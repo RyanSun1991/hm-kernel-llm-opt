@@ -4,10 +4,14 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping
 
+import logging
+
 from hmopt.analysis.runtime.hotspot import HotspotCandidate
 from hmopt.core.llm import ChatMessage, LLMClient
 
 from .safety import SafetyGuard
+
+logger = logging.getLogger(__name__)
 
 
 class TraceAnalystAgent:
@@ -27,4 +31,5 @@ class TraceAnalystAgent:
             ChatMessage(role="system", content="Trace analyst focusing on HM kernel perf."),
             ChatMessage(role="user", content=self.safety.redact(prompt)),
         ]
+        logger.info("TraceAnalyst analyzing metrics=%d hotspots=%d", len(metrics), len(hotspot_lines))
         return self.llm.chat(messages)

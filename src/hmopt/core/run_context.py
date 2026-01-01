@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -18,6 +19,8 @@ from hmopt.storage.vector.store import LocalVectorStore
 
 from .config import AppConfig
 from .errors import HMOptError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -51,6 +54,7 @@ def build_context(config: AppConfig, *, echo_sql: bool = False) -> RunContext:
     run_id = str(uuid.uuid4())
     run_dir = Path(config.storage.run_root) / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("Context built: run_id=%s db=%s artifacts=%s", run_id, config.storage.db_url, config.storage.artifacts_root)
 
     return RunContext(
         config=config,
@@ -74,4 +78,5 @@ def register_run(ctx: RunContext, *, workload_id: Optional[str] = None) -> model
     )
     ctx.session.add(run)
     ctx.session.commit()
+    logger.info("Run registered: run_id=%s workload=%s", ctx.run_id, workload_id or ctx.config.project.workload)
     return run

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Dict, Iterable, List, Optional
 
 from hmopt.storage.db import models
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class HotspotCandidate:
@@ -67,6 +69,7 @@ def rank_hotspots(
 
 
 def persist_hotspots(session, run_id: str, hotspots: Iterable[HotspotCandidate]) -> None:
+    hotspots = list(hotspots)
     for hs in hotspots:
         session.add(
             models.Hotspot(
@@ -80,3 +83,4 @@ def persist_hotspots(session, run_id: str, hotspots: Iterable[HotspotCandidate])
             )
         )
     session.flush()
+    logger.info("Persisted hotspots: run=%s count=%d", run_id, len(hotspots))

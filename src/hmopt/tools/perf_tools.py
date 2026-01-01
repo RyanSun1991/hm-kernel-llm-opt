@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import subprocess
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ProfileResult:
@@ -28,6 +30,7 @@ class ShellProfilerAdapter(ProfilerAdapter):
     def profile(self, workload_id: str, output_dir: Path, options: Optional[dict] = None) -> ProfileResult:
         output_dir.mkdir(parents=True, exist_ok=True)
         try:
+            logger.info("Shell profiler start: cmd=%s", self.command)
             proc = subprocess.run(
                 self.command,
                 cwd=output_dir,
@@ -39,6 +42,7 @@ class ShellProfilerAdapter(ProfilerAdapter):
             success = proc.returncode == 0
             return ProfileResult(success=success, artifacts={}, log=proc.stdout + "\n" + proc.stderr)
         except Exception as exc:
+            logger.exception("Shell profiler error")
             return ProfileResult(success=False, artifacts={}, log=f"profile failed: {exc}")
 
 
@@ -71,4 +75,5 @@ class DummyProfilerAdapter(ProfilerAdapter):
         hiperf_path.write_text(json.dumps({"samples": hiperf_samples}, indent=2), encoding="utf-8")
         artifacts["hiperf"] = hiperf_path
 
+        logger.info("Dummy profiler emitted artifacts=%d", len(artifacts))
         return ProfileResult(success=True, artifacts=artifacts, log="dummy profiler emitted synthetic traces")

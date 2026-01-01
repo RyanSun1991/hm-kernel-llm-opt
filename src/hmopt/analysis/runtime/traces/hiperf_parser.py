@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
 
 from ..metrics import Metric
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -69,4 +72,11 @@ def parse_hiperf(path: Path) -> HiperfSummary:
         for caller, callee in zip(sample.stack, sample.stack[1:]):
             key = (caller, callee)
             edge_costs[key] = edge_costs.get(key, 0.0) + sample.weight
+    logger.info(
+        "Hiperf parsed: file=%s samples=%d hotspots=%d edges=%d",
+        path,
+        len(samples),
+        len(hotspot_costs),
+        len(edge_costs),
+    )
     return HiperfSummary(samples=samples, edge_costs=edge_costs, hotspot_costs=hotspot_costs)

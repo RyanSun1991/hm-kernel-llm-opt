@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,7 +28,6 @@ from hmopt.analysis.static import build_psg, index_repo
 from hmopt.core.config import AppConfig
 from hmopt.core.llm import LLMClient
 from hmopt.core.run_context import RunContext, build_context, register_run
-from hmopt.datasets.exporter import export_dataset
 from hmopt.orchestration.state import RunState, initial_state
 from hmopt.storage.db import models
 from hmopt.tools import (
@@ -54,6 +54,9 @@ class PipelineServices:
     verifier: VerifierAgent
     profiler: ProfilerAgent
     psg: object | None = None
+
+
+logger = logging.getLogger(__name__)
 
 
 def _metrics_to_map(metrics: Iterable[Metric]) -> Dict[str, float]:
@@ -126,6 +129,7 @@ def make_services(config: AppConfig) -> PipelineServices:
 def _profile_and_analyze(services: PipelineServices, state: RunState, label: str) -> RunState:
     """Run profiler adapter, persist artifacts, compute metrics/hotspots."""
     run_id = state["run_id"]
+    logger.info("Profiling phase start: run=%s label=%s", run_id, label)
     output_dir = services.ctx.run_dir / label
     profile_result = services.profiler.profile(
         services.config.project.workload or "default", output_dir
@@ -162,10 +166,17 @@ def _profile_and_analyze(services: PipelineServices, state: RunState, label: str
     if label == "baseline":
         state["baseline_metrics"] = metrics_map
         state["best_metrics"] = metrics_map
+    logger.info(
+        "Profiling phase done: label=%s metrics=%s hotspots=%d",
+        label,
+        {k: round(v, 3) for k, v in metrics_map.items()},
+        len(hotspots),
+    )
     return state
 
 
 def _build_evidence(services: PipelineServices, state: RunState) -> RunState:
+    logger.info("Building evidence pack for iteration=%s", state["iteration"])
     metrics = state.get("candidate_metrics") or state.get("baseline_metrics") or {}
     hotspots = [_hotspot_from_dict(h) for h in state.get("hotspots", [])]
     summary = services.trace_analyst.analyze(metrics, hotspots)
@@ -179,6 +190,7 @@ def _build_evidence(services: PipelineServices, state: RunState) -> RunState:
         pack, kind="evidence_pack", run_id=state["run_id"], session=services.ctx.session
     )
     state["evidence_artifact_id"] = artifact.artifact_id
+    logger.info("Evidence pack stored: artifact=%s", artifact.artifact_id)
     return state
 
 
@@ -195,12 +207,19 @@ def _conductor_decide(services: PipelineServices, state: RunState) -> RunState:
     state["decision"] = decision["decision"]
     state.setdefault("logs", []).append(decision["rationale"])
     state["next_action"] = decision["next_action"]
+    logger.info(
+        "Conductor decision: decision=%s next=%s iteration=%s",
+        state["decision"],
+        state["next_action"],
+        state["iteration"],
+    )
     return state
 
 
 def _coder_generate_patch(services: PipelineServices, state: RunState) -> RunState:
     if state.get("decision") == "stop":
         return state
+    logger.info("Coder generating patch for iteration=%s", state["iteration"])
     instructions = state.get("next_action", "Improve hotspot.")
     patch_text = services.coder.generate_patch(
         Path(services.config.project.repo_path), instructions, iteration=state["iteration"]
@@ -222,12 +241,14 @@ def _coder_generate_patch(services: PipelineServices, state: RunState) -> RunSta
     )
     services.ctx.session.add(patch_row)
     services.ctx.session.commit()
+    logger.info("Patch generated: artifact=%s", art.artifact_id)
     return state
 
 
 def _apply_patch(services: PipelineServices, state: RunState) -> RunState:
     if not state.get("patch_artifact_id"):
         return state
+    logger.info("Applying patch artifact=%s", state["patch_artifact_id"])
     patch_artifact = (
         services.ctx.session.query(models.Artifact)
         .filter(models.Artifact.artifact_id == state["patch_artifact_id"])
@@ -263,10 +284,12 @@ def _apply_patch(services: PipelineServices, state: RunState) -> RunState:
     )
     services.ctx.session.commit()
     state["patch_log_artifact_id"] = log_art.artifact_id
+    logger.info("Patch apply result: status=%s log_artifact=%s", status, log_art.artifact_id)
     return state
 
 
 def _verify(services: PipelineServices, state: RunState) -> RunState:
+    logger.info("Verification start: build+test")
     result = services.verifier.verify(Path(services.config.project.repo_path))
     build_log = services.ctx.artifact_store.store_text(
         result.build.log, kind="build_log", run_id=state["run_id"], session=services.ctx.session
@@ -281,6 +304,7 @@ def _verify(services: PipelineServices, state: RunState) -> RunState:
     if not result.success:
         state["force_stop"] = True
         state["stop_reason"] = "verification_failed"
+    logger.info("Verification done: success=%s", result.success)
     return state
 
 
@@ -303,10 +327,17 @@ def _evaluate(services: PipelineServices, state: RunState) -> RunState:
     services.ctx.session.commit()
     state["iteration"] += 1
     state["perf_improved"] = perf_improved
+    logger.info(
+        "Evaluation: iteration=%s perf_improved=%s delta_keys=%s",
+        state["iteration"],
+        perf_improved,
+        list(delta.keys()),
+    )
     return state
 
 
 def _report(services: PipelineServices, state: RunState) -> RunState:
+    logger.info("Generating report for run=%s", state["run_id"])
     metrics = state.get("candidate_metrics", {})
     hotspots = state.get("hotspots", [])
     lines = [
@@ -329,6 +360,7 @@ def _report(services: PipelineServices, state: RunState) -> RunState:
     run_row.status = "succeeded" if not state.get("stop_reason") else "stopped"
     services.ctx.session.commit()
     state["report_artifact_id"] = art.artifact_id
+    logger.info("Report generated: artifact=%s", art.artifact_id)
     return state
 
 
@@ -350,6 +382,7 @@ def build_graph(services: PipelineServices, max_iterations: int) -> StateGraph:
 
     def init_node(state: RunState) -> RunState:
         register_run(services.ctx, workload_id=services.config.project.workload)
+        logger.info("Run initialized: run_id=%s pipeline=%s", state["run_id"], services.config.pipeline)
         repo_state = get_repo_state(services.config.project.repo_path)
         snapshot = snapshot_files(services.config.project.repo_path)
         snapshot_art = services.ctx.artifact_store.store_json(
@@ -366,6 +399,7 @@ def build_graph(services: PipelineServices, max_iterations: int) -> StateGraph:
         return state
 
     def static_analysis_node(state: RunState) -> RunState:
+        logger.info("Static analysis start (PSG)")
         symbols = index_repo(services.config.project.repo_path)
         services.psg = build_psg(symbols)
         art = services.ctx.artifact_store.store_text(
@@ -380,6 +414,7 @@ def build_graph(services: PipelineServices, max_iterations: int) -> StateGraph:
         )
         services.ctx.session.add(graph_row)
         services.ctx.session.commit()
+        logger.info("Static analysis done: nodes=%d edges=%d", len(services.psg.nodes), len(services.psg.edges))
         return state
 
     graph.add_node("init_run", init_node)
@@ -424,3 +459,104 @@ def run_pipeline(config: AppConfig) -> str:
     graph.invoke(state)
     services.ctx.session.close()
     return services.ctx.run_id
+
+
+def run_artifact_analysis(
+    config: AppConfig,
+    artifacts: list[dict],
+    *,
+    run_conductor: bool = True,
+    run_coder: bool = True,
+    run_verify: bool = False,
+    run_profile: bool = False,
+) -> str:
+    """Run a shortened pipeline that ingests existing artifacts and optionally drives LLM suggestions."""
+    services = make_services(config)
+    state: RunState = initial_state(services.ctx.run_id, max_iterations=1)
+
+    # init + static
+    register_run(services.ctx, workload_id=config.project.workload)
+    repo_state = get_repo_state(config.project.repo_path)
+    snapshot = snapshot_files(config.project.repo_path)
+    snapshot_art = services.ctx.artifact_store.store_json(
+        snapshot, kind="repo_snapshot", run_id=state["run_id"], session=services.ctx.session
+    )
+    run_row = (
+        services.ctx.session.query(models.Run).filter(models.Run.run_id == state["run_id"]).one()
+    )
+    run_row.repo_rev = repo_state.get("commit")
+    run_row.repo_uri = repo_state.get("remote")
+    run_row.repo_dirty = bool(repo_state.get("dirty"))
+    run_row.status = "running"
+    services.ctx.session.commit()
+    state["snapshot_artifact_id"] = snapshot_art.artifact_id
+
+    logger.info("Artifact analysis: ingest %d artifacts", len(artifacts))
+    symbols = index_repo(config.project.repo_path)
+    services.psg = build_psg(symbols)
+    psg_art = services.ctx.artifact_store.store_text(
+        services.psg.to_json(), kind="psg", run_id=state["run_id"], extension=".json", session=services.ctx.session
+    )
+    graph_row = models.Graph(
+        run_id=state["run_id"],
+        kind="psg",
+        format="json",
+        payload_artifact_id=psg_art.artifact_id,
+        metadata_json={"nodes": len(services.psg.nodes), "edges": len(services.psg.edges)},
+    )
+    services.ctx.session.add(graph_row)
+
+    metrics: list[Metric] = []
+    hotspots: list[HotspotCandidate] = []
+
+    for item in artifacts:
+        kind = item.get("kind")
+        path = Path(item.get("path"))
+        art = services.ctx.artifact_store.store_file(
+            path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+        )
+        if kind == "framegraph":
+            fg = parse_framegraph(path)
+            metrics.extend(fg.to_metrics())
+        elif kind == "hitrace":
+            ht = parse_hitrace(path)
+            metrics.extend(ht.to_metrics())
+        elif kind == "hiperf":
+            hp = parse_hiperf(path)
+            hs = rank_hotspots(hp.hotspot_costs, hp.edge_costs, top_n=15)
+            if services.psg:
+                hs = align_hotspots_to_psg(hs, services.psg)
+            hotspots.extend(rank_correlated(hs, {}))
+        else:
+            logger.info("Stored artifact with no parser: %s", kind)
+
+    record_metrics(services.ctx.session, state["run_id"], metrics)
+    persist_hotspots(services.ctx.session, state["run_id"], hotspots)
+    services.ctx.session.commit()
+
+    state["baseline_metrics"] = _metrics_to_map(metrics)
+    state["hotspots"] = [_hotspot_to_dict(h) for h in hotspots]
+
+    state = _build_evidence(services, state)
+
+    if run_conductor:
+        state = _conductor_decide(services, state)
+    else:
+        state["decision"] = "continue" if run_coder else "stop"
+        state["next_action"] = "analyze hotspots"
+
+    if run_coder and state.get("decision") == "continue":
+        state = _coder_generate_patch(services, state)
+        state = _apply_patch(services, state)
+        if run_verify:
+            state = _verify(services, state)
+        if run_profile and not state.get("force_stop"):
+            state = _profile_and_analyze(services, state, f"iter_{state.get('iteration', 0)}")
+            state = _evaluate(services, state)
+
+    state = _report(services, state)
+    run_row.status = "succeeded"
+    services.ctx.session.commit()
+    services.ctx.session.close()
+    logger.info("Artifact analysis finished: run_id=%s", state["run_id"])
+    return state["run_id"]

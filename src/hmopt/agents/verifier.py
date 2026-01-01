@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Optional
 
 from hmopt.tools.build_tools import BuildAdapter, BuildResult
+import logging
+
 from hmopt.tools.test_tools import TestAdapter, TestResult
 
 
@@ -26,6 +28,9 @@ class VerifierAgent:
         self.test_adapter = test_adapter
 
     def verify(self, repo_path: Path, build_config: Optional[dict] = None, test_plan: Optional[dict] = None) -> VerificationResult:
+        logger.info("Verifier running build+test")
         build = self.build_adapter.build(repo_path, build_config)
         tests = self.test_adapter.run_tests(repo_path, test_plan)
+        logger.info("Verifier finished: build_ok=%s test_ok=%s", build.success, tests.success)
         return VerificationResult(build=build, tests=tests)
+logger = logging.getLogger(__name__)

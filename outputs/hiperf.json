@@ -1,0 +1,9 @@
+{
+  "samples": [
+    {"stack": ["main", "render", "driver"], "weight": 10},
+    {"stack": ["main", "update", "memcpy"], "weight": 6},
+    {"stack": ["main", "render", "blend"], "weight": 8},
+    {"stack": ["main", "io", "read"], "weight": 4},
+    {"stack": ["main", "render", "driver"], "weight": 5}
+  ]
+}

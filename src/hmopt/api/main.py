@@ -7,13 +7,15 @@ import threading
 from pathlib import Path
 from typing import Annotated, List
 
+import logging
+
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from hmopt.core.config import AppConfig
 from hmopt.evaluation.reports import render_report
-from hmopt.orchestration import run_pipeline
+from hmopt.orchestration import run_artifact_analysis, run_pipeline
 from hmopt.storage.db import models
 from hmopt.storage.db.engine import init_engine, session_scope
 
@@ -22,6 +24,8 @@ APP_CONFIG = AppConfig.from_yaml(CONFIG_PATH)
 ENGINE = init_engine(APP_CONFIG.storage.db_url, schema_path=Path("src/hmopt/storage/db/schema.sql"))
 
 app = FastAPI(title="HMOPT API", version="0.1.0")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -53,6 +57,7 @@ def health() -> dict:
 @app.post("/runs")
 def create_run(background_tasks: BackgroundTasks) -> dict:
     cfg = AppConfig.from_yaml(CONFIG_PATH)
+    logger.info("API: submit new run")
     background_tasks.add_task(run_pipeline, cfg)
     return {"status": "submitted", "project": cfg.project.name}
 
@@ -104,6 +109,18 @@ def optimize_existing(run_id: str, background_tasks: BackgroundTasks) -> dict:
     cfg.iterations = max(cfg.iterations, 1)
     background_tasks.add_task(run_pipeline, cfg)
     return {"status": "submitted", "baseline_run_id": run_id}
+
+
+@app.post("/analyze")
+def analyze_artifacts(payload: dict, background_tasks: BackgroundTasks) -> dict:
+    """Trigger artifact-based analysis without running profiler/build."""
+    artifacts = payload.get("artifacts", [])
+    repo_path = payload.get("repo_path")
+    cfg = AppConfig.from_yaml(CONFIG_PATH)
+    if repo_path:
+        cfg.project.repo_path = repo_path
+    run_id = run_artifact_analysis(cfg, artifacts)
+    return {"status": "completed", "run_id": run_id}
 
 
 @app.get("/runs/{run_id}/report")

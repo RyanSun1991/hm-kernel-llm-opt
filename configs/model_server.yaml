@@ -2,6 +2,7 @@
 # Source of truth: model_server.txt in the provided materials.
 
 api_base: "http://10.90.56.33:20010/v1"
+api_key: "<your_token>"
 
 # Recommended defaults (adjust per task)
 models:

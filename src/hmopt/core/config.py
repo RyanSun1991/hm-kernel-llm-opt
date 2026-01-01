@@ -9,11 +9,14 @@ keys) out of the repo.
 from __future__ import annotations
 
 import os
+import logging
 from pathlib import Path
 from typing import Any, Optional
 
 import yaml
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 def _expand_env(text: str) -> str:
@@ -54,11 +57,20 @@ class AdapterConfig(BaseModel):
     dummy: bool = True
 
 
+class WorkloadConfig(BaseModel):
+    name: str
+    kind: Optional[str] = None
+    command: Optional[str] = None
+    artifacts: list[dict[str, Any]] = Field(default_factory=list)
+    objectives: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class AppConfig(BaseModel):
     project: ProjectConfig
     llm: ModelConfig
     storage: StorageConfig = StorageConfig()
     adapters: AdapterConfig = AdapterConfig()
+    workloads: list[WorkloadConfig] = Field(default_factory=list)
     iterations: int = 2
     profiling_enabled: bool = True
     pipeline: str = "optimize_kernel"
@@ -66,7 +78,8 @@ class AppConfig(BaseModel):
     @classmethod
     def from_yaml(cls, path: str | Path) -> "AppConfig":
         raw = load_yaml(path)
-        normalized = normalize_raw_config(raw)
+        merged = merge_includes(raw, Path(path).resolve().parent)
+        normalized = normalize_raw_config(merged)
         return cls(**normalized)
 
 
@@ -74,7 +87,46 @@ def load_yaml(path: str | Path) -> dict[str, Any]:
     """Load YAML and expand environment variables."""
     p = Path(path)
     text = _expand_env(p.read_text(encoding="utf-8"))
-    return yaml.safe_load(text)
+    data = yaml.safe_load(text) or {}
+    logger.debug("Loaded YAML: path=%s keys=%s", p, list(data.keys()))
+    return data
+
+
+def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """Recursively merge dictionaries (override wins)."""
+    result = dict(base)
+    for k, v in override.items():
+        if isinstance(v, dict) and isinstance(result.get(k), dict):
+            result[k] = deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
+def merge_includes(raw: dict[str, Any], base_dir: Path) -> dict[str, Any]:
+    """Merge optional include files declared under ``includes``."""
+    merged = dict(raw)
+    includes = merged.get("includes", {}) or {}
+
+    def _resolve(path_like: str) -> Path:
+        return (base_dir / path_like).resolve()
+
+    # Model/LLM settings
+    if "model_server" in includes:
+        model_path = _resolve(includes["model_server"])
+        model_cfg = load_yaml(model_path)
+        llm_cfg = model_cfg.get("llm", model_cfg)
+        merged["llm"] = deep_merge(llm_cfg, merged.get("llm", {}))
+        logger.info("Merged model_server config from %s", model_path)
+
+    # Workloads
+    if "workloads" in includes:
+        workloads_path = _resolve(includes["workloads"])
+        workloads_cfg = load_yaml(workloads_path)
+        merged["workloads"] = workloads_cfg.get("workloads", merged.get("workloads", []))
+        logger.info("Merged workloads config from %s", workloads_path)
+
+    return merged
 
 
 def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
@@ -82,6 +134,7 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
     project_cfg = raw.get("project", {})
     llm_cfg = raw.get("llm", {})
     storage_cfg = raw.get("storage", {})
+    logger.debug("Normalizing config: project_keys=%s llm_keys=%s storage_keys=%s", list(project_cfg.keys()), list(llm_cfg.keys()), list(storage_cfg.keys()))
 
     # Resolve API key from env if provided via env name
     api_key_env = llm_cfg.get("api_key_env")
@@ -127,11 +180,14 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "dummy": adapters_cfg.get("dummy", True),
     }
 
+    workloads_cfg = raw.get("workloads", [])
+
     return {
         "project": project_cfg,
         "llm": llm_norm,
         "storage": storage_norm,
         "adapters": adapters_norm,
+        "workloads": workloads_cfg,
         "iterations": raw.get("iterations", raw.get("max_iterations", 2)),
         "profiling_enabled": raw.get("profiling", {}).get("enabled", True),
         "pipeline": raw.get("pipelines", {}).get("default", raw.get("pipeline", "optimize_kernel")),

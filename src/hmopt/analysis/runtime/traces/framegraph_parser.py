@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List
 
 from ..metrics import Metric, quantile
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -57,6 +60,7 @@ def _load_frames(path: Path) -> list[FrameSample]:
 def parse_framegraph(path: Path, expected_frame_ms: float = 16.67) -> FramegraphResult:
     samples = _load_frames(path)
     if not samples:
+        logger.warning("Framegraph empty: %s", path)
         return FramegraphResult([], 0.0, 0.0, 0.0, [])
 
     start = min(s.ts_ms for s in samples)
@@ -84,6 +88,14 @@ def parse_framegraph(path: Path, expected_frame_ms: float = 16.67) -> Framegraph
     if current_start is not None and current_end is not None:
         windows.append((current_start, current_end))
 
+    logger.info(
+        "Framegraph parsed: file=%s frames=%d fps=%.2f jank_p95=%.2f drop_rate=%.3f",
+        path,
+        len(samples),
+        fps_avg,
+        jank_p95,
+        drop_rate,
+    )
     return FramegraphResult(
         samples=samples,
         fps_avg=fps_avg,

@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
 
 from ..metrics import Metric, quantile
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -79,6 +82,13 @@ def parse_hitrace(path: Path) -> HitraceSummary:
     idle_time = sum(ev.dur_us for ev in events if ev.name.lower().startswith("idle"))
     total = sum(ev.dur_us for ev in events) or 1.0
     idle_ratio = idle_time / total
+    logger.info(
+        "Hitrace parsed: file=%s events=%d p99=%.2f idle_ratio=%.3f",
+        path,
+        len(events),
+        p99,
+        idle_ratio,
+    )
     return HitraceSummary(
         events=events,
         sched_latency_p50=p50,

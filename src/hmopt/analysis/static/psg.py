@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 import re
+import logging
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Dict, List
 
 from .indexer import SymbolInfo
+
+logger = logging.getLogger(__name__)
 
 
 CALL_PATTERN = re.compile(r"([A-Za-z_][\w\d_]*)\s*\(")
@@ -56,4 +59,5 @@ def build_psg(symbols: List[SymbolInfo]) -> PsgGraph:
             target = match.group(1)
             if target in symbol_names and target != sym.name:
                 edges.append(PsgEdge(src=sym.name, dst=target, kind="call_static"))
+    logger.info("PSG built: nodes=%d edges=%d", len(nodes), len(edges))
     return PsgGraph(nodes=nodes, edges=edges)

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import subprocess
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class TestResult:
@@ -25,6 +27,7 @@ class ShellTestAdapter(TestAdapter):
 
     def run_tests(self, repo_path: Path, test_plan: Optional[dict] = None) -> TestResult:
         try:
+            logger.info("Shell tests start: cmd=%s", self.command)
             proc = subprocess.run(
                 self.command,
                 cwd=repo_path,
@@ -35,9 +38,11 @@ class ShellTestAdapter(TestAdapter):
             )
             return TestResult(success=proc.returncode == 0, log=proc.stdout + "\n" + proc.stderr)
         except Exception as exc:
+            logger.exception("Shell tests error")
             return TestResult(success=False, log=f"test run failed: {exc}")
 
 
 class DummyTestAdapter(TestAdapter):
     def run_tests(self, repo_path: Path, test_plan: Optional[dict] = None) -> TestResult:
+        logger.info("Dummy tests invoked")
         return TestResult(success=True, log="dummy tests passed")

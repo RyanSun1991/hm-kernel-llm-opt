@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import math
 import uuid
+import logging
 from dataclasses import dataclass
 from typing import Iterable, List, Optional
 
 from sqlalchemy.orm import Session
 
 from ..db import models
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -40,6 +43,7 @@ class LocalVectorStore:
 
     def add(self, records: Iterable[VectorRecord]) -> list[str]:
         ids: list[str] = []
+        records = list(records)
         for rec in records:
             vid = str(uuid.uuid4())
             ids.append(vid)
@@ -53,6 +57,7 @@ class LocalVectorStore:
             )
             self.session.add(row)
         self.session.flush()
+        logger.info("Stored embeddings: count=%d", len(records))
         return ids
 
     def similarity_search(

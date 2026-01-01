@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import logging
+
 from hmopt.core.llm import ChatMessage, LLMClient
 
 from .safety import SafetyGuard
+
+logger = logging.getLogger(__name__)
 
 
 class CoderAgent:
@@ -38,4 +42,7 @@ class CoderAgent:
         patch = self.llm.chat(messages)
         if "---" not in patch:
             patch = self._offline_patch(patch, iteration)
+            logger.warning("Coder offline patch fallback used for iteration=%s", iteration)
+        else:
+            logger.info("Coder produced patch for iteration=%s", iteration)
         return patch.strip() + "\n"

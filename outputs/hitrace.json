@@ -1,0 +1,10 @@
+{
+  "events": [
+    {"ts": 0, "dur": 50, "name": "sched"},
+    {"ts": 1000, "dur": 80, "name": "sched"},
+    {"ts": 2000, "dur": 120, "name": "sched"},
+    {"ts": 3000, "dur": 60, "name": "idle"},
+    {"ts": 4000, "dur": 40, "name": "idle"},
+    {"ts": 5000, "dur": 110, "name": "sched"}
+  ]
+}

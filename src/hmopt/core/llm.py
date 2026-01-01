@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass
 from typing import Iterable, List, Optional
 
 from openai import OpenAI
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -34,6 +37,7 @@ class LLMClient:
         # Deterministic summary of the last user/system message for offline mode
         content = messages[-1].content if messages else "no prompt"
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+        logger.warning("LLM offline fallback used for model=%s", self.default_model)
         return f"[offline-llm:{digest}] {content[:300]}"
 
     def chat(self, messages: Iterable[ChatMessage], model: Optional[str] = None) -> str:
@@ -50,4 +54,5 @@ class LLMClient:
             return resp.choices[0].message.content  # type: ignore[return-value]
         except Exception:
             self._offline = True
+            logger.exception("LLM call failed; switching to offline mode")
             return self._offline_answer(msgs)

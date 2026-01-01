@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
+import logging
 from pathlib import Path
 from typing import Dict, List
 
+logger = logging.getLogger(__name__)
 
 def _run_git(repo: Path, args: list[str]) -> str | None:
     try:
@@ -21,6 +23,7 @@ def get_repo_state(repo_path: str | Path) -> dict:
     commit = _run_git(repo, ["rev-parse", "HEAD"])
     dirty = bool(_run_git(repo, ["status", "--porcelain"]))
     remote = _run_git(repo, ["config", "--get", "remote.origin.url"])
+    logger.info("Repo state: commit=%s dirty=%s", commit, dirty)
     return {"commit": commit, "dirty": dirty, "remote": remote}
 
 

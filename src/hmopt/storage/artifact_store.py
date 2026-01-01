@@ -5,12 +5,15 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+import logging
 from pathlib import Path
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
 from .db import models
+
+logger = logging.getLogger(__name__)
 
 
 class ArtifactStore:
@@ -55,6 +58,7 @@ class ArtifactStore:
         )
         if session is not None:
             session.add(artifact)
+        logger.info("Stored artifact: kind=%s sha=%s bytes=%d", kind, sha, len(data))
         return artifact
 
     def store_text(

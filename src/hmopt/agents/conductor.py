@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from typing import Mapping
 
+import logging
+
 from hmopt.core.llm import ChatMessage, LLMClient
 
 from .safety import SafetyGuard
+
+logger = logging.getLogger(__name__)
 
 
 class ConductorDecision(dict):
@@ -29,6 +33,7 @@ class ConductorAgent:
         max_iterations: int,
     ) -> ConductorDecision:
         if iteration >= max_iterations:
+            logger.info("Conductor stop due to iteration budget: %s/%s", iteration, max_iterations)
             return ConductorDecision(
                 decision="stop",
                 rationale="Reached iteration budget",
@@ -50,6 +55,7 @@ class ConductorAgent:
         reply = self.llm.chat(messages)
         decision = "continue" if "continue" in reply.lower() else "stop"
         next_action = "refine code paths in hotspot" if decision == "continue" else "finalize report"
+        logger.info("Conductor decision=%s next_action=%s", decision, next_action)
         return ConductorDecision(
             decision=decision,
             rationale=reply,

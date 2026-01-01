@@ -5,9 +5,12 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -63,5 +66,8 @@ def index_repo(repo_path: str | Path) -> List[SymbolInfo]:
     if _ctags_available():
         symbols = _index_with_ctags(root)
         if symbols:
+            logger.info("Indexed repo with ctags: symbols=%d", len(symbols))
             return symbols
-    return _index_with_regex(root, patterns=["*.c", "*.cc", "*.cpp", "*.h", "*.hpp", "*.cxx", "*.py"])
+    symbols = _index_with_regex(root, patterns=["*.c", "*.cc", "*.cpp", "*.h", "*.hpp", "*.cxx", "*.py"])
+    logger.info("Indexed repo with regex: symbols=%d", len(symbols))
+    return symbols

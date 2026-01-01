@@ -1,3 +1,7 @@
+includes:
+  model_server: ./model_server.yaml
+  workloads: ./workloads.yaml
+
 project:
   name: hm-verif-kernel
   repo_path: /path/to/hm-verif-kernel
