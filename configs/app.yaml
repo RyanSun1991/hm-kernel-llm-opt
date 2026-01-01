@@ -1,0 +1,30 @@
+project:
+  name: hm-verif-kernel
+  repo_path: /path/to/hm-verif-kernel
+  build_system: auto   # auto|make|cmake|bazel|custom
+
+llm:
+  provider: openai_compatible
+  base_url: ${HMOPT_LLM_BASE_URL}
+  api_key_env: HMOPT_LLM_API_KEY
+  model: ${HMOPT_LLM_MODEL}
+
+storage:
+  db:
+    url: sqlite:///data/hmopt.db
+  artifacts:
+    root_dir: data/artifacts
+  vector_store:
+    type: local
+    path: data/vector_store
+
+profiling:
+  enabled: true
+  tools:
+    - hitrace
+    - hiperf
+    - perf
+    - framegraph
+
+pipelines:
+  default: optimize_kernel

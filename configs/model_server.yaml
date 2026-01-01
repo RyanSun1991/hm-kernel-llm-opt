@@ -1,0 +1,16 @@
+# Internal LLM API (OpenAI-compatible)
+# Source of truth: model_server.txt in the provided materials.
+
+api_base: "http://10.90.56.33:20010/v1"
+
+# Recommended defaults (adjust per task)
+models:
+  coding_fast: "qwen3-coder-30b"
+  reasoning_strong: "gpt-oss-120b"
+  general: "glm-4.7"
+
+embeddings:
+  default: "qwen3-embedding-8b"
+
+security:
+  allow_external_proxy_models: false

@@ -1,0 +1,7 @@
+# Minimal config example
+project:
+  name: hm-verif-kernel
+  repo_path: /path/to/hm-verif-kernel
+llm:
+  base_url: ${HMOPT_LLM_BASE_URL}
+  model: ${HMOPT_LLM_MODEL}

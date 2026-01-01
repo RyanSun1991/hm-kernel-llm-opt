@@ -1,0 +1,20 @@
+# Define reproducible workloads for profiling + optimization.
+# Each workload should specify:
+# - how to run
+# - what metrics to collect
+# - what success criteria mean
+
+workloads:
+  - name: ui_frame_stability
+    kind: system_trace
+    command: "scripts/run_workload_ui_frame.sh"
+    artifacts:
+      - type: framegraph
+        path: "outputs/framegraph.json"
+      - type: hitrace
+        path: "outputs/hitrace.trace"
+    objectives:
+      - metric: "fps"
+        goal: "maximize"
+      - metric: "jank_rate"
+        goal: "minimize"
