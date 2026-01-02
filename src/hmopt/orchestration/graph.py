@@ -23,7 +23,12 @@ from hmopt.analysis.correlation.aligner import align_hotspots_to_psg
 from hmopt.analysis.correlation.ranker import rank_correlated
 from hmopt.analysis.runtime.hotspot import HotspotCandidate, persist_hotspots, rank_hotspots
 from hmopt.analysis.runtime.metrics import Metric, compute_delta, record_metrics
-from hmopt.analysis.runtime.traces import parse_framegraph, parse_hiperf, parse_hitrace
+from hmopt.analysis.runtime.traces import (
+    parse_framegraph,
+    parse_hiperf,
+    parse_hitrace,
+    parse_sysfs_trace,
+)
 from hmopt.analysis.static import build_psg, index_repo
 from hmopt.core.config import AppConfig
 from hmopt.core.llm import LLMClient
@@ -149,6 +154,9 @@ def _profile_and_analyze(services: PipelineServices, state: RunState, label: str
     if "hitrace" in profile_result.artifacts:
         ht = parse_hitrace(profile_result.artifacts["hitrace"])
         metrics.extend(ht.to_metrics())
+    if "sysfs" in profile_result.artifacts:
+        st = parse_sysfs_trace(profile_result.artifacts["sysfs"])
+        metrics.extend(st.to_metrics())
     if "hiperf" in profile_result.artifacts:
         hp = parse_hiperf(profile_result.artifacts["hiperf"])
         hotspots = rank_hotspots(hp.hotspot_costs, hp.edge_costs, top_n=10)
@@ -521,6 +529,9 @@ def run_artifact_analysis(
         elif kind == "hitrace":
             ht = parse_hitrace(path)
             metrics.extend(ht.to_metrics())
+        elif kind == "sysfs":
+            st = parse_sysfs_trace(path)
+            metrics.extend(st.to_metrics())
         elif kind == "hiperf":
             hp = parse_hiperf(path)
             hs = rank_hotspots(hp.hotspot_costs, hp.edge_costs, top_n=15)
