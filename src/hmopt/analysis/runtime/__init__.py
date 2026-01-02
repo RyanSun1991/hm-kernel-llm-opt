@@ -6,9 +6,11 @@ from .traces import (
     FramegraphResult,
     HiperfSummary,
     HitraceSummary,
+    SysfsTraceSummary,
     parse_framegraph,
     parse_hiperf,
     parse_hitrace,
+    parse_sysfs_trace,
 )
 
 __all__ = [
@@ -20,7 +22,9 @@ __all__ = [
     "parse_framegraph",
     "parse_hitrace",
     "parse_hiperf",
+    "parse_sysfs_trace",
     "FramegraphResult",
     "HiperfSummary",
     "HitraceSummary",
+    "SysfsTraceSummary",
 ]
