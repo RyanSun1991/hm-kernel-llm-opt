@@ -5,9 +5,9 @@ from __future__ import annotations
 import csv
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Optional
 
 from ..metrics import Metric, quantile
 
@@ -27,13 +27,144 @@ class FramegraphResult:
     frame_drop_rate: float
     jank_p95_ms: float
     jank_windows: List[tuple[float, float]]
+    has_frame_timeline: bool = False
+    event_count_total: float = 0.0
+    event_counts: dict[str, float] = field(default_factory=dict)
+    sample_count_total: int = 0
+    process_count: int = 0
+    thread_count: int = 0
+    symbol_counts_raw: dict[str, float] = field(default_factory=dict)
+    symbol_counts: dict[str, float] = field(default_factory=dict)
+    name_maps: Optional["FramegraphNameMaps"] = None
+    process_summaries: dict[str, dict] = field(default_factory=dict)
+    thread_summaries: dict[str, dict] = field(default_factory=dict)
+    lib_summaries: dict[str, dict] = field(default_factory=dict)
+    pcg_nodes: dict[str, dict] = field(default_factory=dict)
+    pcg_edges: list[dict] = field(default_factory=list)
 
     def to_metrics(self) -> list[Metric]:
-        return [
-            Metric(metric_name="fps_avg", value=self.fps_avg, unit="fps"),
-            Metric(metric_name="frame_drop_rate", value=self.frame_drop_rate, unit="ratio"),
-            Metric(metric_name="jank_p95_ms", value=self.jank_p95_ms, unit="ms"),
-        ]
+        metrics: list[Metric] = []
+        if self.has_frame_timeline:
+            metrics.extend(
+                [
+                    Metric(metric_name="fps_avg", value=self.fps_avg, unit="fps"),
+                    Metric(metric_name="frame_drop_rate", value=self.frame_drop_rate, unit="ratio"),
+                    Metric(metric_name="jank_p95_ms", value=self.jank_p95_ms, unit="ms"),
+                ]
+            )
+        if self.event_count_total:
+            metrics.append(
+                Metric(metric_name="framegraph_event_count_total", value=self.event_count_total)
+            )
+        for name, value in self.event_counts.items():
+            metric_name = f"framegraph_event_{_sanitize_event_name(name)}_total"
+            unit = _event_unit(name)
+            metrics.append(Metric(metric_name=metric_name, value=value, unit=unit))
+            if "instruction" in name.lower():
+                metrics.append(Metric(metric_name="instruction_count_total", value=value, unit=unit))
+        if self.sample_count_total:
+            metrics.append(Metric(metric_name="framegraph_sample_count_total", value=float(self.sample_count_total)))
+        if self.process_count:
+            metrics.append(Metric(metric_name="framegraph_process_count", value=float(self.process_count)))
+        if self.thread_count:
+            metrics.append(Metric(metric_name="framegraph_thread_count", value=float(self.thread_count)))
+        if self.symbol_counts:
+            metrics.append(
+                Metric(metric_name="framegraph_symbol_count", value=float(len(self.symbol_counts)))
+            )
+        return metrics
+
+
+@dataclass
+class FramegraphNameMaps:
+    process_name_map: dict[str, str] = field(default_factory=dict)
+    thread_name_map: dict[str, str] = field(default_factory=dict)
+    symbols_file_list: list[str] = field(default_factory=list)
+    symbol_map: dict[str, dict] = field(default_factory=dict)
+
+    def resolve_symbol(self, symbol_id: int | str, file_hint: Optional[int] = None) -> str:
+        entry = self.symbol_map.get(str(symbol_id)) or self.symbol_map.get(symbol_id)
+        symbol = f"symbol_{symbol_id}"
+        file_idx = file_hint
+        if isinstance(entry, dict):
+            symbol = entry.get("symbol", symbol)
+            file_idx = entry.get("file", file_idx)
+        if file_idx is not None and 0 <= int(file_idx) < len(self.symbols_file_list):
+            file_path = self.symbols_file_list[int(file_idx)]
+            if file_path and not symbol.startswith(file_path):
+                return f"{file_path}:{symbol}"
+        return symbol
+
+    def to_dict(self) -> dict:
+        return {
+            "processNameMap": self.process_name_map,
+            "threadNameMap": self.thread_name_map,
+            "symbolsFileList": self.symbols_file_list,
+            "SymbolMap": self.symbol_map,
+        }
+
+
+def _sanitize_event_name(name: str) -> str:
+    cleaned = "".join(ch if ch.isalnum() else "_" for ch in name.strip().lower())
+    return cleaned.strip("_") or "event"
+
+
+def _event_unit(name: str) -> str:
+    lower = name.lower()
+    if "instruction" in lower:
+        return "instructions"
+    return "events"
+
+
+def _normalize_symbol(raw: str) -> str:
+    sym = raw.strip()
+    if ":" in sym:
+        sym = sym.split(":")[-1]
+    if "+" in sym:
+        sym = sym.split("+")[0]
+    sym = sym.strip()
+    return sym or raw
+
+
+def _top_symbols(weights: dict[str, float], top_n: int = 5) -> list[dict]:
+    ordered = sorted(weights.items(), key=lambda x: x[1], reverse=True)[:top_n]
+    return [{"symbol": sym, "weight": weight} for sym, weight in ordered]
+
+
+def _walk_call_tree(
+    node: dict,
+    name_maps: FramegraphNameMaps,
+    node_stats: dict[str, dict],
+    edge_stats: dict[tuple[str, str, str], float],
+    *,
+    parent: Optional[str] = None,
+    direction: str = "call",
+) -> None:
+    if not isinstance(node, dict):
+        return
+    symbol_id = node.get("symbol")
+    current: Optional[str] = parent
+    if symbol_id not in (None, -1):
+        raw = name_maps.resolve_symbol(symbol_id)
+        norm = _normalize_symbol(raw)
+        current = norm
+        stats = node_stats.setdefault(norm, {"self_events": 0.0, "sub_events": 0.0, "label": raw})
+        stats["self_events"] += float(node.get("selfEvents", 0) or 0)
+        stats["sub_events"] += float(node.get("subEvents", 0) or 0)
+        if parent:
+            key = (parent, norm, direction)
+            edge_stats[key] = edge_stats.get(key, 0.0) + float(node.get("subEvents", 0) or 0)
+
+    for child in node.get("callStack", []) or []:
+        if isinstance(child, dict):
+            _walk_call_tree(
+                child,
+                name_maps,
+                node_stats,
+                edge_stats,
+                parent=current,
+                direction=direction,
+            )
 
 
 def _load_frames(path: Path) -> list[FrameSample]:
@@ -58,6 +189,11 @@ def _load_frames(path: Path) -> list[FrameSample]:
 
 
 def parse_framegraph(path: Path, expected_frame_ms: float = 16.67) -> FramegraphResult:
+    if path.suffix.lower() == ".json":
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and ("recordSampleInfo" in data or "processNameMap" in data):
+            return _parse_sample_info(data, path)
+
     samples = _load_frames(path)
     if not samples:
         logger.warning("Framegraph empty: %s", path)
@@ -102,4 +238,195 @@ def parse_framegraph(path: Path, expected_frame_ms: float = 16.67) -> Framegraph
         frame_drop_rate=drop_rate,
         jank_p95_ms=jank_p95,
         jank_windows=windows,
+        has_frame_timeline=True,
+    )
+
+
+def _parse_sample_info(data: dict, path: Path) -> FramegraphResult:
+    name_maps = FramegraphNameMaps(
+        process_name_map=data.get("processNameMap", {}) or {},
+        thread_name_map=data.get("threadNameMap", {}) or {},
+        symbols_file_list=data.get("symbolsFileList", [])
+        or data.get("symbols_file_list", [])
+        or [],
+        symbol_map=data.get("SymbolMap", {}) or data.get("symbolMap", {}) or {},
+    )
+    record_infos = data.get("recordSampleInfo", []) or []
+
+    pids: set[int] = set()
+    tids: set[int] = set()
+    sample_count_total = 0
+    symbol_counts_raw: dict[str, float] = {}
+    symbol_counts: dict[str, float] = {}
+    process_summaries: dict[str, dict] = {}
+    thread_summaries: dict[str, dict] = {}
+    lib_summaries: dict[str, dict] = {}
+
+    process_symbol_weights: dict[int, dict[str, float]] = {}
+    thread_symbol_weights: dict[int, dict[str, float]] = {}
+    lib_symbol_weights: dict[int, dict[str, float]] = {}
+
+    event_count_total = 0.0
+    event_counts: dict[str, float] = {}
+    node_stats: dict[str, dict] = {}
+    edge_stats: dict[tuple[str, str, str], float] = {}
+    for info in record_infos:
+        event_name = info.get("eventConfigName") or "event"
+        count = float(info.get("eventCount", 0) or 0)
+        event_count_total += count
+        event_counts[event_name] = event_counts.get(event_name, 0.0) + count
+        for proc in info.get("processes", []) or []:
+            pid = proc.get("pid")
+            if pid is not None:
+                pids.add(int(pid))
+                proc_summary = process_summaries.setdefault(
+                    str(pid),
+                    {
+                        "pid": int(pid),
+                        "name": name_maps.process_name_map.get(str(pid), ""),
+                        "event_count": 0.0,
+                        "sample_count": 0,
+                        "thread_count": 0,
+                        "top_symbols": [],
+                    },
+                )
+                proc_summary["event_count"] += float(proc.get("eventCount", 0) or 0)
+            for thread in proc.get("threads", []) or []:
+                tid = thread.get("tid")
+                if tid is not None:
+                    tids.add(int(tid))
+                    thread_summary = thread_summaries.setdefault(
+                        str(tid),
+                        {
+                            "tid": int(tid),
+                            "pid": int(pid) if pid is not None else None,
+                            "name": name_maps.thread_name_map.get(str(tid), ""),
+                            "event_count": 0.0,
+                            "sample_count": 0,
+                            "top_symbols": [],
+                        },
+                    )
+                    thread_summary["event_count"] += float(thread.get("eventCount", 0) or 0)
+                sample_count_total += int(thread.get("sampleCount", 0) or 0)
+                if pid is not None:
+                    process_summaries[str(pid)]["sample_count"] += int(thread.get("sampleCount", 0) or 0)
+                    process_summaries[str(pid)]["thread_count"] += 1
+                if tid is not None:
+                    thread_summaries[str(tid)]["sample_count"] += int(thread.get("sampleCount", 0) or 0)
+
+                call_order = thread.get("CallOrder")
+                if isinstance(call_order, dict):
+                    _walk_call_tree(
+                        call_order,
+                        name_maps,
+                        node_stats,
+                        edge_stats,
+                        parent=None,
+                        direction="call",
+                    )
+                called_order = thread.get("CalledOrder")
+                if isinstance(called_order, dict):
+                    _walk_call_tree(
+                        called_order,
+                        name_maps,
+                        node_stats,
+                        edge_stats,
+                        parent=None,
+                        direction="called",
+                    )
+                for lib in thread.get("libs", []) or []:
+                    file_id = lib.get("fileId")
+                    if file_id is not None:
+                        lib_summary = lib_summaries.setdefault(
+                            str(file_id),
+                            {
+                                "file_id": int(file_id),
+                                "file_path": name_maps.symbols_file_list[int(file_id)]
+                                if 0 <= int(file_id) < len(name_maps.symbols_file_list)
+                                else "",
+                                "event_count": 0.0,
+                                "top_symbols": [],
+                            },
+                        )
+                        lib_summary["event_count"] += float(lib.get("eventCount", 0) or 0)
+                    for func in lib.get("functions", []) or []:
+                        symbol_id = func.get("symbol")
+                        if symbol_id in (None, -1):
+                            continue
+                        counts = func.get("counts", [])
+                        weight = 0.0
+                        if isinstance(counts, list) and counts:
+                            weight = float(counts[-1])
+                        else:
+                            weight = float(func.get("eventCount", 0) or 0)
+                        symbol_name = name_maps.resolve_symbol(symbol_id, file_id)
+                        symbol_counts_raw[symbol_name] = symbol_counts_raw.get(symbol_name, 0.0) + weight
+                        normalized = _normalize_symbol(symbol_name)
+                        symbol_counts[normalized] = symbol_counts.get(normalized, 0.0) + weight
+                        if pid is not None:
+                            process_symbol_weights.setdefault(int(pid), {})
+                            process_symbol_weights[int(pid)][normalized] = (
+                                process_symbol_weights[int(pid)].get(normalized, 0.0) + weight
+                            )
+                        if tid is not None:
+                            thread_symbol_weights.setdefault(int(tid), {})
+                            thread_symbol_weights[int(tid)][normalized] = (
+                                thread_symbol_weights[int(tid)].get(normalized, 0.0) + weight
+                            )
+                        if file_id is not None:
+                            lib_symbol_weights.setdefault(int(file_id), {})
+                            lib_symbol_weights[int(file_id)][normalized] = (
+                                lib_symbol_weights[int(file_id)].get(normalized, 0.0) + weight
+                            )
+
+    if not event_count_total:
+        event_count_total = float(data.get("totalRecordSamples", 0) or 0)
+
+    for pid, weights in process_symbol_weights.items():
+        key = str(pid)
+        if key in process_summaries:
+            process_summaries[key]["top_symbols"] = _top_symbols(weights, top_n=5)
+    for tid, weights in thread_symbol_weights.items():
+        key = str(tid)
+        if key in thread_summaries:
+            thread_summaries[key]["top_symbols"] = _top_symbols(weights, top_n=5)
+    for fid, weights in lib_symbol_weights.items():
+        key = str(fid)
+        if key in lib_summaries:
+            lib_summaries[key]["top_symbols"] = _top_symbols(weights, top_n=5)
+
+    pcg_edges = [
+        {"src": src, "dst": dst, "weight": weight, "direction": direction}
+        for (src, dst, direction), weight in edge_stats.items()
+    ]
+
+    logger.info(
+        "Framegraph sample parsed: file=%s events=%.0f samples=%d processes=%d threads=%d symbols=%d",
+        path,
+        event_count_total,
+        sample_count_total,
+        len(pids),
+        len(tids),
+        len(symbol_counts),
+    )
+    return FramegraphResult(
+        samples=[],
+        fps_avg=0.0,
+        frame_drop_rate=0.0,
+        jank_p95_ms=0.0,
+        jank_windows=[],
+        has_frame_timeline=False,
+        event_count_total=event_count_total,
+        event_counts=event_counts,
+        sample_count_total=sample_count_total,
+        process_count=len(pids),
+        thread_count=len(tids),
+        symbol_counts_raw=symbol_counts_raw,
+        symbol_counts=symbol_counts,
+        name_maps=name_maps,
+        process_summaries=process_summaries,
+        thread_summaries=thread_summaries,
+        lib_summaries=lib_summaries,
+        pcg_nodes=node_stats,
+        pcg_edges=pcg_edges,
     )

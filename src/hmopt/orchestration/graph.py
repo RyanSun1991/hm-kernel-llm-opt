@@ -35,6 +35,7 @@ from hmopt.core.llm import LLMClient
 from hmopt.core.run_context import RunContext, build_context, register_run
 from hmopt.orchestration.state import RunState, initial_state
 from hmopt.storage.db import models
+from hmopt.storage.vector.store import VectorRecord
 from hmopt.tools import (
     DummyBuildAdapter,
     DummyProfilerAdapter,
@@ -62,6 +63,197 @@ class PipelineServices:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _hotspots_from_symbol_counts(
+    symbol_counts: dict[str, float],
+    *,
+    top_n: int = 20,
+    min_ratio: float = 0.001,
+    min_abs: float = 0.0,
+    total: float | None = None,
+) -> list[HotspotCandidate]:
+    threshold = min_abs
+    if total:
+        threshold = max(threshold, total * min_ratio)
+    filtered = [(name, score) for name, score in symbol_counts.items() if score >= threshold]
+    ordered = sorted(filtered, key=lambda x: x[1], reverse=True)[:top_n]
+    return [
+        HotspotCandidate(
+            symbol=name,
+            file_path=None,
+            line_start=None,
+            line_end=None,
+            score=score,
+            evidence_artifacts=[],
+        )
+        for name, score in ordered
+    ]
+
+
+def _store_framegraph_maps(services: PipelineServices, run_id: str, result, source_path: Path | None) -> None:
+    metadata = {"source": str(source_path)} if source_path else {}
+    if getattr(result, "name_maps", None):
+        payload = result.name_maps.to_dict()
+        map_art = services.ctx.artifact_store.store_json(
+            payload, kind="framegraph_name_map", run_id=run_id, session=services.ctx.session, metadata=metadata
+        )
+        logger.info("Stored framegraph name maps: artifact=%s", map_art.artifact_id)
+    if getattr(result, "symbol_counts_raw", None):
+        counts_raw = result.symbol_counts_raw
+        if counts_raw:
+            counts_art = services.ctx.artifact_store.store_json(
+                counts_raw,
+                kind="framegraph_symbol_counts_raw",
+                run_id=run_id,
+                session=services.ctx.session,
+                metadata=metadata,
+            )
+            logger.info("Stored framegraph raw symbol counts: artifact=%s", counts_art.artifact_id)
+    if getattr(result, "symbol_counts", None):
+        counts = result.symbol_counts
+        if counts:
+            counts_art = services.ctx.artifact_store.store_json(
+                counts,
+                kind="framegraph_symbol_counts",
+                run_id=run_id,
+                session=services.ctx.session,
+                metadata=metadata,
+            )
+            logger.info("Stored framegraph normalized symbol counts: artifact=%s", counts_art.artifact_id)
+    _store_framegraph_pcg(services, run_id, result, metadata)
+    _store_name_maps_in_vector_store(services, run_id, result)
+    _store_name_map_summaries(services, run_id, result, metadata)
+    services.ctx.session.commit()
+
+
+def _store_name_maps_in_vector_store(services: PipelineServices, run_id: str, result) -> None:
+    if not getattr(result, "name_maps", None):
+        return
+    name_maps = result.name_maps
+    entries: list[tuple[str, dict]] = []
+
+    for pid, name in name_maps.process_name_map.items():
+        entries.append((f"process {pid} name {name}", {"kind": "process", "id": str(pid)}))
+    for tid, name in name_maps.thread_name_map.items():
+        entries.append((f"thread {tid} name {name}", {"kind": "thread", "id": str(tid)}))
+    for idx, path in enumerate(name_maps.symbols_file_list):
+        entries.append((f"lib {idx} path {path}", {"kind": "symbols_file", "id": str(idx)}))
+    for sym_id, entry in name_maps.symbol_map.items():
+        if isinstance(entry, dict):
+            sym_name = entry.get("symbol", "")
+            file_id = entry.get("file", "")
+            entries.append(
+                (
+                    f"symbol {sym_id} file {file_id} name {sym_name}",
+                    {"kind": "symbol", "id": str(sym_id), "file": str(file_id)},
+                )
+            )
+
+    for pid, summary in (result.process_summaries or {}).items():
+        name = summary.get("name", "")
+        top_symbols = summary.get("top_symbols", [])
+        symbol_text = ", ".join(f"{s['symbol']}:{s['weight']:.1f}" for s in top_symbols)
+        entries.append(
+            (
+                f"process {pid} name {name} events {summary.get('event_count', 0)} "
+                f"samples {summary.get('sample_count', 0)} threads {summary.get('thread_count', 0)} "
+                f"top_symbols {symbol_text}",
+                {"kind": "process_summary", "id": str(pid)},
+            )
+        )
+    for tid, summary in (result.thread_summaries or {}).items():
+        name = summary.get("name", "")
+        top_symbols = summary.get("top_symbols", [])
+        symbol_text = ", ".join(f"{s['symbol']}:{s['weight']:.1f}" for s in top_symbols)
+        entries.append(
+            (
+                f"thread {tid} name {name} pid {summary.get('pid')} "
+                f"events {summary.get('event_count', 0)} samples {summary.get('sample_count', 0)} "
+                f"top_symbols {symbol_text}",
+                {"kind": "thread_summary", "id": str(tid), "pid": str(summary.get('pid'))},
+            )
+        )
+    for lib_id, summary in (result.lib_summaries or {}).items():
+        top_symbols = summary.get("top_symbols", [])
+        symbol_text = ", ".join(f"{s['symbol']}:{s['weight']:.1f}" for s in top_symbols)
+        entries.append(
+            (
+                f"lib {lib_id} path {summary.get('file_path', '')} "
+                f"events {summary.get('event_count', 0)} top_symbols {symbol_text}",
+                {"kind": "lib_summary", "id": str(lib_id)},
+            )
+        )
+
+    if not entries:
+        return
+
+    texts = [t for t, _ in entries]
+    metas = [m for _, m in entries]
+    batch_size = 128
+    for idx in range(0, len(texts), batch_size):
+        batch_texts = texts[idx : idx + batch_size]
+        batch_metas = metas[idx : idx + batch_size]
+        embeddings = services.ctx.embedding_client.embed_texts(batch_texts)
+        records = [
+            VectorRecord(
+                kind="framegraph_name_map",
+                ref_id=f"{meta['kind']}:{meta['id']}",
+                embedding=emb,
+                run_id=run_id,
+                metadata=meta,
+            )
+            for emb, meta in zip(embeddings, batch_metas)
+        ]
+        services.ctx.vector_store.add(records)
+    logger.info("Stored framegraph name maps in vector store: count=%d", len(entries))
+
+
+def _store_name_map_summaries(
+    services: PipelineServices, run_id: str, result, metadata: dict | None = None
+) -> None:
+    payload = {
+        "process_summaries": result.process_summaries,
+        "thread_summaries": result.thread_summaries,
+        "lib_summaries": result.lib_summaries,
+    }
+    if result.process_summaries or result.thread_summaries or result.lib_summaries:
+        art = services.ctx.artifact_store.store_json(
+            payload,
+            kind="framegraph_name_map_summary",
+            run_id=run_id,
+            session=services.ctx.session,
+            metadata=metadata or {},
+        )
+        logger.info("Stored framegraph name map summary: artifact=%s", art.artifact_id)
+
+
+def _store_framegraph_pcg(services: PipelineServices, run_id: str, result, metadata: dict | None = None) -> None:
+    if not getattr(result, "pcg_edges", None):
+        return
+    if not result.pcg_edges:
+        return
+    payload = {"nodes": result.pcg_nodes, "edges": result.pcg_edges}
+    art = services.ctx.artifact_store.store_json(
+        payload,
+        kind="pcg_framegraph",
+        run_id=run_id,
+        session=services.ctx.session,
+        metadata=metadata or {},
+    )
+    graph_row = models.Graph(
+        run_id=run_id,
+        kind="pcg",
+        format="json",
+        payload_artifact_id=art.artifact_id,
+        metadata_json={
+            "nodes": len(result.pcg_nodes),
+            "edges": len(result.pcg_edges),
+            "source": "framegraph",
+        },
+    )
+    services.ctx.session.add(graph_row)
+    logger.info("Stored framegraph PCG: artifact=%s", art.artifact_id)
 
 
 def _metrics_to_map(metrics: Iterable[Metric]) -> Dict[str, float]:
@@ -151,6 +343,18 @@ def _profile_and_analyze(services: PipelineServices, state: RunState, label: str
     if "framegraph" in profile_result.artifacts:
         fg = parse_framegraph(profile_result.artifacts["framegraph"])
         metrics.extend(fg.to_metrics())
+        _store_framegraph_maps(services, run_id, fg, profile_result.artifacts["framegraph"])
+        if fg.symbol_counts:
+            fg_hotspots = _hotspots_from_symbol_counts(
+                fg.symbol_counts,
+                top_n=20,
+                min_ratio=0.001,
+                min_abs=10.0,
+                total=fg.event_count_total,
+            )
+            if services.psg:
+                fg_hotspots = align_hotspots_to_psg(fg_hotspots, services.psg)
+            hotspots.extend(fg_hotspots)
     if "hitrace" in profile_result.artifacts:
         ht = parse_hitrace(profile_result.artifacts["hitrace"])
         metrics.extend(ht.to_metrics())
@@ -159,10 +363,13 @@ def _profile_and_analyze(services: PipelineServices, state: RunState, label: str
         metrics.extend(st.to_metrics())
     if "hiperf" in profile_result.artifacts:
         hp = parse_hiperf(profile_result.artifacts["hiperf"])
-        hotspots = rank_hotspots(hp.hotspot_costs, hp.edge_costs, top_n=10)
+        hp_hotspots = rank_hotspots(hp.hotspot_costs, hp.edge_costs, top_n=10)
         if services.psg:
-            hotspots = align_hotspots_to_psg(hotspots, services.psg)
-        hotspots = rank_correlated(hotspots, {m.metric_name: m.value for m in metrics})
+            hp_hotspots = align_hotspots_to_psg(hp_hotspots, services.psg)
+        hotspots.extend(hp_hotspots)
+
+    if hotspots:
+        hotspots = rank_correlated(hotspots, {m.metric_name: m.value for m in metrics}, limit=20)
         persist_hotspots(services.ctx.session, run_id, hotspots)
 
     record_metrics(services.ctx.session, run_id, metrics)
@@ -526,6 +733,18 @@ def run_artifact_analysis(
         if kind == "framegraph":
             fg = parse_framegraph(path)
             metrics.extend(fg.to_metrics())
+            _store_framegraph_maps(services, state["run_id"], fg, path)
+            if fg.symbol_counts:
+                fg_hotspots = _hotspots_from_symbol_counts(
+                    fg.symbol_counts,
+                    top_n=20,
+                    min_ratio=0.001,
+                    min_abs=10.0,
+                    total=fg.event_count_total,
+                )
+                if services.psg:
+                    fg_hotspots = align_hotspots_to_psg(fg_hotspots, services.psg)
+                hotspots.extend(fg_hotspots)
         elif kind == "hitrace":
             ht = parse_hitrace(path)
             metrics.extend(ht.to_metrics())
@@ -537,10 +756,13 @@ def run_artifact_analysis(
             hs = rank_hotspots(hp.hotspot_costs, hp.edge_costs, top_n=15)
             if services.psg:
                 hs = align_hotspots_to_psg(hs, services.psg)
-            hotspots.extend(rank_correlated(hs, {}))
+            hotspots.extend(hs)
         else:
             logger.info("Stored artifact with no parser: %s", kind)
 
+    if hotspots:
+        metrics_map = {m.metric_name: m.value for m in metrics}
+        hotspots = rank_correlated(hotspots, metrics_map, limit=20)
     record_metrics(services.ctx.session, state["run_id"], metrics)
     persist_hotspots(services.ctx.session, state["run_id"], hotspots)
     services.ctx.session.commit()
