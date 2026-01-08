@@ -7,7 +7,7 @@ import logging
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Any, Dict, Iterable, List
 
 from langgraph.graph import END, START, StateGraph
 
@@ -25,6 +25,7 @@ from hmopt.analysis.runtime.hotspot import HotspotCandidate, persist_hotspots, r
 from hmopt.analysis.runtime.metrics import Metric, compute_delta, record_metrics
 from hmopt.analysis.runtime.traces import (
     parse_framegraph,
+    parse_framegraph_html,
     parse_hiperf,
     parse_hitrace,
     parse_sysfs_trace,
@@ -89,6 +90,156 @@ def _hotspots_from_symbol_counts(
         )
         for name, score in ordered
     ]
+
+
+def _top_weighted_items(weights: dict[str, float], *, top_n: int, total: float | None = None) -> list[dict[str, float]]:
+    if not weights:
+        return []
+    ordered = sorted(weights.items(), key=lambda item: item[1], reverse=True)[:top_n]
+    result: list[dict[str, float]] = []
+    for name, weight in ordered:
+        entry: dict[str, float] = {"name": name, "weight": weight}
+        if total and total > 0:
+            entry["ratio"] = weight / total
+        result.append(entry)
+    return result
+
+
+def _top_summaries(summaries: dict[str, dict], *, top_n: int, total: float | None = None) -> list[dict[str, Any]]:
+    if not summaries:
+        return []
+    ordered = sorted(summaries.values(), key=lambda entry: entry.get("event_count", 0.0), reverse=True)[:top_n]
+    result: list[dict[str, Any]] = []
+    for entry in ordered:
+        enriched = dict(entry)
+        enriched["weight"] = enriched.get("event_count", 0.0)
+        if total and total > 0:
+            ratio = enriched.get("event_count", 0.0) / total
+            enriched["event_ratio"] = ratio
+            enriched["ratio"] = ratio
+        result.append(enriched)
+    return result
+
+
+def _top_threads_by_symbols(result, *, top_n: int = 10, symbols_per_thread: int = 5) -> list[dict[str, Any]]:
+    thread_weights: list[tuple[str, float]] = []
+    for tid, weights in result.symbol_counts_per_thread.items():
+        thread_weights.append((str(tid), sum(weights.values())))
+    ordered = sorted(thread_weights, key=lambda item: item[1], reverse=True)[:top_n]
+    output: list[dict[str, Any]] = []
+    for tid, total in ordered:
+        name = ""
+        thread_summary = result.thread_summaries.get(str(tid), {})
+        if thread_summary:
+            name = thread_summary.get("name", "")
+        label = f"{tid} {name}".strip()
+        weights = result.symbol_counts_per_thread.get(str(tid), {})
+        output.append(
+            {
+                "thread": label or tid,
+                "total": total,
+                "top_symbols": _top_weighted_items(weights, top_n=symbols_per_thread, total=total),
+            }
+        )
+    return output
+
+
+def _framegraph_trace_insight(result, *, top_n: int = 20, source_path: Path | None = None) -> dict[str, Any]:
+    event_total = result.event_count_total or sum(result.symbol_counts.values())
+    return {
+        "event_total": event_total,
+        "top_symbols": _top_weighted_items(result.symbol_counts, top_n=top_n, total=event_total),
+        "top_symbols_raw": _top_weighted_items(result.symbol_counts_raw, top_n=top_n, total=event_total),
+        "top_processes": _top_summaries(result.process_summaries, top_n=top_n, total=event_total),
+        "top_threads": _top_summaries(result.thread_summaries, top_n=top_n, total=event_total),
+        "top_libs": _top_summaries(result.lib_summaries, top_n=top_n, total=event_total),
+        "top_threads_by_symbols": _top_threads_by_symbols(result, top_n=top_n),
+        "symbol_counts_per_thread": result.symbol_counts_per_thread,
+        "source_path": str(source_path) if source_path else None,
+        "source": "framegraph",
+    }
+
+
+def _collect_framegraph_paths(path: Path) -> list[Path]:
+    if path.is_dir():
+        return sorted(path.rglob("*__sysmgr_hiperfReport.html"))
+    return [path]
+
+
+def _format_evidence_report(
+    run_id: str,
+    iteration: int,
+    metrics: dict[str, float],
+    hotspots: list[HotspotCandidate],
+    trace_insights: list[dict[str, Any]],
+    summary: str,
+) -> str:
+    lines: list[str] = [
+        f"# Evidence snapshot for run {run_id}",
+        f"Iteration: {iteration}",
+        "## Trace Analyst Summary",
+        summary or "No summary available.",
+        "## Metrics",
+    ]
+    if metrics:
+        for key, value in metrics.items():
+            lines.append(f"- {key}: {value}")
+    else:
+        lines.append("- (none)")
+
+    lines.append("## Hotspots")
+    if hotspots:
+        for hs in hotspots[:20]:
+            lines.append(f"- {hs.symbol} score={hs.score:.2f}")
+    else:
+        lines.append("- (none)")
+
+    for insight in trace_insights:
+        source_label = insight.get("source_path") or insight.get("source", "trace")
+        lines.append(f"## Trace hotspot detail ({source_label})")
+        lines.append(f"Total events: {insight.get('event_total', 0)}")
+
+        def _emit_list(title: str, items: list[dict[str, Any]], key: str = "name") -> None:
+            lines.append(f"- {title}:")
+            if not items:
+                lines.append("  - (none)")
+                return
+            for item in items:
+                name = (
+                    item.get(key)
+                    or item.get("name")
+                    or item.get("symbol")
+                    or item.get("pid")
+                    or item.get("tid")
+                    or item.get("file_path")
+                    or str(item.get("file_id") or "unknown")
+                )
+                weight = item.get("weight", 0.0)
+                ratio = item.get("ratio")
+                ratio_text = f" ({ratio:.2%})" if isinstance(ratio, float) else ""
+                lines.append(f"  - {name}: {weight:.2f}{ratio_text}")
+
+        _emit_list("Top symbols (normalized)", insight.get("top_symbols", []))
+        _emit_list("Top symbols (raw)", insight.get("top_symbols_raw", []))
+        _emit_list("Top processes", insight.get("top_processes", []), key="name")
+        _emit_list("Top threads", insight.get("top_threads", []), key="name")
+        _emit_list("Top libs", insight.get("top_libs", []), key="file_path")
+        lines.append("- Top symbols per thread:")
+        thread_items = insight.get("top_threads_by_symbols", [])
+        if not thread_items:
+            lines.append("  - (none)")
+        else:
+            for thread_item in thread_items:
+                thread_label = thread_item.get("thread", "unknown")
+                lines.append(f"  - {thread_label} (total {thread_item.get('total', 0):.2f}):")
+                for symbol in thread_item.get("top_symbols", []):
+                    ratio = symbol.get("ratio")
+                    ratio_text = f" ({ratio:.2%})" if isinstance(ratio, float) else ""
+                    lines.append(
+                        f"    - {symbol.get('name', 'unknown')}: {symbol.get('weight', 0.0):.2f}{ratio_text}"
+                    )
+
+    return "\n".join(lines)
 
 
 def _store_framegraph_maps(services: PipelineServices, run_id: str, result, source_path: Path | None) -> None:
@@ -394,18 +545,35 @@ def _build_evidence(services: PipelineServices, state: RunState) -> RunState:
     logger.info("Building evidence pack for iteration=%s", state["iteration"])
     metrics = state.get("candidate_metrics") or state.get("baseline_metrics") or {}
     hotspots = [_hotspot_from_dict(h) for h in state.get("hotspots", [])]
-    summary = services.trace_analyst.analyze(metrics, hotspots)
+    trace_insights = state.get("trace_insights", [])
+    summary = services.trace_analyst.analyze(metrics, hotspots, trace_insights)
     pack = {
         "iteration": state["iteration"],
         "metrics": metrics,
         "hotspots": [h.__dict__ for h in hotspots],
         "summary": summary,
+        "trace_insights": trace_insights,
     }
     artifact = services.ctx.artifact_store.store_json(
         pack, kind="evidence_pack", run_id=state["run_id"], session=services.ctx.session
     )
+    report_text = _format_evidence_report(
+        state["run_id"], state["iteration"], metrics, hotspots, trace_insights, summary
+    )
+    report_artifact = services.ctx.artifact_store.store_text(
+        report_text,
+        kind="evidence_report",
+        run_id=state["run_id"],
+        extension=".md",
+        session=services.ctx.session,
+    )
     state["evidence_artifact_id"] = artifact.artifact_id
-    logger.info("Evidence pack stored: artifact=%s", artifact.artifact_id)
+    state["evidence_report_artifact_id"] = report_artifact.artifact_id
+    logger.info(
+        "Evidence pack stored: artifact=%s report_artifact=%s",
+        artifact.artifact_id,
+        report_artifact.artifact_id,
+    )
     return state
 
 
@@ -727,38 +895,49 @@ def run_artifact_analysis(
     for item in artifacts:
         kind = item.get("kind")
         path = Path(item.get("path"))
-        art = services.ctx.artifact_store.store_file(
-            path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
-        )
         if kind == "framegraph":
-            fg = parse_framegraph(path)
-            metrics.extend(fg.to_metrics())
-            _store_framegraph_maps(services, state["run_id"], fg, path)
-            if fg.symbol_counts:
-                fg_hotspots = _hotspots_from_symbol_counts(
-                    fg.symbol_counts,
-                    top_n=20,
-                    min_ratio=0.001,
-                    min_abs=10.0,
-                    total=fg.event_count_total,
+            framegraph_paths = _collect_framegraph_paths(path)
+            if not framegraph_paths:
+                logger.warning("No framegraph HTML files found in %s", path)
+            for fg_path in framegraph_paths:
+                services.ctx.artifact_store.store_file(
+                    fg_path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
                 )
-                if services.psg:
-                    fg_hotspots = align_hotspots_to_psg(fg_hotspots, services.psg)
-                hotspots.extend(fg_hotspots)
-        elif kind == "hitrace":
-            ht = parse_hitrace(path)
-            metrics.extend(ht.to_metrics())
-        elif kind == "sysfs":
-            st = parse_sysfs_trace(path)
-            metrics.extend(st.to_metrics())
-        elif kind == "hiperf":
-            hp = parse_hiperf(path)
-            hs = rank_hotspots(hp.hotspot_costs, hp.edge_costs, top_n=15)
-            if services.psg:
-                hs = align_hotspots_to_psg(hs, services.psg)
-            hotspots.extend(hs)
+                fg = parse_framegraph_html(fg_path) if fg_path.suffix.lower() == ".html" else parse_framegraph(fg_path)
+                metrics.extend(fg.to_metrics())
+                _store_framegraph_maps(services, state["run_id"], fg, fg_path)
+                if fg.symbol_counts:
+                    fg_hotspots = _hotspots_from_symbol_counts(
+                        fg.symbol_counts,
+                        top_n=20,
+                        min_ratio=0.001,
+                        min_abs=10.0,
+                        total=fg.event_count_total,
+                    )
+                    if services.psg:
+                        fg_hotspots = align_hotspots_to_psg(fg_hotspots, services.psg)
+                    hotspots.extend(fg_hotspots)
+                state.setdefault("trace_insights", []).append(
+                    _framegraph_trace_insight(fg, top_n=20, source_path=fg_path)
+                )
         else:
-            logger.info("Stored artifact with no parser: %s", kind)
+            services.ctx.artifact_store.store_file(
+                path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+            )
+            if kind == "hitrace":
+                ht = parse_hitrace(path)
+                metrics.extend(ht.to_metrics())
+            elif kind == "sysfs":
+                st = parse_sysfs_trace(path)
+                metrics.extend(st.to_metrics())
+            elif kind == "hiperf":
+                hp = parse_hiperf(path)
+                hs = rank_hotspots(hp.hotspot_costs, hp.edge_costs, top_n=15)
+                if services.psg:
+                    hs = align_hotspots_to_psg(hs, services.psg)
+                hotspots.extend(hs)
+            else:
+                logger.info("Stored artifact with no parser: %s", kind)
 
     if hotspots:
         metrics_map = {m.metric_name: m.value for m in metrics}

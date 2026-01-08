@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Optional
@@ -35,6 +36,7 @@ class FramegraphResult:
     thread_count: int = 0
     symbol_counts_raw: dict[str, float] = field(default_factory=dict)
     symbol_counts: dict[str, float] = field(default_factory=dict)
+    symbol_counts_per_thread: dict[str, dict[str, float]] = field(default_factory=dict)
     name_maps: Optional["FramegraphNameMaps"] = None
     process_summaries: dict[str, dict] = field(default_factory=dict)
     thread_summaries: dict[str, dict] = field(default_factory=dict)
@@ -242,6 +244,26 @@ def parse_framegraph(path: Path, expected_frame_ms: float = 16.67) -> Framegraph
     )
 
 
+def parse_framegraph_payload(data: dict, source_path: Path) -> FramegraphResult:
+    if isinstance(data, dict) and ("recordSampleInfo" in data or "processNameMap" in data):
+        return _parse_sample_info(data, source_path)
+    return FramegraphResult([], 0.0, 0.0, 0.0, [])
+
+
+def parse_framegraph_html(path: Path) -> FramegraphResult:
+    text = path.read_text(encoding="utf-8")
+    match = re.search(
+        r'<script\\s+id="record_data"\\s+type="application/json"\\s*>(.*?)</script>',
+        text,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not match:
+        logger.warning("Framegraph HTML missing record_data: %s", path)
+        return FramegraphResult([], 0.0, 0.0, 0.0, [])
+    data = json.loads(match.group(1))
+    return parse_framegraph_payload(data, path)
+
+
 def _parse_sample_info(data: dict, path: Path) -> FramegraphResult:
     name_maps = FramegraphNameMaps(
         process_name_map=data.get("processNameMap", {}) or {},
@@ -423,6 +445,7 @@ def _parse_sample_info(data: dict, path: Path) -> FramegraphResult:
         thread_count=len(tids),
         symbol_counts_raw=symbol_counts_raw,
         symbol_counts=symbol_counts,
+        symbol_counts_per_thread={str(tid): weights for tid, weights in thread_symbol_weights.items()},
         name_maps=name_maps,
         process_summaries=process_summaries,
         thread_summaries=thread_summaries,
