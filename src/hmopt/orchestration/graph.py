@@ -7,7 +7,7 @@ import logging
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Any, Dict, Iterable, List
 
 from langgraph.graph import END, START, StateGraph
 
@@ -89,6 +89,109 @@ def _hotspots_from_symbol_counts(
         )
         for name, score in ordered
     ]
+
+
+def _top_weighted_items(weights: dict[str, float], *, top_n: int, total: float | None = None) -> list[dict[str, float]]:
+    if not weights:
+        return []
+    ordered = sorted(weights.items(), key=lambda item: item[1], reverse=True)[:top_n]
+    result: list[dict[str, float]] = []
+    for name, weight in ordered:
+        entry: dict[str, float] = {"name": name, "weight": weight}
+        if total and total > 0:
+            entry["ratio"] = weight / total
+        result.append(entry)
+    return result
+
+
+def _top_summaries(summaries: dict[str, dict], *, top_n: int, total: float | None = None) -> list[dict[str, Any]]:
+    if not summaries:
+        return []
+    ordered = sorted(summaries.values(), key=lambda entry: entry.get("event_count", 0.0), reverse=True)[:top_n]
+    result: list[dict[str, Any]] = []
+    for entry in ordered:
+        enriched = dict(entry)
+        enriched["weight"] = enriched.get("event_count", 0.0)
+        if total and total > 0:
+            ratio = enriched.get("event_count", 0.0) / total
+            enriched["event_ratio"] = ratio
+            enriched["ratio"] = ratio
+        result.append(enriched)
+    return result
+
+
+def _framegraph_trace_insight(result, *, top_n: int = 20) -> dict[str, Any]:
+    event_total = result.event_count_total or sum(result.symbol_counts.values())
+    return {
+        "event_total": event_total,
+        "top_symbols": _top_weighted_items(result.symbol_counts, top_n=top_n, total=event_total),
+        "top_symbols_raw": _top_weighted_items(result.symbol_counts_raw, top_n=top_n, total=event_total),
+        "top_processes": _top_summaries(result.process_summaries, top_n=top_n, total=event_total),
+        "top_threads": _top_summaries(result.thread_summaries, top_n=top_n, total=event_total),
+        "top_libs": _top_summaries(result.lib_summaries, top_n=top_n, total=event_total),
+        "source": "framegraph",
+    }
+
+
+def _format_evidence_report(
+    run_id: str,
+    iteration: int,
+    metrics: dict[str, float],
+    hotspots: list[HotspotCandidate],
+    trace_insights: list[dict[str, Any]],
+    summary: str,
+) -> str:
+    lines: list[str] = [
+        f"# Evidence snapshot for run {run_id}",
+        f"Iteration: {iteration}",
+        "## Trace Analyst Summary",
+        summary or "No summary available.",
+        "## Metrics",
+    ]
+    if metrics:
+        for key, value in metrics.items():
+            lines.append(f"- {key}: {value}")
+    else:
+        lines.append("- (none)")
+
+    lines.append("## Hotspots")
+    if hotspots:
+        for hs in hotspots[:20]:
+            lines.append(f"- {hs.symbol} score={hs.score:.2f}")
+    else:
+        lines.append("- (none)")
+
+    for insight in trace_insights:
+        lines.append(f"## Trace hotspot detail ({insight.get('source', 'trace')})")
+        lines.append(f"Total events: {insight.get('event_total', 0)}")
+
+        def _emit_list(title: str, items: list[dict[str, Any]], key: str = "name") -> None:
+            lines.append(f"- {title}:")
+            if not items:
+                lines.append("  - (none)")
+                return
+            for item in items:
+                name = (
+                    item.get(key)
+                    or item.get("name")
+                    or item.get("symbol")
+                    or item.get("pid")
+                    or item.get("tid")
+                    or item.get("file_path")
+                    or str(item.get("file_id") or "unknown")
+                )
+                weight = item.get("weight", 0.0)
+                ratio = item.get("ratio")
+                ratio_text = f" ({ratio:.2%})" if isinstance(ratio, float) else ""
+                lines.append(f"  - {name}: {weight:.2f}{ratio_text}")
+
+        _emit_list("Top symbols (normalized)", insight.get("top_symbols", []))
+        _emit_list("Top symbols (raw)", insight.get("top_symbols_raw", []))
+        _emit_list("Top processes", insight.get("top_processes", []), key="name")
+        _emit_list("Top threads", insight.get("top_threads", []), key="name")
+        _emit_list("Top libs", insight.get("top_libs", []), key="file_path")
+
+    return "\n".join(lines)
 
 
 def _store_framegraph_maps(services: PipelineServices, run_id: str, result, source_path: Path | None) -> None:
@@ -395,17 +498,34 @@ def _build_evidence(services: PipelineServices, state: RunState) -> RunState:
     metrics = state.get("candidate_metrics") or state.get("baseline_metrics") or {}
     hotspots = [_hotspot_from_dict(h) for h in state.get("hotspots", [])]
     summary = services.trace_analyst.analyze(metrics, hotspots)
+    trace_insights = state.get("trace_insights", [])
     pack = {
         "iteration": state["iteration"],
         "metrics": metrics,
         "hotspots": [h.__dict__ for h in hotspots],
         "summary": summary,
+        "trace_insights": trace_insights,
     }
     artifact = services.ctx.artifact_store.store_json(
         pack, kind="evidence_pack", run_id=state["run_id"], session=services.ctx.session
     )
+    report_text = _format_evidence_report(
+        state["run_id"], state["iteration"], metrics, hotspots, trace_insights, summary
+    )
+    report_artifact = services.ctx.artifact_store.store_text(
+        report_text,
+        kind="evidence_report",
+        run_id=state["run_id"],
+        extension=".md",
+        session=services.ctx.session,
+    )
     state["evidence_artifact_id"] = artifact.artifact_id
-    logger.info("Evidence pack stored: artifact=%s", artifact.artifact_id)
+    state["evidence_report_artifact_id"] = report_artifact.artifact_id
+    logger.info(
+        "Evidence pack stored: artifact=%s report_artifact=%s",
+        artifact.artifact_id,
+        report_artifact.artifact_id,
+    )
     return state
 
 
@@ -745,6 +865,7 @@ def run_artifact_analysis(
                 if services.psg:
                     fg_hotspots = align_hotspots_to_psg(fg_hotspots, services.psg)
                 hotspots.extend(fg_hotspots)
+            state.setdefault("trace_insights", []).append(_framegraph_trace_insight(fg, top_n=20))
         elif kind == "hitrace":
             ht = parse_hitrace(path)
             metrics.extend(ht.to_metrics())
