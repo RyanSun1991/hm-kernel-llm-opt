@@ -15,10 +15,12 @@ class RunState(TypedDict, total=False):
     candidate_metrics: Dict[str, float]
     best_metrics: Dict[str, float]
     evidence_artifact_id: Optional[str]
+    evidence_report_artifact_id: Optional[str]
     patch_artifact_id: Optional[str]
     best_run_id: Optional[str]
     hotspots: List[dict]
     logs: List[str]
+    trace_insights: List[dict]
 
 
 def initial_state(run_id: str, max_iterations: int) -> RunState:
@@ -32,8 +34,10 @@ def initial_state(run_id: str, max_iterations: int) -> RunState:
         "candidate_metrics": {},
         "best_metrics": {},
         "evidence_artifact_id": None,
+        "evidence_report_artifact_id": None,
         "patch_artifact_id": None,
         "best_run_id": run_id,
         "hotspots": [],
         "logs": [],
+        "trace_insights": [],
     }
