@@ -55,7 +55,7 @@ def ingest_artifact(
     run_id: Optional[str] = typer.Option(None, help="Run ID to attach"),
     config: str = typer.Option("configs/app.yaml", help="Config for storage settings"),
 ) -> None:
-    # Demo: python -m hmopt.cli ingest-artifact outputs/framegraph.json --kind framegraph
+    # Demo: python -m hmopt.cli ingest-artifact outputs/flamegraph.json --kind flamegraph
     # Purpose: manually stash an artifact into the DB/artifact store.
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
@@ -105,7 +105,7 @@ def analyze_artifacts(
     artifact: list[str] = typer.Option(
         [],
         "--artifact",
-        help="Artifact spec kind:path (e.g., framegraph:outputs/framegraph.json). Repeatable.",
+        help="Artifact spec kind:path (e.g., flamegraph:outputs/flamegraph.json). Repeatable.",
     ),
     config: str = typer.Option("configs/app.yaml", help="Config YAML"),
     repo_path: Optional[str] = typer.Option(None, help="Override repo path for this run"),
@@ -114,7 +114,7 @@ def analyze_artifacts(
     with_profile: bool = typer.Option(False, help="Re-profile candidate after patch"),
 ) -> None:
     # Demo: python -m hmopt.cli analyze-artifacts \
-    #          --artifact framegraph:outputs/framegraph.json \
+    #          --artifact flamegraph:outputs/flamegraph.json \
     #          --artifact hitrace:outputs/hitrace.json \
     #          --artifact hiperf:outputs/hiperf.json \
     #          --repo-path /path/to/hm-verif-kernel

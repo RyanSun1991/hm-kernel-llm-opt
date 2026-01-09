@@ -5,7 +5,7 @@ This repository contains a **code + performance analysis and optimization platfo
 The platform is designed as an **agentic, closed-loop pipeline**:
 
 1) Ingest **source code** + **kernel configs** + **hardware specs**
-2) Ingest **performance artifacts** (e.g., hitrace/hiperf/framegraph/proc/klog/perf)
+2) Ingest **performance artifacts** (e.g., hitrace/hiperf/flamegraph/proc/klog/perf)
 3) Build **static structure graphs** + **runtime call graphs**
 4) Correlate profiling bottlenecks with code locations
 5) Use LLM agents to propose patches, run verification, re-profile, and iterate

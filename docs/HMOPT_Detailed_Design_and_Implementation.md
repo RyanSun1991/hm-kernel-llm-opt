@@ -28,7 +28,7 @@ We will implement **HMOPT**, a platform that unifies:
 3) **Control plane:** strict experiment tracking, safety policies (internal models by default), stop conditions, regression detection, and reporting.
 
 The system is designed to:
-- Reduce manual analysis of huge traces (hitrace/hiperf/framegraph/klog/proc). fileciteturn0file3  
+- Reduce manual analysis of huge traces (hitrace/hiperf/flamegraph/klog/proc). fileciteturn0file3  
 - Support project-level changes safely via static and runtime graph context (POLO). fileciteturn0file1  
 - Improve kernel code/config iteratively with profiling evidence and historical best retention (PRAGMA). fileciteturn0file0  
 - Accumulate a local dataset for future fine-tuning/training and “self-evolution.” fileciteturn0file3  
@@ -39,7 +39,7 @@ The system is designed to:
 
 ### 2.1 Goals
 - **G1: Reproducible experiments**: each run has immutable identifiers; artifacts hashed; metrics comparable across iterations.
-- **G2: Performance artifact ingestion**: framegraph, hitrace, hiperf (minimum), with a plugin interface for new formats.
+- **G2: Performance artifact ingestion**: flamegraph, hitrace, hiperf (minimum), with a plugin interface for new formats.
 - **G3: Correlation and evidence packs**: align symptoms (frame drops, scheduler latency spikes) to code regions with structured evidence.
 - **G4: Agentic optimization loop**:
   - Coder proposes diffs
@@ -113,7 +113,7 @@ The system is designed to:
 #### `artifacts`
 - `artifact_id` (UUID)
 - `run_id`
-- `kind` (build_log, test_log, hitrace, hiperf, framegraph, report, patch_diff, binary, …)
+- `kind` (build_log, test_log, hitrace, hiperf, flamegraph, report, patch_diff, binary, …)
 - `sha256`, `path`, `bytes`, `mime`
 - `metadata_json`
 
@@ -377,7 +377,7 @@ Define interfaces:
 - `run(workload_id, duration, options) -> WorkloadResult(artifacts)`
 
 **ProfilerAdapter**
-- `collect(workload_result) -> PerfArtifactBundle(hitrace, hiperf, framegraph, ...)`
+- `collect(workload_result) -> PerfArtifactBundle(hitrace, hiperf, flamegraph, ...)`
 
 Adapters are configured by YAML (device/workload-specific).
 
@@ -419,7 +419,7 @@ Report sections:
 ## 14. Testing Strategy
 
 ### 14.1 Unit tests
-- parsers: framegraph/hitrace/hiperf parsing with golden files
+- parsers: flamegraph/hitrace/hiperf parsing with golden files
 - artifact store: hashing and retrieval
 - DB: schema migrations and CRUD
 
@@ -456,8 +456,8 @@ Acceptance:
 - `hmopt ingest repo` persists snapshot; `hmopt analyze --static` can output PSG stats.
 
 ### Phase C — Perf ingestion + runtime analysis (Week 4–6)
-- C1: artifact ingestion (hitrace/hiperf/framegraph files)
-- C2: framegraph parser → fps, drop windows
+- C1: artifact ingestion (hitrace/hiperf/flamegraph files)
+- C2: flamegraph parser → fps, drop windows
 - C3: hiperf parser → sample stacks → PCG
 - C4: hotspot ranking (baseline + FuncRank-like)
 
@@ -482,7 +482,7 @@ Acceptance:
 - `hmopt optimize` runs at least 2 iterations end-to-end with dummy adapters and stores all artifacts.
 
 ### Phase F — HM domain expansion + dataset export (Week 12+)
-- F1: HM bottleneck taxonomy + strategy templates (scheduler/memory/IRQ/framegraph)
+- F1: HM bottleneck taxonomy + strategy templates (scheduler/memory/IRQ/flamegraph)
 - F2: stronger redaction policy for sensitive logs
 - F3: dataset exporter for successful runs
 
@@ -518,9 +518,9 @@ Each task includes:
 - Store a test file and confirm `sha256` path exists on disk
 - Insert artifact row and query it back
 
-### Task T-C2: Framegraph Parser v1
+### Task T-C2: Flamegraph Parser v1
 **Files**
-- `src/hmopt/analysis/runtime/traces/framegraph_parser.py`
+- `src/hmopt/analysis/runtime/traces/flamegraph_parser.py`
 - `src/hmopt/analysis/runtime/metrics.py`
 
 **Steps**

@@ -28,7 +28,7 @@ profiling:
     - hitrace
     - hiperf
     - perf
-    - framegraph
+    - flamegraph
 
 pipelines:
   default: optimize_kernel

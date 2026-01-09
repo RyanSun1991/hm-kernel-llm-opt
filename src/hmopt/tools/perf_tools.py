@@ -53,11 +53,11 @@ class DummyProfilerAdapter(ProfilerAdapter):
         output_dir.mkdir(parents=True, exist_ok=True)
         artifacts: dict[str, Path] = {}
 
-        # framegraph
+        # flamegraph
         frames = [{"ts": i * 16.6, "dur": 16.6 + (i % 10) * 0.5} for i in range(120)]
-        frame_path = output_dir / "framegraph.json"
+        frame_path = output_dir / "flamegraph.json"
         frame_path.write_text(json.dumps({"frames": frames}, indent=2), encoding="utf-8")
-        artifacts["framegraph"] = frame_path
+        artifacts["flamegraph"] = frame_path
 
         # hitrace (scheduler latency samples)
         hitrace = [{"ts": i * 1000, "dur": 80 + (i % 5) * 20, "name": "sched"} for i in range(200)]
