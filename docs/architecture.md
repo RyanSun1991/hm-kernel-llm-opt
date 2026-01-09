@@ -19,7 +19,7 @@ This document describes the target architecture for the HM-VERIF optimization pl
   - Config + hardware spec capture
 
 - Profiling
-  - Trace collection (hitrace/hiperf/perf/framegraph)
+  - Trace collection (hitrace/hiperf/perf/flamegraph)
   - Normalization to a common schema
 
 - Analysis

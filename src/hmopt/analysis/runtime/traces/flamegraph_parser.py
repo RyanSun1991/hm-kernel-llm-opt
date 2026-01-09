@@ -1,10 +1,11 @@
-"""Framegraph parser."""
+"""Flamegraph parser."""
 
 from __future__ import annotations
 
 import csv
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Optional
@@ -21,7 +22,7 @@ class FrameSample:
 
 
 @dataclass
-class FramegraphResult:
+class FlamegraphResult:
     samples: List[FrameSample]
     fps_avg: float
     frame_drop_rate: float
@@ -35,12 +36,14 @@ class FramegraphResult:
     thread_count: int = 0
     symbol_counts_raw: dict[str, float] = field(default_factory=dict)
     symbol_counts: dict[str, float] = field(default_factory=dict)
-    name_maps: Optional["FramegraphNameMaps"] = None
+    symbol_counts_per_thread: dict[str, dict[str, float]] = field(default_factory=dict)
+    name_maps: Optional["FlamegraphNameMaps"] = None
     process_summaries: dict[str, dict] = field(default_factory=dict)
     thread_summaries: dict[str, dict] = field(default_factory=dict)
     lib_summaries: dict[str, dict] = field(default_factory=dict)
     pcg_nodes: dict[str, dict] = field(default_factory=dict)
     pcg_edges: list[dict] = field(default_factory=list)
+    source_path: Optional[str] = None
 
     def to_metrics(self) -> list[Metric]:
         metrics: list[Metric] = []
@@ -54,29 +57,29 @@ class FramegraphResult:
             )
         if self.event_count_total:
             metrics.append(
-                Metric(metric_name="framegraph_event_count_total", value=self.event_count_total)
+                Metric(metric_name="flamegraph_event_count_total", value=self.event_count_total)
             )
         for name, value in self.event_counts.items():
-            metric_name = f"framegraph_event_{_sanitize_event_name(name)}_total"
+            metric_name = f"flamegraph_event_{_sanitize_event_name(name)}_total"
             unit = _event_unit(name)
             metrics.append(Metric(metric_name=metric_name, value=value, unit=unit))
             if "instruction" in name.lower():
                 metrics.append(Metric(metric_name="instruction_count_total", value=value, unit=unit))
         if self.sample_count_total:
-            metrics.append(Metric(metric_name="framegraph_sample_count_total", value=float(self.sample_count_total)))
+            metrics.append(Metric(metric_name="flamegraph_sample_count_total", value=float(self.sample_count_total)))
         if self.process_count:
-            metrics.append(Metric(metric_name="framegraph_process_count", value=float(self.process_count)))
+            metrics.append(Metric(metric_name="flamegraph_process_count", value=float(self.process_count)))
         if self.thread_count:
-            metrics.append(Metric(metric_name="framegraph_thread_count", value=float(self.thread_count)))
+            metrics.append(Metric(metric_name="flamegraph_thread_count", value=float(self.thread_count)))
         if self.symbol_counts:
             metrics.append(
-                Metric(metric_name="framegraph_symbol_count", value=float(len(self.symbol_counts)))
+                Metric(metric_name="flamegraph_symbol_count", value=float(len(self.symbol_counts)))
             )
         return metrics
 
 
 @dataclass
-class FramegraphNameMaps:
+class FlamegraphNameMaps:
     process_name_map: dict[str, str] = field(default_factory=dict)
     thread_name_map: dict[str, str] = field(default_factory=dict)
     symbols_file_list: list[str] = field(default_factory=list)
@@ -133,7 +136,7 @@ def _top_symbols(weights: dict[str, float], top_n: int = 5) -> list[dict]:
 
 def _walk_call_tree(
     node: dict,
-    name_maps: FramegraphNameMaps,
+    name_maps: FlamegraphNameMaps,
     node_stats: dict[str, dict],
     edge_stats: dict[tuple[str, str, str], float],
     *,
@@ -167,16 +170,21 @@ def _walk_call_tree(
             )
 
 
+def _samples_from_payload(frames: list[dict]) -> list[FrameSample]:
+    samples = []
+    for frame in frames:
+        ts = float(frame.get("ts") or frame.get("timestamp_ms") or frame.get("t", 0))
+        dur = float(frame.get("dur") or frame.get("duration_ms") or frame.get("duration", 0))
+        samples.append(FrameSample(ts_ms=ts, dur_ms=dur))
+    return samples
+
+
 def _load_frames(path: Path) -> list[FrameSample]:
     if path.suffix.lower() == ".json":
         data = json.loads(path.read_text(encoding="utf-8"))
         frames = data.get("frames", data)
-        samples = []
-        for frame in frames:
-            ts = float(frame.get("ts") or frame.get("timestamp_ms") or frame.get("t", 0))
-            dur = float(frame.get("dur") or frame.get("duration_ms") or frame.get("duration", 0))
-            samples.append(FrameSample(ts_ms=ts, dur_ms=dur))
-        return samples
+        if isinstance(frames, list):
+            return _samples_from_payload(frames)
 
     samples = []
     with path.open("r", encoding="utf-8") as f:
@@ -188,16 +196,36 @@ def _load_frames(path: Path) -> list[FrameSample]:
     return samples
 
 
-def parse_framegraph(path: Path, expected_frame_ms: float = 16.67) -> FramegraphResult:
-    if path.suffix.lower() == ".json":
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict) and ("recordSampleInfo" in data or "processNameMap" in data):
-            return _parse_sample_info(data, path)
+def _extract_record_data(html_text: str) -> str | None:
+    pattern = (
+        r"<script[^>]*id=[\"']record_data[\"'][^>]*type=[\"']application/json[\"'][^>]*>"
+        r"(.*?)</script>"
+    )
+    match = re.search(pattern, html_text, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return None
+    return match.group(1).strip()
 
-    samples = _load_frames(path)
+
+def _parse_flamegraph_payload(
+    data: object, path: Path, expected_frame_ms: float = 16.67
+) -> FlamegraphResult:
+    if isinstance(data, dict) and ("recordSampleInfo" in data or "processNameMap" in data):
+        return _parse_sample_info(data, path)
+
+    frames = data.get("frames", data) if isinstance(data, dict) else data
+    samples: list[FrameSample] = []
+    if isinstance(frames, list):
+        samples = _samples_from_payload(frames)
+    return _flamegraph_from_samples(samples, path, expected_frame_ms)
+
+
+def _flamegraph_from_samples(
+    samples: list[FrameSample], path: Path, expected_frame_ms: float
+) -> FlamegraphResult:
     if not samples:
-        logger.warning("Framegraph empty: %s", path)
-        return FramegraphResult([], 0.0, 0.0, 0.0, [])
+        logger.warning("Flamegraph empty: %s", path)
+        return FlamegraphResult([], 0.0, 0.0, 0.0, [])
 
     start = min(s.ts_ms for s in samples)
     end = max(s.ts_ms + s.dur_ms for s in samples)
@@ -205,7 +233,6 @@ def parse_framegraph(path: Path, expected_frame_ms: float = 16.67) -> Framegraph
     fps_avg = (len(samples) / total_time) * 1000.0
 
     jank_threshold = expected_frame_ms * 1.3
-    jank_durations = [s.dur_ms for s in samples if s.dur_ms >= jank_threshold]
     jank_p95 = quantile([s.dur_ms for s in samples], 0.95)
     drop_rate = len([s for s in samples if s.dur_ms > expected_frame_ms * 2]) / len(samples)
 
@@ -225,25 +252,68 @@ def parse_framegraph(path: Path, expected_frame_ms: float = 16.67) -> Framegraph
         windows.append((current_start, current_end))
 
     logger.info(
-        "Framegraph parsed: file=%s frames=%d fps=%.2f jank_p95=%.2f drop_rate=%.3f",
+        "Flamegraph parsed: file=%s frames=%d fps=%.2f jank_p95=%.2f drop_rate=%.3f",
         path,
         len(samples),
         fps_avg,
         jank_p95,
         drop_rate,
     )
-    return FramegraphResult(
+    return FlamegraphResult(
         samples=samples,
         fps_avg=fps_avg,
         frame_drop_rate=drop_rate,
         jank_p95_ms=jank_p95,
         jank_windows=windows,
         has_frame_timeline=True,
+        source_path=str(path),
     )
 
 
-def _parse_sample_info(data: dict, path: Path) -> FramegraphResult:
-    name_maps = FramegraphNameMaps(
+def _parse_flamegraph_html(path: Path, expected_frame_ms: float = 16.67) -> FlamegraphResult | None:
+    html_text = path.read_text(encoding="utf-8", errors="ignore")
+    payload = _extract_record_data(html_text)
+    if not payload:
+        logger.warning("Flamegraph HTML missing record_data: %s", path)
+        return None
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        logger.warning("Flamegraph HTML JSON decode failed: %s error=%s", path, exc)
+        return None
+    return _parse_flamegraph_payload(data, path, expected_frame_ms)
+
+
+def parse_flamegraph(path: Path, expected_frame_ms: float = 16.67) -> list[FlamegraphResult]:
+    if path.is_dir():
+        html_files = sorted(path.rglob("*__sysmgr_hiperfReport.html"))
+        results: list[FlamegraphResult] = []
+        for html_file in html_files:
+            parsed = _parse_flamegraph_html(html_file, expected_frame_ms)
+            if parsed:
+                results.append(parsed)
+        if not results:
+            logger.warning("Flamegraph directory had no report HTML: %s", path)
+        return results
+
+    if path.suffix.lower() == ".html":
+        parsed = _parse_flamegraph_html(path, expected_frame_ms)
+        return [parsed] if parsed else []
+
+    if path.suffix.lower() == ".json":
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return [_parse_flamegraph_payload(data, path, expected_frame_ms)]
+
+    samples = _load_frames(path)
+    if not samples:
+        logger.warning("Flamegraph empty: %s", path)
+        return []
+
+    return [_flamegraph_from_samples(samples, path, expected_frame_ms)]
+
+
+def _parse_sample_info(data: dict, path: Path) -> FlamegraphResult:
+    name_maps = FlamegraphNameMaps(
         process_name_map=data.get("processNameMap", {}) or {},
         thread_name_map=data.get("threadNameMap", {}) or {},
         symbols_file_list=data.get("symbolsFileList", [])
@@ -258,6 +328,7 @@ def _parse_sample_info(data: dict, path: Path) -> FramegraphResult:
     sample_count_total = 0
     symbol_counts_raw: dict[str, float] = {}
     symbol_counts: dict[str, float] = {}
+    symbol_counts_per_thread: dict[str, dict[str, float]] = {}
     process_summaries: dict[str, dict] = {}
     thread_summaries: dict[str, dict] = {}
     lib_summaries: dict[str, dict] = {}
@@ -390,6 +461,7 @@ def _parse_sample_info(data: dict, path: Path) -> FramegraphResult:
         key = str(tid)
         if key in thread_summaries:
             thread_summaries[key]["top_symbols"] = _top_symbols(weights, top_n=5)
+        symbol_counts_per_thread[key] = dict(weights)
     for fid, weights in lib_symbol_weights.items():
         key = str(fid)
         if key in lib_summaries:
@@ -401,7 +473,7 @@ def _parse_sample_info(data: dict, path: Path) -> FramegraphResult:
     ]
 
     logger.info(
-        "Framegraph sample parsed: file=%s events=%.0f samples=%d processes=%d threads=%d symbols=%d",
+        "Flamegraph sample parsed: file=%s events=%.0f samples=%d processes=%d threads=%d symbols=%d",
         path,
         event_count_total,
         sample_count_total,
@@ -409,7 +481,7 @@ def _parse_sample_info(data: dict, path: Path) -> FramegraphResult:
         len(tids),
         len(symbol_counts),
     )
-    return FramegraphResult(
+    return FlamegraphResult(
         samples=[],
         fps_avg=0.0,
         frame_drop_rate=0.0,
@@ -423,10 +495,12 @@ def _parse_sample_info(data: dict, path: Path) -> FramegraphResult:
         thread_count=len(tids),
         symbol_counts_raw=symbol_counts_raw,
         symbol_counts=symbol_counts,
+        symbol_counts_per_thread=symbol_counts_per_thread,
         name_maps=name_maps,
         process_summaries=process_summaries,
         thread_summaries=thread_summaries,
         lib_summaries=lib_summaries,
         pcg_nodes=node_stats,
         pcg_edges=pcg_edges,
+        source_path=str(path),
     )

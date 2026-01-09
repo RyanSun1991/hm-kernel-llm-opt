@@ -24,7 +24,7 @@ from hmopt.analysis.correlation.ranker import rank_correlated
 from hmopt.analysis.runtime.hotspot import HotspotCandidate, persist_hotspots, rank_hotspots
 from hmopt.analysis.runtime.metrics import Metric, compute_delta, record_metrics
 from hmopt.analysis.runtime.traces import (
-    parse_framegraph,
+    parse_flamegraph,
     parse_hiperf,
     parse_hitrace,
     parse_sysfs_trace,
@@ -120,8 +120,22 @@ def _top_summaries(summaries: dict[str, dict], *, top_n: int, total: float | Non
     return result
 
 
-def _framegraph_trace_insight(result, *, top_n: int = 20) -> dict[str, Any]:
+def _flamegraph_trace_insight(result, *, top_n: int = 20, source_path: Path | None = None) -> dict[str, Any]:
     event_total = result.event_count_total or sum(result.symbol_counts.values())
+    source_value = source_path or getattr(result, "source_path", None)
+    source_text = str(source_value) if source_value else None
+    thread_symbol_insights: list[dict[str, Any]] = []
+    for tid, weights in (result.symbol_counts_per_thread or {}).items():
+        summary = (result.thread_summaries or {}).get(str(tid), {})
+        thread_total = sum(weights.values())
+        thread_symbol_insights.append(
+            {
+                "tid": tid,
+                "name": summary.get("name", ""),
+                "event_count": summary.get("event_count", 0.0),
+                "top_symbols": _top_weighted_items(weights, top_n=top_n, total=thread_total),
+            }
+        )
     return {
         "event_total": event_total,
         "top_symbols": _top_weighted_items(result.symbol_counts, top_n=top_n, total=event_total),
@@ -129,7 +143,9 @@ def _framegraph_trace_insight(result, *, top_n: int = 20) -> dict[str, Any]:
         "top_processes": _top_summaries(result.process_summaries, top_n=top_n, total=event_total),
         "top_threads": _top_summaries(result.thread_summaries, top_n=top_n, total=event_total),
         "top_libs": _top_summaries(result.lib_summaries, top_n=top_n, total=event_total),
-        "source": "framegraph",
+        "top_symbols_per_thread": thread_symbol_insights,
+        "source_path": source_text,
+        "source": "flamegraph",
     }
 
 
@@ -190,41 +206,70 @@ def _format_evidence_report(
         _emit_list("Top processes", insight.get("top_processes", []), key="name")
         _emit_list("Top threads", insight.get("top_threads", []), key="name")
         _emit_list("Top libs", insight.get("top_libs", []), key="file_path")
+        per_thread = insight.get("top_symbols_per_thread", [])
+        if per_thread:
+            lines.append("- Top symbols per thread:")
+            for entry in per_thread:
+                thread_label = entry.get("name") or entry.get("tid")
+                if entry.get("name") and entry.get("tid"):
+                    thread_label = f"{entry.get('name')} (tid {entry.get('tid')})"
+                lines.append(f"  - {thread_label}:")
+                for item in entry.get("top_symbols", []):
+                    name = item.get("name") or item.get("symbol")
+                    weight = item.get("weight", 0.0)
+                    ratio = item.get("ratio")
+                    ratio_text = f" ({ratio:.2%})" if isinstance(ratio, float) else ""
+                    lines.append(f"    - {name}: {weight:.2f}{ratio_text}")
 
     return "\n".join(lines)
 
 
-def _store_framegraph_maps(services: PipelineServices, run_id: str, result, source_path: Path | None) -> None:
-    metadata = {"source": str(source_path)} if source_path else {}
+def _store_flamegraph_maps(services: PipelineServices, run_id: str, result, source_path: Path | None) -> None:
+    source_value = source_path or getattr(result, "source_path", None)
+    metadata = {"source": str(source_value)} if source_value else {}
     if getattr(result, "name_maps", None):
         payload = result.name_maps.to_dict()
         map_art = services.ctx.artifact_store.store_json(
-            payload, kind="framegraph_name_map", run_id=run_id, session=services.ctx.session, metadata=metadata
+            payload, kind="flamegraph_name_map", run_id=run_id, session=services.ctx.session, metadata=metadata
         )
-        logger.info("Stored framegraph name maps: artifact=%s", map_art.artifact_id)
+        logger.info("Stored flamegraph name maps: artifact=%s", map_art.artifact_id)
     if getattr(result, "symbol_counts_raw", None):
         counts_raw = result.symbol_counts_raw
         if counts_raw:
             counts_art = services.ctx.artifact_store.store_json(
                 counts_raw,
-                kind="framegraph_symbol_counts_raw",
+                kind="flamegraph_symbol_counts_raw",
                 run_id=run_id,
                 session=services.ctx.session,
                 metadata=metadata,
             )
-            logger.info("Stored framegraph raw symbol counts: artifact=%s", counts_art.artifact_id)
+            logger.info("Stored flamegraph raw symbol counts: artifact=%s", counts_art.artifact_id)
     if getattr(result, "symbol_counts", None):
         counts = result.symbol_counts
         if counts:
             counts_art = services.ctx.artifact_store.store_json(
                 counts,
-                kind="framegraph_symbol_counts",
+                kind="flamegraph_symbol_counts",
                 run_id=run_id,
                 session=services.ctx.session,
                 metadata=metadata,
             )
-            logger.info("Stored framegraph normalized symbol counts: artifact=%s", counts_art.artifact_id)
-    _store_framegraph_pcg(services, run_id, result, metadata)
+            logger.info("Stored flamegraph normalized symbol counts: artifact=%s", counts_art.artifact_id)
+    if getattr(result, "symbol_counts_per_thread", None):
+        counts_per_thread = result.symbol_counts_per_thread
+        if counts_per_thread:
+            counts_art = services.ctx.artifact_store.store_json(
+                counts_per_thread,
+                kind="flamegraph_symbol_counts_per_thread",
+                run_id=run_id,
+                session=services.ctx.session,
+                metadata=metadata,
+            )
+            logger.info(
+                "Stored flamegraph per-thread symbol counts: artifact=%s",
+                counts_art.artifact_id,
+            )
+    _store_flamegraph_pcg(services, run_id, result, metadata)
     _store_name_maps_in_vector_store(services, run_id, result)
     _store_name_map_summaries(services, run_id, result, metadata)
     services.ctx.session.commit()
@@ -300,7 +345,7 @@ def _store_name_maps_in_vector_store(services: PipelineServices, run_id: str, re
         embeddings = services.ctx.embedding_client.embed_texts(batch_texts)
         records = [
             VectorRecord(
-                kind="framegraph_name_map",
+                kind="flamegraph_name_map",
                 ref_id=f"{meta['kind']}:{meta['id']}",
                 embedding=emb,
                 run_id=run_id,
@@ -309,7 +354,7 @@ def _store_name_maps_in_vector_store(services: PipelineServices, run_id: str, re
             for emb, meta in zip(embeddings, batch_metas)
         ]
         services.ctx.vector_store.add(records)
-    logger.info("Stored framegraph name maps in vector store: count=%d", len(entries))
+    logger.info("Stored flamegraph name maps in vector store: count=%d", len(entries))
 
 
 def _store_name_map_summaries(
@@ -323,15 +368,15 @@ def _store_name_map_summaries(
     if result.process_summaries or result.thread_summaries or result.lib_summaries:
         art = services.ctx.artifact_store.store_json(
             payload,
-            kind="framegraph_name_map_summary",
+            kind="flamegraph_name_map_summary",
             run_id=run_id,
             session=services.ctx.session,
             metadata=metadata or {},
         )
-        logger.info("Stored framegraph name map summary: artifact=%s", art.artifact_id)
+        logger.info("Stored flamegraph name map summary: artifact=%s", art.artifact_id)
 
 
-def _store_framegraph_pcg(services: PipelineServices, run_id: str, result, metadata: dict | None = None) -> None:
+def _store_flamegraph_pcg(services: PipelineServices, run_id: str, result, metadata: dict | None = None) -> None:
     if not getattr(result, "pcg_edges", None):
         return
     if not result.pcg_edges:
@@ -339,7 +384,7 @@ def _store_framegraph_pcg(services: PipelineServices, run_id: str, result, metad
     payload = {"nodes": result.pcg_nodes, "edges": result.pcg_edges}
     art = services.ctx.artifact_store.store_json(
         payload,
-        kind="pcg_framegraph",
+        kind="pcg_flamegraph",
         run_id=run_id,
         session=services.ctx.session,
         metadata=metadata or {},
@@ -352,11 +397,11 @@ def _store_framegraph_pcg(services: PipelineServices, run_id: str, result, metad
         metadata_json={
             "nodes": len(result.pcg_nodes),
             "edges": len(result.pcg_edges),
-            "source": "framegraph",
+            "source": "flamegraph",
         },
     )
     services.ctx.session.add(graph_row)
-    logger.info("Stored framegraph PCG: artifact=%s", art.artifact_id)
+    logger.info("Stored flamegraph PCG: artifact=%s", art.artifact_id)
 
 
 def _metrics_to_map(metrics: Iterable[Metric]) -> Dict[str, float]:
@@ -443,21 +488,25 @@ def _profile_and_analyze(services: PipelineServices, state: RunState, label: str
 
     metrics: list[Metric] = []
     hotspots: list[HotspotCandidate] = []
-    if "framegraph" in profile_result.artifacts:
-        fg = parse_framegraph(profile_result.artifacts["framegraph"])
-        metrics.extend(fg.to_metrics())
-        _store_framegraph_maps(services, run_id, fg, profile_result.artifacts["framegraph"])
-        if fg.symbol_counts:
-            fg_hotspots = _hotspots_from_symbol_counts(
-                fg.symbol_counts,
-                top_n=20,
-                min_ratio=0.001,
-                min_abs=10.0,
-                total=fg.event_count_total,
+    if "flamegraph" in profile_result.artifacts:
+        fg_results = parse_flamegraph(profile_result.artifacts["flamegraph"])
+        for fg in fg_results:
+            metrics.extend(fg.to_metrics())
+            _store_flamegraph_maps(services, run_id, fg, profile_result.artifacts["flamegraph"])
+            if fg.symbol_counts:
+                fg_hotspots = _hotspots_from_symbol_counts(
+                    fg.symbol_counts,
+                    top_n=20,
+                    min_ratio=0.001,
+                    min_abs=10.0,
+                    total=fg.event_count_total,
+                )
+                if services.psg:
+                    fg_hotspots = align_hotspots_to_psg(fg_hotspots, services.psg)
+                hotspots.extend(fg_hotspots)
+            state.setdefault("trace_insights", []).append(
+                _flamegraph_trace_insight(fg, top_n=20)
             )
-            if services.psg:
-                fg_hotspots = align_hotspots_to_psg(fg_hotspots, services.psg)
-            hotspots.extend(fg_hotspots)
     if "hitrace" in profile_result.artifacts:
         ht = parse_hitrace(profile_result.artifacts["hitrace"])
         metrics.extend(ht.to_metrics())
@@ -497,8 +546,8 @@ def _build_evidence(services: PipelineServices, state: RunState) -> RunState:
     logger.info("Building evidence pack for iteration=%s", state["iteration"])
     metrics = state.get("candidate_metrics") or state.get("baseline_metrics") or {}
     hotspots = [_hotspot_from_dict(h) for h in state.get("hotspots", [])]
-    summary = services.trace_analyst.analyze(metrics, hotspots)
     trace_insights = state.get("trace_insights", [])
+    summary = services.trace_analyst.analyze(metrics, hotspots, trace_insights)
     pack = {
         "iteration": state["iteration"],
         "metrics": metrics,
@@ -850,22 +899,25 @@ def run_artifact_analysis(
         art = services.ctx.artifact_store.store_file(
             path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
         )
-        if kind == "framegraph":
-            fg = parse_framegraph(path)
-            metrics.extend(fg.to_metrics())
-            _store_framegraph_maps(services, state["run_id"], fg, path)
-            if fg.symbol_counts:
-                fg_hotspots = _hotspots_from_symbol_counts(
-                    fg.symbol_counts,
-                    top_n=20,
-                    min_ratio=0.001,
-                    min_abs=10.0,
-                    total=fg.event_count_total,
+        if kind == "flamegraph":
+            fg_results = parse_flamegraph(path)
+            for fg in fg_results:
+                metrics.extend(fg.to_metrics())
+                _store_flamegraph_maps(services, state["run_id"], fg, path)
+                if fg.symbol_counts:
+                    fg_hotspots = _hotspots_from_symbol_counts(
+                        fg.symbol_counts,
+                        top_n=20,
+                        min_ratio=0.001,
+                        min_abs=10.0,
+                        total=fg.event_count_total,
+                    )
+                    if services.psg:
+                        fg_hotspots = align_hotspots_to_psg(fg_hotspots, services.psg)
+                    hotspots.extend(fg_hotspots)
+                state.setdefault("trace_insights", []).append(
+                    _flamegraph_trace_insight(fg, top_n=20)
                 )
-                if services.psg:
-                    fg_hotspots = align_hotspots_to_psg(fg_hotspots, services.psg)
-                hotspots.extend(fg_hotspots)
-            state.setdefault("trace_insights", []).append(_framegraph_trace_insight(fg, top_n=20))
         elif kind == "hitrace":
             ht = parse_hitrace(path)
             metrics.extend(ht.to_metrics())

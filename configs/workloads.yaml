@@ -9,8 +9,8 @@ workloads:
     kind: system_trace
     command: "scripts/run_workload_ui_frame.sh"
     artifacts:
-      - type: framegraph
-        path: "outputs/framegraph.json"
+      - type: flamegraph
+        path: "outputs/flamegraph.json"
       - type: hitrace
         path: "outputs/hitrace.trace"
     objectives:
