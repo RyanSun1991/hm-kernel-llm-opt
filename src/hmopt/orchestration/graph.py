@@ -149,6 +149,145 @@ def _flamegraph_trace_insight(result, *, top_n: int = 20, source_path: Path | No
     }
 
 
+def _flamegraph_comparison_insight(results: list, *, top_n: int = 10) -> dict[str, Any] | None:
+    if len(results) < 2:
+        return None
+
+    summaries: list[dict[str, Any]] = []
+    symbol_weights_by_source: dict[str, dict[str, float]] = {}
+    thread_comparisons: dict[str, dict[str, Any]] = {}
+    for idx, result in enumerate(results):
+        source_path = getattr(result, "source_path", None)
+        source_label = str(source_path) if source_path else f"flamegraph_{idx + 1}"
+        event_total = result.event_count_total or sum(result.symbol_counts.values())
+        summaries.append(
+            {
+                "source": source_label,
+                "event_total": event_total,
+                "process_count": result.process_count,
+                "thread_count": result.thread_count,
+                "sample_count_total": result.sample_count_total,
+                "top_symbols": _top_weighted_items(result.symbol_counts, top_n=top_n, total=event_total),
+                "top_processes": _top_summaries(result.process_summaries, top_n=top_n, total=event_total),
+                "top_threads": _top_summaries(result.thread_summaries, top_n=top_n, total=event_total),
+                "top_libs": _top_summaries(result.lib_summaries, top_n=top_n, total=event_total),
+            }
+        )
+        symbol_weights_by_source[source_label] = dict(result.symbol_counts or {})
+        for tid, weights in (result.symbol_counts_per_thread or {}).items():
+            summary = (result.thread_summaries or {}).get(str(tid), {})
+            thread_label = summary.get("name") or str(tid)
+            thread_key = f"{tid}:{thread_label}"
+            thread_entry = thread_comparisons.setdefault(
+                thread_key,
+                {"tid": tid, "name": summary.get("name", ""), "per_source": {}},
+            )
+            thread_total = sum(weights.values())
+            thread_entry["per_source"][source_label] = {
+                "event_count": summary.get("event_count", 0.0),
+                "top_symbols": _top_weighted_items(weights, top_n=top_n, total=thread_total),
+                "symbol_weights": dict(weights),
+            }
+
+    event_totals = {summary["source"]: summary["event_total"] for summary in summaries}
+    min_source = min(event_totals, key=event_totals.get)
+    max_source = max(event_totals, key=event_totals.get)
+    event_total_range = {
+        "min": event_totals[min_source],
+        "max": event_totals[max_source],
+        "delta": event_totals[max_source] - event_totals[min_source],
+        "min_source": min_source,
+        "max_source": max_source,
+    }
+
+    symbol_sources: dict[str, dict[str, float]] = {}
+    for source, weights in symbol_weights_by_source.items():
+        for symbol, weight in weights.items():
+            symbol_sources.setdefault(symbol, {})[source] = weight
+
+    symbol_spreads: list[dict[str, Any]] = []
+    for symbol, weights in symbol_sources.items():
+        for source in symbol_weights_by_source:
+            weights.setdefault(source, 0.0)
+        max_source_symbol = max(weights, key=weights.get)
+        min_source_symbol = min(weights, key=weights.get)
+        max_weight = weights[max_source_symbol]
+        min_weight = weights[min_source_symbol]
+        ratio = (max_weight / min_weight) if min_weight > 0 else None
+        symbol_spreads.append(
+            {
+                "symbol": symbol,
+                "max_weight": max_weight,
+                "min_weight": min_weight,
+                "max_source": max_source_symbol,
+                "min_source": min_source_symbol,
+                "spread": max_weight - min_weight,
+                "ratio": ratio,
+                "weights": weights,
+            }
+        )
+
+    symbol_spreads.sort(key=lambda entry: entry["spread"], reverse=True)
+    symbol_spreads = symbol_spreads[:top_n]
+
+    thread_spreads: list[dict[str, Any]] = []
+    for thread_key, entry in thread_comparisons.items():
+        per_source = entry.get("per_source", {})
+        symbol_sources: dict[str, dict[str, float]] = {}
+        for source, payload in per_source.items():
+            weights = payload.get("symbol_weights", {})
+            for symbol, weight in weights.items():
+                symbol_sources.setdefault(symbol, {})[source] = weight
+        symbol_spread_entries: list[dict[str, Any]] = []
+        for symbol, weights in symbol_sources.items():
+            for source in per_source:
+                weights.setdefault(source, 0.0)
+            max_source_symbol = max(weights, key=weights.get)
+            min_source_symbol = min(weights, key=weights.get)
+            max_weight = weights[max_source_symbol]
+            min_weight = weights[min_source_symbol]
+            ratio = (max_weight / min_weight) if min_weight > 0 else None
+            symbol_spread_entries.append(
+                {
+                    "symbol": symbol,
+                    "max_weight": max_weight,
+                    "min_weight": min_weight,
+                    "max_source": max_source_symbol,
+                    "min_source": min_source_symbol,
+                    "spread": max_weight - min_weight,
+                    "ratio": ratio,
+                    "weights": weights,
+                }
+            )
+        symbol_spread_entries.sort(key=lambda item: item["spread"], reverse=True)
+        thread_spreads.append(
+            {
+                "tid": entry.get("tid"),
+                "name": entry.get("name", ""),
+                "per_source": {
+                    source: {
+                        "event_count": payload.get("event_count", 0.0),
+                        "top_symbols": payload.get("top_symbols", []),
+                    }
+                    for source, payload in per_source.items()
+                },
+                "symbol_spreads": symbol_spread_entries[:top_n],
+            }
+        )
+
+    thread_spreads.sort(key=lambda item: sum(p.get("event_count", 0.0) for p in item["per_source"].values()), reverse=True)
+
+    return {
+        "source": "flamegraph_comparison",
+        "source_summaries": summaries,
+        "comparison": {
+            "event_total_range": event_total_range,
+            "symbol_spreads": symbol_spreads,
+            "thread_spreads": thread_spreads,
+        },
+    }
+
+
 def _format_evidence_report(
     run_id: str,
     iteration: int,
@@ -179,6 +318,62 @@ def _format_evidence_report(
 
     for insight in trace_insights:
         lines.append(f"## Trace hotspot detail ({insight.get('source', 'trace')})")
+        if insight.get("source") == "flamegraph_comparison":
+            comparison = insight.get("comparison", {})
+            event_total_range = comparison.get("event_total_range", {})
+            lines.append(
+                "Event totals: "
+                f"min={event_total_range.get('min', 0):.2f} ({event_total_range.get('min_source', 'n/a')}), "
+                f"max={event_total_range.get('max', 0):.2f} ({event_total_range.get('max_source', 'n/a')}), "
+                f"delta={event_total_range.get('delta', 0):.2f}"
+            )
+            lines.append("- Per-source summaries:")
+            for summary in insight.get("source_summaries", []):
+                lines.append(
+                    f"  - {summary.get('source')}: events={summary.get('event_total', 0):.2f} "
+                    f"processes={summary.get('process_count', 0)} threads={summary.get('thread_count', 0)} "
+                    f"samples={summary.get('sample_count_total', 0)}"
+                )
+            lines.append("- Top symbol spreads:")
+            for entry in comparison.get("symbol_spreads", []):
+                ratio = entry.get("ratio")
+                ratio_text = f"{ratio:.2f}x" if isinstance(ratio, float) else "n/a"
+                lines.append(
+                    f"  - {entry.get('symbol')}: "
+                    f"max={entry.get('max_weight', 0):.2f} ({entry.get('max_source')}), "
+                    f"min={entry.get('min_weight', 0):.2f} ({entry.get('min_source')}), "
+                    f"spread={entry.get('spread', 0):.2f}, ratio={ratio_text}"
+                )
+            lines.append("- Per-thread symbol comparison:")
+            for thread_entry in comparison.get("thread_spreads", []):
+                thread_label = thread_entry.get("name") or thread_entry.get("tid")
+                if thread_entry.get("name") and thread_entry.get("tid") is not None:
+                    thread_label = f"{thread_entry.get('name')} (tid {thread_entry.get('tid')})"
+                lines.append(f"  - {thread_label}:")
+                for source, payload in (thread_entry.get("per_source", {}) or {}).items():
+                    lines.append(
+                        f"    - {source}: events={payload.get('event_count', 0.0):.2f}"
+                    )
+                    for item in payload.get("top_symbols", []):
+                        ratio = item.get("ratio")
+                        ratio_text = f" ({ratio:.2%})" if isinstance(ratio, float) else ""
+                        lines.append(
+                            f"      - {item.get('name')}: {item.get('weight', 0.0):.2f}{ratio_text}"
+                        )
+                spreads = thread_entry.get("symbol_spreads", [])
+                if spreads:
+                    lines.append("    - Top symbol spreads:")
+                    for entry in spreads:
+                        ratio = entry.get("ratio")
+                        ratio_text = f"{ratio:.2f}x" if isinstance(ratio, float) else "n/a"
+                        lines.append(
+                            f"      - {entry.get('symbol')}: "
+                            f"max={entry.get('max_weight', 0):.2f} ({entry.get('max_source')}), "
+                            f"min={entry.get('min_weight', 0):.2f} ({entry.get('min_source')}), "
+                            f"spread={entry.get('spread', 0):.2f}, ratio={ratio_text}"
+                        )
+            continue
+
         lines.append(f"Total events: {insight.get('event_total', 0)}")
 
         def _emit_list(title: str, items: list[dict[str, Any]], key: str = "name") -> None:
@@ -507,6 +702,9 @@ def _profile_and_analyze(services: PipelineServices, state: RunState, label: str
             state.setdefault("trace_insights", []).append(
                 _flamegraph_trace_insight(fg, top_n=20)
             )
+        comparison = _flamegraph_comparison_insight(fg_results, top_n=10)
+        if comparison:
+            state.setdefault("trace_insights", []).append(comparison)
     if "hitrace" in profile_result.artifacts:
         ht = parse_hitrace(profile_result.artifacts["hitrace"])
         metrics.extend(ht.to_metrics())
@@ -896,10 +1094,27 @@ def run_artifact_analysis(
     for item in artifacts:
         kind = item.get("kind")
         path = Path(item.get("path"))
-        art = services.ctx.artifact_store.store_file(
-            path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
-        )
+        if path.is_dir() and kind != "flamegraph":
+            logger.warning("Skipping directory artifact (unsupported kind=%s): %s", kind, path)
+            continue
         if kind == "flamegraph":
+            if path.is_dir():
+                html_files = sorted(path.rglob("*__sysmgr_hiperfReport.html"))
+                if html_files:
+                    for html_file in html_files:
+                        services.ctx.artifact_store.store_file(
+                            html_file,
+                            kind=kind,
+                            run_id=state["run_id"],
+                            session=services.ctx.session,
+                            metadata={"source_dir": str(path)},
+                        )
+                else:
+                    logger.warning("Flamegraph directory had no report HTML: %s", path)
+            else:
+                services.ctx.artifact_store.store_file(
+                    path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+                )
             fg_results = parse_flamegraph(path)
             for fg in fg_results:
                 metrics.extend(fg.to_metrics())
@@ -918,19 +1133,34 @@ def run_artifact_analysis(
                 state.setdefault("trace_insights", []).append(
                     _flamegraph_trace_insight(fg, top_n=20)
                 )
+            comparison = _flamegraph_comparison_insight(fg_results, top_n=10)
+            if comparison:
+                state.setdefault("trace_insights", []).append(comparison)
         elif kind == "hitrace":
+            services.ctx.artifact_store.store_file(
+                path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+            )
             ht = parse_hitrace(path)
             metrics.extend(ht.to_metrics())
         elif kind == "sysfs":
+            services.ctx.artifact_store.store_file(
+                path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+            )
             st = parse_sysfs_trace(path)
             metrics.extend(st.to_metrics())
         elif kind == "hiperf":
+            services.ctx.artifact_store.store_file(
+                path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+            )
             hp = parse_hiperf(path)
             hs = rank_hotspots(hp.hotspot_costs, hp.edge_costs, top_n=15)
             if services.psg:
                 hs = align_hotspots_to_psg(hs, services.psg)
             hotspots.extend(hs)
         else:
+            services.ctx.artifact_store.store_file(
+                path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+            )
             logger.info("Stored artifact with no parser: %s", kind)
 
     if hotspots:
