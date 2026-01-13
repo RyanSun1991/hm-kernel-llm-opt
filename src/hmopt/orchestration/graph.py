@@ -30,6 +30,7 @@ from hmopt.analysis.runtime.traces import (
     parse_sysfs_trace,
 )
 from hmopt.analysis.static import build_psg, index_repo
+from hmopt.analysis.static.psg import PsgEdge, PsgGraph, PsgNode
 from hmopt.core.config import AppConfig
 from hmopt.core.llm import LLMClient
 from hmopt.core.run_context import RunContext, build_context, register_run
@@ -286,6 +287,30 @@ def _flamegraph_comparison_insight(results: list, *, top_n: int = 10) -> dict[st
             "thread_spreads": thread_spreads,
         },
     }
+
+
+def _load_psg_from_artifact(services: PipelineServices, artifact_id: str) -> PsgGraph | None:
+    artifact = (
+        services.ctx.session.query(models.Artifact)
+        .filter(models.Artifact.artifact_id == artifact_id)
+        .one_or_none()
+    )
+    if not artifact:
+        logger.warning("PSG artifact not found: %s", artifact_id)
+        return None
+    path = services.ctx.artifact_store.resolve_path(artifact)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to load PSG artifact %s: %s", artifact_id, exc)
+        return None
+    try:
+        nodes = {name: PsgNode(**node) for name, node in (payload.get("nodes") or {}).items()}
+        edges = [PsgEdge(**edge) for edge in (payload.get("edges") or [])]
+    except (TypeError, ValueError) as exc:
+        logger.warning("Invalid PSG payload in artifact %s: %s", artifact_id, exc)
+        return None
+    return PsgGraph(nodes=nodes, edges=edges)
 
 
 def _format_evidence_report(
@@ -1074,19 +1099,51 @@ def run_artifact_analysis(
     state["snapshot_artifact_id"] = snapshot_art.artifact_id
 
     logger.info("Artifact analysis: ingest %d artifacts", len(artifacts))
-    symbols = index_repo(config.project.repo_path)
-    services.psg = build_psg(symbols)
-    psg_art = services.ctx.artifact_store.store_text(
-        services.psg.to_json(), kind="psg", run_id=state["run_id"], extension=".json", session=services.ctx.session
-    )
-    graph_row = models.Graph(
-        run_id=state["run_id"],
-        kind="psg",
-        format="json",
-        payload_artifact_id=psg_art.artifact_id,
-        metadata_json={"nodes": len(services.psg.nodes), "edges": len(services.psg.edges)},
-    )
-    services.ctx.session.add(graph_row)
+    repo_rev = repo_state.get("commit")
+    repo_dirty = bool(repo_state.get("dirty"))
+    reused_psg = False
+    if repo_rev:
+        existing_graph = (
+            services.ctx.session.query(models.Graph)
+            .join(models.Run, models.Graph.run_id == models.Run.run_id)
+            .filter(
+                models.Graph.kind == "psg",
+                models.Run.repo_rev == repo_rev,
+                models.Run.repo_dirty == repo_dirty,
+                models.Run.run_id != state["run_id"],
+            )
+            .order_by(models.Run.created_at.desc())
+            .first()
+        )
+        if existing_graph:
+            loaded_psg = _load_psg_from_artifact(services, existing_graph.payload_artifact_id)
+            if loaded_psg:
+                services.psg = loaded_psg
+                graph_row = models.Graph(
+                    run_id=state["run_id"],
+                    kind="psg",
+                    format="json",
+                    payload_artifact_id=existing_graph.payload_artifact_id,
+                    metadata_json=existing_graph.metadata_json,
+                )
+                services.ctx.session.add(graph_row)
+                reused_psg = True
+                logger.info("Reused PSG from run %s", existing_graph.run_id)
+
+    if not reused_psg:
+        symbols = index_repo(config.project.repo_path)
+        services.psg = build_psg(symbols)
+        psg_art = services.ctx.artifact_store.store_text(
+            services.psg.to_json(), kind="psg", run_id=state["run_id"], extension=".json", session=services.ctx.session
+        )
+        graph_row = models.Graph(
+            run_id=state["run_id"],
+            kind="psg",
+            format="json",
+            payload_artifact_id=psg_art.artifact_id,
+            metadata_json={"nodes": len(services.psg.nodes), "edges": len(services.psg.edges)},
+        )
+        services.ctx.session.add(graph_row)
 
     metrics: list[Metric] = []
     hotspots: list[HotspotCandidate] = []
