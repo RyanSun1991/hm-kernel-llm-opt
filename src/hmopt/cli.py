@@ -11,6 +11,7 @@ import typer
 
 from hmopt.core.config import AppConfig
 from hmopt.orchestration import run_artifact_analysis, run_pipeline
+from hmopt.indexing import build_kernel_index, build_runtime_index, route_query
 from hmopt.storage.artifact_store import ArtifactStore
 from hmopt.storage.db.engine import init_engine
 from hmopt.storage.db import models
@@ -139,6 +140,54 @@ def analyze_artifacts(
         run_profile=with_profile,
     )
     typer.echo(f"Artifact analysis complete. run_id={run_id}")
+
+
+@app.command()
+def index_kernel(
+    config: str = typer.Option("configs/app.yaml", help="Config YAML"),
+    repo_path: Optional[str] = typer.Option(None, help="Override repo path for this run"),
+    compile_commands_dir: Optional[str] = typer.Option(
+        None, help="Directory containing compile_commands.json"
+    ),
+) -> None:
+    # Demo: python -m hmopt.cli index-kernel --repo-path /path/to/hm-verif-kernel \
+    #          --compile-commands-dir /path/to/hm-verif-kernel
+    # Purpose: build kernel code ingestion + LlamaIndex index (clangd preferred).
+    logging.basicConfig(level=logging.INFO)
+    cfg = _load_config(config)
+    if repo_path:
+        cfg.project.repo_path = repo_path
+    if compile_commands_dir:
+        cfg.indexing.clangd.compile_commands_dir = Path(compile_commands_dir)
+    build_kernel_index(cfg, repo_path=cfg.project.repo_path)
+    typer.echo("Kernel code index built")
+
+
+@app.command()
+def index_runtime(
+    run_id: str = typer.Argument(..., help="Run ID to index runtime data"),
+    config: str = typer.Option("configs/app.yaml", help="Config YAML"),
+) -> None:
+    # Demo: python -m hmopt.cli index-runtime <run_id>
+    # Purpose: build runtime metrics/hotspots index for a run.
+    logging.basicConfig(level=logging.INFO)
+    cfg = _load_config(config)
+    build_runtime_index(cfg, run_id)
+    typer.echo(f"Runtime index built for run_id={run_id}")
+
+
+@app.command()
+def query(
+    query_str: str = typer.Argument(..., help="Query to run against indexes"),
+    mode: str = typer.Option("auto", help="auto|code|runtime"),
+    config: str = typer.Option("configs/app.yaml", help="Config YAML"),
+) -> None:
+    # Demo: python -m hmopt.cli query "Which function is hot?" --mode runtime
+    # Purpose: query routing across code/runtime indexes.
+    logging.basicConfig(level=logging.INFO)
+    cfg = _load_config(config)
+    response = route_query(cfg, query_str, mode=mode)
+    typer.echo(response)
 
 
 if __name__ == "__main__":

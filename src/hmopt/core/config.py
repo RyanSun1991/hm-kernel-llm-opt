@@ -65,12 +65,69 @@ class WorkloadConfig(BaseModel):
     objectives: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class Neo4jConfig(BaseModel):
+    enabled: bool = False
+    uri: str = "bolt://localhost:7687"
+    user: str = "neo4j"
+    password: Optional[str] = Field(default_factory=lambda: os.getenv("NEO4J_PASSWORD"))
+    database: str = "neo4j"
+
+
+class ClangdConfig(BaseModel):
+    enabled: bool = True
+    binary: str = "clangd"
+    compile_commands_dir: Optional[Path] = None
+    extra_args: list[str] = Field(default_factory=list)
+    timeout_sec: int = 10
+    max_files: int = 5000
+    symbol_kinds: list[str] = Field(
+        default_factory=lambda: [
+            "function",
+            "method",
+            "constructor",
+            "class",
+            "struct",
+            "enum",
+            "enum_member",
+            "interface",
+            "type_parameter",
+            "variable",
+            "constant",
+            "field",
+            "property",
+        ]
+    )
+    call_hierarchy_enabled: bool = True
+    call_hierarchy_max_functions: int = 2000
+    call_hierarchy_max_calls: int = 100
+    call_hierarchy_max_depth: int = 1
+    usage_scan_enabled: bool = True
+    usage_scan_max_names: int = 2000
+    relation_max_per_symbol: int = 200
+    file_summary_enabled: bool = True
+    relation_summary_enabled: bool = True
+    relation_summary_max_items: int = 50
+
+
+class IndexingConfig(BaseModel):
+    enabled: bool = True
+    persist_dir: Path = Path("data/llamaindex")
+    llm_enrich: bool = False
+    llm_enrich_limit: int = 50
+    hotspot_top_k: int = 20
+    hotspot_min_ratio: float = 0.001
+    hotspot_min_abs: float = 10.0
+    neo4j: Neo4jConfig = Neo4jConfig()
+    clangd: ClangdConfig = ClangdConfig()
+
+
 class AppConfig(BaseModel):
     project: ProjectConfig
     llm: ModelConfig
     storage: StorageConfig = StorageConfig()
     adapters: AdapterConfig = AdapterConfig()
     workloads: list[WorkloadConfig] = Field(default_factory=list)
+    indexing: IndexingConfig = IndexingConfig()
     iterations: int = 2
     profiling_enabled: bool = True
     pipeline: str = "optimize_kernel"
@@ -181,6 +238,69 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
     workloads_cfg = raw.get("workloads", [])
+    indexing_cfg = raw.get("indexing", {})
+
+    neo4j_cfg = indexing_cfg.get("neo4j", {})
+    neo4j_norm = {
+        "enabled": bool(neo4j_cfg.get("enabled", False)),
+        "uri": neo4j_cfg.get("uri", "bolt://localhost:7687"),
+        "user": neo4j_cfg.get("user", "neo4j"),
+        "password": neo4j_cfg.get("password")
+        or (os.getenv(neo4j_cfg.get("password_env")) if neo4j_cfg.get("password_env") else None),
+        "database": neo4j_cfg.get("database", "neo4j"),
+    }
+
+    clangd_cfg = indexing_cfg.get("clangd", {})
+    clangd_norm = {
+        "enabled": clangd_cfg.get("enabled", True),
+        "binary": clangd_cfg.get("binary", "clangd"),
+        "compile_commands_dir": Path(clangd_cfg["compile_commands_dir"])
+        if clangd_cfg.get("compile_commands_dir")
+        else None,
+        "extra_args": clangd_cfg.get("extra_args", []),
+        "timeout_sec": int(clangd_cfg.get("timeout_sec", 10)),
+        "max_files": int(clangd_cfg.get("max_files", 5000)),
+        "symbol_kinds": clangd_cfg.get(
+            "symbol_kinds",
+            [
+                "function",
+                "method",
+                "constructor",
+                "class",
+                "struct",
+                "enum",
+                "enum_member",
+                "interface",
+                "type_parameter",
+                "variable",
+                "constant",
+                "field",
+                "property",
+            ],
+        ),
+        "call_hierarchy_enabled": bool(clangd_cfg.get("call_hierarchy_enabled", True)),
+        "call_hierarchy_max_functions": int(clangd_cfg.get("call_hierarchy_max_functions", 2000)),
+        "call_hierarchy_max_calls": int(clangd_cfg.get("call_hierarchy_max_calls", 100)),
+        "call_hierarchy_max_depth": int(clangd_cfg.get("call_hierarchy_max_depth", 1)),
+        "usage_scan_enabled": bool(clangd_cfg.get("usage_scan_enabled", True)),
+        "usage_scan_max_names": int(clangd_cfg.get("usage_scan_max_names", 2000)),
+        "relation_max_per_symbol": int(clangd_cfg.get("relation_max_per_symbol", 200)),
+        "file_summary_enabled": bool(clangd_cfg.get("file_summary_enabled", True)),
+        "relation_summary_enabled": bool(clangd_cfg.get("relation_summary_enabled", True)),
+        "relation_summary_max_items": int(clangd_cfg.get("relation_summary_max_items", 50)),
+    }
+
+    indexing_norm = {
+        "enabled": indexing_cfg.get("enabled", True),
+        "persist_dir": Path(indexing_cfg.get("persist_dir", "data/llamaindex")),
+        "llm_enrich": indexing_cfg.get("llm_enrich", False),
+        "llm_enrich_limit": int(indexing_cfg.get("llm_enrich_limit", 50)),
+        "hotspot_top_k": int(indexing_cfg.get("hotspot_top_k", 20)),
+        "hotspot_min_ratio": float(indexing_cfg.get("hotspot_min_ratio", 0.001)),
+        "hotspot_min_abs": float(indexing_cfg.get("hotspot_min_abs", 10.0)),
+        "neo4j": neo4j_norm,
+        "clangd": clangd_norm,
+    }
 
     return {
         "project": project_cfg,
@@ -188,6 +308,7 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "storage": storage_norm,
         "adapters": adapters_norm,
         "workloads": workloads_cfg,
+        "indexing": indexing_norm,
         "iterations": raw.get("iterations", raw.get("max_iterations", 2)),
         "profiling_enabled": raw.get("profiling", {}).get("enabled", True),
         "pipeline": raw.get("pipelines", {}).get("default", raw.get("pipeline", "optimize_kernel")),

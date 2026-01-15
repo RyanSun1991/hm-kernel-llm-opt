@@ -32,3 +32,49 @@ profiling:
 
 pipelines:
   default: optimize_kernel
+
+indexing:
+  enabled: true
+  persist_dir: data/llamaindex
+  llm_enrich: false
+  llm_enrich_limit: 50
+  hotspot_top_k: 20
+  hotspot_min_ratio: 0.001
+  hotspot_min_abs: 10.0
+  clangd:
+    enabled: true
+    binary: clangd
+    compile_commands_dir: /path/to/hm-verif-kernel
+    extra_args: []
+    timeout_sec: 10
+    max_files: 5000
+    symbol_kinds:
+      - function
+      - method
+      - constructor
+      - class
+      - struct
+      - enum
+      - enum_member
+      - interface
+      - type_parameter
+      - variable
+      - constant
+      - field
+      - property
+    call_hierarchy_enabled: true
+    call_hierarchy_max_functions: 2000
+    call_hierarchy_max_calls: 100
+    call_hierarchy_max_depth: 1
+    usage_scan_enabled: true
+    usage_scan_max_names: 2000
+    relation_max_per_symbol: 200
+    file_summary_enabled: true
+    relation_summary_enabled: true
+    relation_summary_max_items: 50
+  neo4j:
+    enabled: false
+    uri: bolt://localhost:7687
+    user: neo4j
+    password_env: NEO4J_PASSWORD
+    database: neo4j

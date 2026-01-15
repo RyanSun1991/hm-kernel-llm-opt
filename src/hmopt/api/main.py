@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from hmopt.core.config import AppConfig
 from hmopt.evaluation.reports import render_report
 from hmopt.orchestration import run_artifact_analysis, run_pipeline
+from hmopt.indexing import route_query
 from hmopt.storage.db import models
 from hmopt.storage.db.engine import init_engine, session_scope
 
@@ -121,6 +122,18 @@ def analyze_artifacts(payload: dict, background_tasks: BackgroundTasks) -> dict:
         cfg.project.repo_path = repo_path
     run_id = run_artifact_analysis(cfg, artifacts)
     return {"status": "completed", "run_id": run_id}
+
+
+@app.post("/query")
+def query_indexes(payload: dict) -> dict:
+    """Query routed across code/runtime indexes."""
+    query_str = payload.get("query", "")
+    mode = payload.get("mode", "auto")
+    if not query_str:
+        raise HTTPException(status_code=400, detail="query is required")
+    cfg = AppConfig.from_yaml(CONFIG_PATH)
+    response = route_query(cfg, query_str, mode=mode)
+    return {"mode": mode, "response": response}
 
 
 @app.get("/runs/{run_id}/report")

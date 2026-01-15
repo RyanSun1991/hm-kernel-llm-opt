@@ -710,23 +710,25 @@ def _profile_and_analyze(services: PipelineServices, state: RunState, label: str
     hotspots: list[HotspotCandidate] = []
     if "flamegraph" in profile_result.artifacts:
         fg_results = parse_flamegraph(profile_result.artifacts["flamegraph"])
+        fg_hotspots_all: list[HotspotCandidate] = []
         for fg in fg_results:
             metrics.extend(fg.to_metrics())
             _store_flamegraph_maps(services, run_id, fg, profile_result.artifacts["flamegraph"])
             if fg.symbol_counts:
                 fg_hotspots = _hotspots_from_symbol_counts(
                     fg.symbol_counts,
-                    top_n=20,
-                    min_ratio=0.001,
-                    min_abs=10.0,
+                    top_n=services.config.indexing.hotspot_top_k,
+                    min_ratio=services.config.indexing.hotspot_min_ratio,
+                    min_abs=services.config.indexing.hotspot_min_abs,
                     total=fg.event_count_total,
                 )
                 if services.psg:
                     fg_hotspots = align_hotspots_to_psg(fg_hotspots, services.psg)
-                hotspots.extend(fg_hotspots)
+                fg_hotspots_all.extend(fg_hotspots)
             state.setdefault("trace_insights", []).append(
                 _flamegraph_trace_insight(fg, top_n=20)
             )
+        hotspots.extend(fg_hotspots_all)
         comparison = _flamegraph_comparison_insight(fg_results, top_n=10)
         if comparison:
             state.setdefault("trace_insights", []).append(comparison)
@@ -1150,6 +1152,8 @@ def run_artifact_analysis(
 
     for item in artifacts:
         kind = item.get("kind")
+        if kind == "framegraph":
+            kind = "flamegraph"
         path = Path(item.get("path"))
         if path.is_dir() and kind != "flamegraph":
             logger.warning("Skipping directory artifact (unsupported kind=%s): %s", kind, path)
@@ -1173,23 +1177,25 @@ def run_artifact_analysis(
                     path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
                 )
             fg_results = parse_flamegraph(path)
+            fg_hotspots_all: list[HotspotCandidate] = []
             for fg in fg_results:
                 metrics.extend(fg.to_metrics())
                 _store_flamegraph_maps(services, state["run_id"], fg, path)
                 if fg.symbol_counts:
                     fg_hotspots = _hotspots_from_symbol_counts(
                         fg.symbol_counts,
-                        top_n=20,
-                        min_ratio=0.001,
-                        min_abs=10.0,
+                        top_n=services.config.indexing.hotspot_top_k,
+                        min_ratio=services.config.indexing.hotspot_min_ratio,
+                        min_abs=services.config.indexing.hotspot_min_abs,
                         total=fg.event_count_total,
                     )
                     if services.psg:
                         fg_hotspots = align_hotspots_to_psg(fg_hotspots, services.psg)
-                    hotspots.extend(fg_hotspots)
+                    fg_hotspots_all.extend(fg_hotspots)
                 state.setdefault("trace_insights", []).append(
                     _flamegraph_trace_insight(fg, top_n=20)
                 )
+            hotspots.extend(fg_hotspots_all)
             comparison = _flamegraph_comparison_insight(fg_results, top_n=10)
             if comparison:
                 state.setdefault("trace_insights", []).append(comparison)
