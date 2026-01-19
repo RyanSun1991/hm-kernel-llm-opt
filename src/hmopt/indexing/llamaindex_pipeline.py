@@ -29,10 +29,16 @@ logger = logging.getLogger(__name__)
 
 try:
     from llama_index.graph_stores.neo4j import Neo4jGraphStore
-    from llama_index.vector_stores.neo4j import Neo4jVectorStore
 except ImportError:  # pragma: no cover - optional
     Neo4jGraphStore = None
-    Neo4jVectorStore = None
+
+try:
+    from llama_index.vector_stores.neo4jvector import Neo4jVectorStore
+except ImportError:  # pragma: no cover - optional
+    try:
+        from llama_index.vector_stores.neo4j import Neo4jVectorStore
+    except ImportError:  # pragma: no cover - optional
+        Neo4jVectorStore = None
 
 
 @dataclass
