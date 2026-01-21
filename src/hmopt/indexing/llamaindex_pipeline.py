@@ -14,7 +14,7 @@ from llama_index.core import (
     VectorStoreIndex,
     load_index_from_storage,
 )
-from llama_index.core.indices.property_graph import SchemaLLMPathExtractor
+from llama_index.core.graph_stores.types import EntityNode, Relation
 from llama_index.core.schema import TextNode
 from llama_index.embeddings.openai import OpenAIEmbedding
 from llama_index.llms.openai import OpenAI
@@ -28,9 +28,9 @@ from hmopt.storage.db.engine import init_engine, session_scope
 logger = logging.getLogger(__name__)
 
 try:
-    from llama_index.graph_stores.neo4j import Neo4jGraphStore
+    from llama_index.graph_stores.neo4j.neo4j_property_graph import Neo4jPropertyGraphStore
 except ImportError:  # pragma: no cover - optional
-    Neo4jGraphStore = None
+    Neo4jPropertyGraphStore = None
 
 try:
     from llama_index.vector_stores.neo4jvector import Neo4jVectorStore
@@ -68,8 +68,8 @@ def _build_llama_models(config: AppConfig) -> tuple[OpenAI, OpenAIEmbedding]:
 
 
 def _storage_context(config: AppConfig, persist_dir: Path) -> StorageContext:
-    if config.indexing.neo4j.enabled and Neo4jGraphStore and Neo4jVectorStore:
-        graph_store = Neo4jGraphStore(
+    if config.indexing.neo4j.enabled and Neo4jPropertyGraphStore and Neo4jVectorStore:
+        property_graph_store = Neo4jPropertyGraphStore(
             url=config.indexing.neo4j.uri,
             username=config.indexing.neo4j.user,
             password=config.indexing.neo4j.password,
@@ -83,7 +83,7 @@ def _storage_context(config: AppConfig, persist_dir: Path) -> StorageContext:
         )
         return StorageContext.from_defaults(
             persist_dir=str(persist_dir),
-            graph_store=graph_store,
+            property_graph_store=property_graph_store,
             vector_store=vector_store,
         )
     if config.indexing.neo4j.enabled:
@@ -104,6 +104,7 @@ def _index_to_nodes(index: CodeIndex) -> list[TextNode]:
     for chunk in index.chunks:
         nodes.append(
             TextNode(
+                id_=chunk.symbol_id,
                 text=f"{_code_header(chunk)}\n{chunk.text}",
                 metadata={
                     "type": "code",
@@ -143,6 +144,97 @@ def _index_to_nodes(index: CodeIndex) -> list[TextNode]:
     return nodes
 
 
+def _build_graph_entities(index: CodeIndex) -> tuple[list[EntityNode], list[Relation]]:
+    nodes: dict[str, EntityNode] = {}
+
+    def add_node(
+        *,
+        node_id: str,
+        label: str,
+        symbol_name: str,
+        symbol_kind: str,
+        path: Optional[str] = None,
+        symbol_qualname: Optional[str] = None,
+        start_line: Optional[int] = None,
+        end_line: Optional[int] = None,
+    ) -> None:
+        if node_id in nodes:
+            return
+        properties = {
+            "symbol_name": symbol_name,
+            "symbol_kind": symbol_kind,
+        }
+        if symbol_qualname:
+            properties["symbol_qualname"] = symbol_qualname
+        if path:
+            properties["path"] = path
+        if start_line is not None:
+            properties["start_line"] = start_line
+        if end_line is not None:
+            properties["end_line"] = end_line
+        nodes[node_id] = EntityNode(name=node_id, label=label, properties=properties)
+
+    for chunk in index.chunks:
+        add_node(
+            node_id=chunk.symbol_id,
+            label="symbol",
+            symbol_name=chunk.symbol_name,
+            symbol_kind=chunk.kind,
+            symbol_qualname=chunk.symbol_qualname,
+            path=str(chunk.path),
+            start_line=chunk.start_line,
+            end_line=chunk.end_line,
+        )
+
+    relations: list[Relation] = []
+    for rel in index.relations:
+        add_node(
+            node_id=rel.src_id,
+            label="symbol",
+            symbol_name=rel.src_name,
+            symbol_kind=rel.src_kind,
+            path=rel.src_path,
+        )
+        label = "external" if rel.dst_kind == "external" else "symbol"
+        add_node(
+            node_id=rel.dst_id,
+            label=label,
+            symbol_name=rel.dst_name,
+            symbol_kind=rel.dst_kind,
+            path=rel.dst_path,
+        )
+        relations.append(
+            Relation(
+                label=rel.kind,
+                source_id=rel.src_id,
+                target_id=rel.dst_id,
+                properties={
+                    "src_name": rel.src_name,
+                    "dst_name": rel.dst_name,
+                    "src_kind": rel.src_kind,
+                    "dst_kind": rel.dst_kind,
+                    "src_path": rel.src_path,
+                    "dst_path": rel.dst_path,
+                },
+            )
+        )
+
+    return list(nodes.values()), relations
+
+
+def _upsert_clangd_graph(storage: StorageContext, index: CodeIndex, nodes: list[TextNode]) -> None:
+    graph_store = storage.property_graph_store
+    if not graph_store:
+        logger.warning("Property graph store unavailable; skipping clangd relation upsert")
+        return
+    graph_store.upsert_llama_nodes(nodes)
+    entity_nodes, relations = _build_graph_entities(index)
+    if entity_nodes:
+        graph_store.upsert_nodes(entity_nodes)
+    if relations:
+        graph_store.upsert_relations(relations)
+
+
 def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> IndexPaths:
     paths = _index_paths(config)
     paths.code_dir.mkdir(parents=True, exist_ok=True)
@@ -180,13 +272,8 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
 
     storage = _storage_context(config, paths.code_dir)
     VectorStoreIndex(nodes, storage_context=storage, embed_model=embed)
-    if config.indexing.neo4j.enabled and Neo4jGraphStore:
-        extractor = SchemaLLMPathExtractor(llm=llm)
-        PropertyGraphIndex(
-            nodes,
-            storage_context=storage,
-            kg_extractors=[extractor],
-        )
+    if config.indexing.neo4j.enabled:
+        _upsert_clangd_graph(storage, index, nodes)
     storage.persist(persist_dir=str(paths.code_dir))
     logger.info("Kernel code index built: nodes=%d", len(nodes))
     return paths
@@ -213,18 +300,34 @@ def _load_index(config: AppConfig, persist_dir: Path) -> VectorStoreIndex:
 
 def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
     paths = _index_paths(config)
-    llm, _ = _build_llama_models(config)
+    llm, embed = _build_llama_models(config)
 
     def _engine(dir_path: Path):
         index = _load_index(config, dir_path)
         return index.as_query_engine(llm=llm)
 
+    def _graph_engine(dir_path: Path):
+        storage = _storage_context(config, dir_path)
+        if not storage.property_graph_store:
+            return _engine(dir_path)
+        graph_index = PropertyGraphIndex.from_existing(
+            property_graph_store=storage.property_graph_store,
+            vector_store=storage.vector_store,
+            llm=llm,
+            embed_model=embed,
+            embed_kg_nodes=False,
+            storage_context=storage,
+        )
+        return graph_index.as_query_engine(llm=llm)
+
     if mode == "code":
-        return str(_engine(paths.code_dir).query(query))
+        return str(_graph_engine(paths.code_dir).query(query))
     if mode == "runtime":
         return str(_engine(paths.runtime_dir).query(query))
+    if mode == "graph":
+        return str(_graph_engine(paths.code_dir).query(query))
 
     keywords_runtime = ["perf", "trace", "runtime", "framegraph", "instruction", "hotspot"]
     if any(k in query.lower() for k in keywords_runtime):
         return str(_engine(paths.runtime_dir).query(query))
-    return str(_engine(paths.code_dir).query(query))
+    return str(_graph_engine(paths.code_dir).query(query))
