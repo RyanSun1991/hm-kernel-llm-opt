@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass
@@ -16,8 +17,9 @@ from llama_index.core import (
 )
 from llama_index.core.graph_stores.types import EntityNode, Relation
 from llama_index.core.schema import TextNode
+from llama_index.core.data_structs.data_structs import IndexStructType
 from llama_index.embeddings.openai import OpenAIEmbedding
-from hmopt.indexing.openai_like import OpenAILike
+from hmopt.indexing.openai_like import OpenAILike, OpenAIEmbeddingLike
 
 from hmopt.core.config import AppConfig
 from hmopt.indexing.clangd_client import ClangdConfig as LspClangdConfig
@@ -48,6 +50,12 @@ class IndexPaths:
     runtime_dir: Path
 
 
+@dataclass
+class Neo4jIndexConfig:
+    index_name: str
+    node_label: str
+
+
 def _index_paths(config: AppConfig) -> IndexPaths:
     base = Path(config.indexing.persist_dir)
     return IndexPaths(base_dir=base, code_dir=base / "code", runtime_dir=base / "runtime")
@@ -61,14 +69,111 @@ def _build_llama_models(config: AppConfig) -> tuple[OpenAILike, OpenAIEmbedding]
     if config.llm.base_url:
         os.environ.setdefault("OPENAI_API_BASE", config.llm.base_url)
     llm = OpenAILike(model=config.llm.model, api_key=config.llm.api_key, api_base=config.llm.base_url)
-    embed = OpenAIEmbedding(
+    embed = OpenAIEmbeddingLike(
         model=config.llm.embedding_model, api_key=config.llm.api_key, api_base=config.llm.base_url
     )
     return llm, embed
 
 
-def _storage_context(config: AppConfig, persist_dir: Path) -> StorageContext:
+def _embedding_metadata_path(persist_dir: Path) -> Path:
+    return persist_dir / "embedding_meta.json"
+
+
+def _persist_embedding_metadata(
+    persist_dir: Path,
+    *,
+    model: str,
+    dimension: int,
+    index_name: str,
+    node_label: str,
+    index_id: Optional[str] = None,
+) -> None:
+    metadata_path = _embedding_metadata_path(persist_dir)
+    metadata = {
+        "model": model,
+        "dimension": dimension,
+        "index_name": index_name,
+        "node_label": node_label,
+    }
+    if index_id:
+        metadata["index_id"] = index_id
+    metadata_path.write_text(
+        json.dumps(metadata, indent=2)
+        + "\n"
+    )
+
+
+def _load_embedding_metadata(persist_dir: Path) -> Optional[dict]:
+    metadata_path = _embedding_metadata_path(persist_dir)
+    if not metadata_path.exists():
+        return None
+    try:
+        return json.loads(metadata_path.read_text())
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse embedding metadata at %s", metadata_path)
+        return None
+
+
+def _infer_embedding_dimension(embed: OpenAIEmbedding) -> int:
+    return len(embed.get_text_embedding("dimension probe"))
+
+
+def _ensure_embedding_compat(
+    persist_dir: Path,
+    *,
+    embed_model: str,
+    embed_dim: int,
+    index_name: str,
+    node_label: str,
+    index_id: Optional[str] = None,
+) -> None:
+    metadata = _load_embedding_metadata(persist_dir)
+    if not metadata:
+        logger.warning("Embedding metadata missing for index at %s", persist_dir)
+        return
+    stored_dim = metadata.get("dimension")
+    stored_model = metadata.get("model")
+    stored_index = metadata.get("index_name")
+    stored_label = metadata.get("node_label")
+    stored_index_id = metadata.get("index_id")
+    if stored_dim != embed_dim:
+        raise RuntimeError(
+            "Embedding dimension mismatch for index at "
+            f"{persist_dir}. Stored model={stored_model!r} dim={stored_dim}, "
+            f"current model={embed_model!r} dim={embed_dim}. "
+            "Rebuild the index or drop the Neo4j vector index before querying."
+        )
+    if stored_index and stored_index != index_name:
+        raise RuntimeError(
+            "Neo4j index name mismatch for index at "
+            f"{persist_dir}. Stored index={stored_index!r}, current index={index_name!r}. "
+            "Rebuild the index to match the current configuration."
+        )
+    if stored_label and stored_label != node_label:
+        raise RuntimeError(
+            "Neo4j node label mismatch for index at "
+            f"{persist_dir}. Stored label={stored_label!r}, current label={node_label!r}. "
+            "Rebuild the index to match the current configuration."
+        )
+    if stored_index_id and index_id and stored_index_id != index_id:
+        raise RuntimeError(
+            "Index ID mismatch for index at "
+            f"{persist_dir}. Stored index_id={stored_index_id!r}, current index_id={index_id!r}. "
+            "Rebuild the index to match the current configuration."
+        )
+
+
+def _storage_context(
+    config: AppConfig,
+    persist_dir: Path,
+    *,
+    embedding_dimension: Optional[int] = None,
+    index_name: str = "vector",
+    node_label: str = "Chunk",
+) -> StorageContext:
     if config.indexing.neo4j.enabled and Neo4jPropertyGraphStore and Neo4jVectorStore:
+        if embedding_dimension is None:
+            raise RuntimeError("Embedding dimension is required for Neo4j vector store usage.")
         property_graph_store = Neo4jPropertyGraphStore(
             url=config.indexing.neo4j.uri,
             username=config.indexing.neo4j.user,
@@ -80,6 +185,9 @@ def _storage_context(config: AppConfig, persist_dir: Path) -> StorageContext:
             password=config.indexing.neo4j.password,
             url=config.indexing.neo4j.uri,
             database=config.indexing.neo4j.database,
+            embedding_dimension=embedding_dimension,
+            index_name=index_name,
+            node_label=node_label,
         )
         return StorageContext.from_defaults(
             persist_dir=str(persist_dir),
@@ -89,6 +197,40 @@ def _storage_context(config: AppConfig, persist_dir: Path) -> StorageContext:
     if config.indexing.neo4j.enabled:
         logger.warning("Neo4j stores not available; falling back to local storage")
     return StorageContext.from_defaults(persist_dir=str(persist_dir))
+
+
+def _neo4j_index_config(kind: str) -> Neo4jIndexConfig:
+    if kind == "runtime":
+        return Neo4jIndexConfig(index_name="runtime_vector", node_label="RuntimeChunk")
+    return Neo4jIndexConfig(index_name="code_vector", node_label="CodeChunk")
+
+
+def _reset_neo4j_vector_index(
+    config: AppConfig,
+    *,
+    embedding_dimension: int,
+    index_name: str,
+    node_label: str,
+) -> None:
+    if not (config.indexing.neo4j.enabled and Neo4jVectorStore):
+        return
+    vector_store = Neo4jVectorStore(
+        username=config.indexing.neo4j.user,
+        password=config.indexing.neo4j.password,
+        url=config.indexing.neo4j.uri,
+        database=config.indexing.neo4j.database,
+        embedding_dimension=embedding_dimension,
+        index_name=index_name,
+        node_label=node_label,
+    )
+    try:
+        vector_store.database_query(f'DROP INDEX `{index_name}` IF EXISTS')
+    except Exception as exc:  # pragma: no cover - best effort cleanup
+        logger.warning("Failed to drop Neo4j index %s: %s", index_name, exc)
+    try:
+        vector_store.database_query(f'MATCH (n:`{node_label}`) DETACH DELETE n')
+    except Exception as exc:  # pragma: no cover - best effort cleanup
+        logger.warning("Failed to delete Neo4j nodes for %s: %s", node_label, exc)
 
 
 def _code_header(chunk: CodeChunk) -> str:
@@ -239,6 +381,14 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
     paths = _index_paths(config)
     paths.code_dir.mkdir(parents=True, exist_ok=True)
     llm, embed = _build_llama_models(config)
+    embed_dim = _infer_embedding_dimension(embed)
+    neo4j_cfg = _neo4j_index_config("code")
+    _reset_neo4j_vector_index(
+        config,
+        embedding_dimension=embed_dim,
+        index_name=neo4j_cfg.index_name,
+        node_label=neo4j_cfg.node_label,
+    )
 
     clangd_cfg = LspClangdConfig(
         binary=config.indexing.clangd.binary,
@@ -270,11 +420,25 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
             summary = llm.complete(f"Summarize the following kernel code:\n\n{node.text}")
             node.text = f"// [LLM SUMMARY]\n{summary.text}\n\n{node.text}"
 
-    storage = _storage_context(config, paths.code_dir)
-    VectorStoreIndex(nodes, storage_context=storage, embed_model=embed)
+    storage = _storage_context(
+        config,
+        paths.code_dir,
+        embedding_dimension=embed_dim,
+        index_name=neo4j_cfg.index_name,
+        node_label=neo4j_cfg.node_label,
+    )
+    index = VectorStoreIndex(nodes, storage_context=storage, embed_model=embed)
     if config.indexing.neo4j.enabled:
         _upsert_clangd_graph(storage, index, nodes)
     storage.persist(persist_dir=str(paths.code_dir))
+    _persist_embedding_metadata(
+        paths.code_dir,
+        model=config.llm.embedding_model,
+        dimension=embed_dim,
+        index_name=neo4j_cfg.index_name,
+        node_label=neo4j_cfg.node_label,
+        index_id=index.index_id,
+    )
     logger.info("Kernel code index built: nodes=%d", len(nodes))
     return paths
 
@@ -283,31 +447,118 @@ def build_runtime_index(config: AppConfig, run_id: str) -> IndexPaths:
     paths = _index_paths(config)
     paths.runtime_dir.mkdir(parents=True, exist_ok=True)
     llm, embed = _build_llama_models(config)
+    embed_dim = _infer_embedding_dimension(embed)
+    neo4j_cfg = _neo4j_index_config("runtime")
+    _reset_neo4j_vector_index(
+        config,
+        embedding_dimension=embed_dim,
+        index_name=neo4j_cfg.index_name,
+        node_label=neo4j_cfg.node_label,
+    )
     engine = init_engine(config.storage.db_url, schema_path=Path("src/hmopt/storage/db/schema.sql"))
     with session_scope(engine) as session:
         nodes = build_runtime_nodes(session, run_id)
-    storage = _storage_context(config, paths.runtime_dir)
-    VectorStoreIndex(nodes, storage_context=storage, embed_model=embed)
+    storage = _storage_context(
+        config,
+        paths.runtime_dir,
+        embedding_dimension=embed_dim,
+        index_name=neo4j_cfg.index_name,
+        node_label=neo4j_cfg.node_label,
+    )
+    index = VectorStoreIndex(nodes, storage_context=storage, embed_model=embed)
     storage.persist(persist_dir=str(paths.runtime_dir))
+    _persist_embedding_metadata(
+        paths.runtime_dir,
+        model=config.llm.embedding_model,
+        dimension=embed_dim,
+        index_name=neo4j_cfg.index_name,
+        node_label=neo4j_cfg.node_label,
+        index_id=index.index_id,
+    )
     logger.info("Runtime index built: nodes=%d run_id=%s", len(nodes), run_id)
     return paths
 
 
-def _load_index(config: AppConfig, persist_dir: Path) -> VectorStoreIndex:
-    storage = _storage_context(config, persist_dir)
-    return load_index_from_storage(storage)
+def _load_index(
+    config: AppConfig,
+    persist_dir: Path,
+    *,
+    embedding_dimension: int,
+    index_name: str,
+    node_label: str,
+    embed_model: OpenAIEmbedding,
+) -> VectorStoreIndex:
+    storage = _storage_context(
+        config,
+        persist_dir,
+        embedding_dimension=embedding_dimension,
+        index_name=index_name,
+        node_label=node_label,
+    )
+    metadata = _load_embedding_metadata(persist_dir) or {}
+    index_id = metadata.get("index_id")
+    if index_id:
+        return load_index_from_storage(storage, index_id=index_id, embed_model=embed_model)
+    index_structs = storage.index_store.index_structs()
+    vector_structs = [struct for struct in index_structs if struct.get_type() == IndexStructType.VECTOR_STORE]
+    if len(vector_structs) == 1:
+        return load_index_from_storage(
+            storage,
+            index_id=vector_structs[0].index_id,
+            embed_model=embed_model,
+        )
+    if not index_structs:
+        raise RuntimeError(f"No indexes found in storage at {persist_dir}.")
+    index_ids = ", ".join(struct.index_id for struct in index_structs)
+    raise RuntimeError(
+        "Multiple indexes found in storage and no index_id metadata is available. "
+        f"Persist dir={persist_dir} index_ids=[{index_ids}]. "
+        "Rebuild the index to regenerate metadata or specify index_id explicitly."
+    )
 
 
 def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
     paths = _index_paths(config)
     llm, embed = _build_llama_models(config)
+    embed_dim = _infer_embedding_dimension(embed)
+    code_index_cfg = _neo4j_index_config("code")
+    runtime_index_cfg = _neo4j_index_config("runtime")
 
     def _engine(dir_path: Path):
-        index = _load_index(config, dir_path)
+        index_cfg = runtime_index_cfg if dir_path == paths.runtime_dir else code_index_cfg
+        _ensure_embedding_compat(
+            dir_path,
+            embed_model=config.llm.embedding_model,
+            embed_dim=embed_dim,
+            index_name=index_cfg.index_name,
+            node_label=index_cfg.node_label,
+        )
+        index = _load_index(
+            config,
+            dir_path,
+            embedding_dimension=embed_dim,
+            index_name=index_cfg.index_name,
+            node_label=index_cfg.node_label,
+            embed_model=embed,
+        )
         return index.as_query_engine(llm=llm)
 
     def _graph_engine(dir_path: Path):
-        storage = _storage_context(config, dir_path)
+        index_cfg = code_index_cfg
+        _ensure_embedding_compat(
+            dir_path,
+            embed_model=config.llm.embedding_model,
+            embed_dim=embed_dim,
+            index_name=index_cfg.index_name,
+            node_label=index_cfg.node_label,
+        )
+        storage = _storage_context(
+            config,
+            dir_path,
+            embedding_dimension=embed_dim,
+            index_name=index_cfg.index_name,
+            node_label=index_cfg.node_label,
+        )
         if not storage.property_graph_store:
             return _engine(dir_path)
         graph_index = PropertyGraphIndex.from_existing(
@@ -320,14 +571,25 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
         )
         return graph_index.as_query_engine(llm=llm)
 
+    def _runtime_to_code_query() -> str:
+        runtime_response = _engine(paths.runtime_dir).query(query)
+        combined_query = (
+            "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
+            f"Runtime findings:\n{runtime_response}\n\n"
+            f"Question: {query}"
+        )
+        return str(_graph_engine(paths.code_dir).query(combined_query))
+
     if mode == "code":
         return str(_graph_engine(paths.code_dir).query(query))
     if mode == "runtime":
         return str(_engine(paths.runtime_dir).query(query))
     if mode == "graph":
         return str(_graph_engine(paths.code_dir).query(query))
+    if mode == "runtime_code":
+        return _runtime_to_code_query()
 
     keywords_runtime = ["perf", "trace", "runtime", "framegraph", "instruction", "hotspot"]
     if any(k in query.lower() for k in keywords_runtime):
-        return str(_engine(paths.runtime_dir).query(query))
+        return _runtime_to_code_query()
     return str(_graph_engine(paths.code_dir).query(query))
