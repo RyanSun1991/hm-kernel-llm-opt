@@ -17,7 +17,7 @@ from llama_index.core import (
 from llama_index.core.graph_stores.types import EntityNode, Relation
 from llama_index.core.schema import TextNode
 from llama_index.embeddings.openai import OpenAIEmbedding
-from llama_index.llms.openai import OpenAI
+from hmopt.indexing.openai_like import OpenAILike
 
 from hmopt.core.config import AppConfig
 from hmopt.indexing.clangd_client import ClangdConfig as LspClangdConfig
@@ -53,14 +53,14 @@ def _index_paths(config: AppConfig) -> IndexPaths:
     return IndexPaths(base_dir=base, code_dir=base / "code", runtime_dir=base / "runtime")
 
 
-def _build_llama_models(config: AppConfig) -> tuple[OpenAI, OpenAIEmbedding]:
+def _build_llama_models(config: AppConfig) -> tuple[OpenAILike, OpenAIEmbedding]:
     if not config.llm.api_key:
         raise RuntimeError("LLM API key is required for LlamaIndex indexing")
     if config.llm.api_key:
         os.environ.setdefault("OPENAI_API_KEY", config.llm.api_key)
     if config.llm.base_url:
         os.environ.setdefault("OPENAI_API_BASE", config.llm.base_url)
-    llm = OpenAI(model=config.llm.model, api_key=config.llm.api_key, api_base=config.llm.base_url)
+    llm = OpenAILike(model=config.llm.model, api_key=config.llm.api_key, api_base=config.llm.base_url)
     embed = OpenAIEmbedding(
         model=config.llm.embedding_model, api_key=config.llm.api_key, api_base=config.llm.base_url
     )
