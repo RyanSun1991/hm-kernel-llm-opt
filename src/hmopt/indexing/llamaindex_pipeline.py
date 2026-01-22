@@ -412,12 +412,12 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
         relation_summary_enabled=config.indexing.clangd.relation_summary_enabled,
         relation_summary_max_items=config.indexing.clangd.relation_summary_max_items,
     )
-    index = index_kernel_code(
+    code_index = index_kernel_code(
         Path(repo_path or config.project.repo_path),
         clangd_config=clangd_cfg if config.indexing.clangd.enabled else None,
         max_files=config.indexing.clangd.max_files,
     )
-    nodes = _index_to_nodes(index)
+    nodes = _index_to_nodes(code_index)
 
     if config.indexing.llm_enrich:
         limit = min(config.indexing.llm_enrich_limit, len(nodes))
@@ -432,9 +432,9 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
         index_name=neo4j_cfg.index_name,
         node_label=neo4j_cfg.node_label,
     )
-    index = VectorStoreIndex(nodes, storage_context=storage, embed_model=embed)
+    vector_index = VectorStoreIndex(nodes, storage_context=storage, embed_model=embed)
     if config.indexing.neo4j.enabled:
-        _upsert_clangd_graph(storage, index, nodes)
+        _upsert_clangd_graph(storage, code_index, nodes)
     storage.persist(persist_dir=str(paths.code_dir))
     _persist_embedding_metadata(
         paths.code_dir,
@@ -442,7 +442,7 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
         dimension=embed_dim,
         index_name=neo4j_cfg.index_name,
         node_label=neo4j_cfg.node_label,
-        index_id=index.index_id,
+        index_id=vector_index.index_id,
     )
     logger.info("Kernel code index built: nodes=%d", len(nodes))
     return paths
