@@ -43,6 +43,9 @@ indexing:
   hotspot_top_k: 20
   hotspot_min_ratio: 0.001
   hotspot_min_abs: 10.0
+  query_code_top_k: 10
+  query_runtime_top_k: 10
+  query_graph_top_k: 3
   clangd:
     enabled: true
     binary: clangd
