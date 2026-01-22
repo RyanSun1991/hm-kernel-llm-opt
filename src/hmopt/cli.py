@@ -17,6 +17,7 @@ from hmopt.storage.db.engine import init_engine
 from hmopt.storage.db import models
 from hmopt.storage.db.engine import session_scope
 from hmopt.core.config import load_yaml, normalize_raw_config
+from hmopt.models.hiperf_report import HiperfReport, Frame
 
 app = typer.Typer(help="HM-VERIF kernel optimization platform")
 
@@ -93,11 +94,19 @@ def report(
             raise typer.Exit(code=1)
         metrics = session.query(models.Metric).filter(models.Metric.run_id == run_id).all()
         hotspots = session.query(models.Hotspot).filter(models.Hotspot.run_id == run_id).all()
+        # graph = session.query(models.Graph).filter(models.Graph.run_id == run_id).all()
+        # patch = session.query(models.Patch).filter(models.Patch.run_id == run_id).all()
+        # agentMessage = session.query(models.AgentMessage).filter(models.AgentMessage.run_id == run_id).all()
+        # vectorEmbedding = session.query(models.VectorEmbedding).filter(models.VectorEmbedding.run_id == run_id).all()
         summary = {
             "run_id": run_id,
             "status": run.status,
             "metrics": {m.metric_name: m.value for m in metrics},
             "hotspots": [h.symbol for h in hotspots],
+            # "graph": [h.metadata_json for h in graph],
+            # "patch": [h.files_changed_json for h in patch],
+            # "agentMessage": [h.output_artifact_id for h in agentMessage],
+            # "vectorEmbedding": [h.embedding_json for h in vectorEmbedding],
         }
         typer.echo(json.dumps(summary, indent=2))
 
@@ -140,6 +149,10 @@ def analyze_artifacts(
         run_profile=with_profile,
     )
     typer.echo(f"Artifact analysis complete. run_id={run_id}")
+
+
+
+
 
 
 @app.command()
@@ -188,6 +201,7 @@ def query(
     cfg = _load_config(config)
     response = route_query(cfg, query_str, mode=mode)
     typer.echo(response)
+
 
 
 if __name__ == "__main__":
