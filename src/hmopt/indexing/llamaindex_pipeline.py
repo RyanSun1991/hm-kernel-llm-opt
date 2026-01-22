@@ -113,6 +113,14 @@ def _infer_embedding_dimension(embed: OpenAIEmbeddingLike) -> int:
     return len(embed.get_text_embedding("dimension probe"))
 
 
+def _embedding_dimension_for_query(
+    persist_dir: Path, embed: OpenAIEmbeddingLike
+) -> int:
+    metadata = _load_embedding_metadata(persist_dir)
+    if metadata and metadata.get("dimension"):
+        return int(metadata["dimension"])
+    return _infer_embedding_dimension(embed)
+
 def _ensure_embedding_compat(
     persist_dir: Path,
     *,
@@ -416,6 +424,8 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
     if config.indexing.llm_enrich:
         limit = min(config.indexing.llm_enrich_limit, len(nodes))
         for node in nodes[:limit]:
+            if node.metadata.get("type") != "code":
+                continue
             summary = llm.complete(f"Summarize the following kernel code:\n\n{node.text}")
             node.text = f"// [LLM SUMMARY]\n{summary.text}\n\n{node.text}"
 
@@ -517,7 +527,12 @@ def _load_index(
     if index_id:
         return load_index_from_storage(storage, index_id=index_id, embed_model=embed_model)
     index_structs = storage.index_store.index_structs()
-    vector_structs = [struct for struct in index_structs if struct.get_type() == IndexStructType.VECTOR_STORE]
+    vector_structs = []
+    for struct in index_structs:
+        struct_type = struct.get_type()
+        struct_type_value = struct_type.value if hasattr(struct_type, "value") else str(struct_type)
+        if struct_type_value in ("vector_store", "IndexStructType.VECTOR_STORE"):
+            vector_structs.append(struct)
     if len(vector_structs) == 1:
         return load_index_from_storage(storage, index_id=vector_structs[0].index_id, embed_model=embed_model)
     if not index_structs:
@@ -544,12 +559,63 @@ def _docstore_has_nodes(storage: StorageContext) -> bool:
 def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
     paths = _index_paths(config)
     llm, embed = _build_llama_models(config)
-    embed_dim = _infer_embedding_dimension(embed)
     code_index_cfg = _neo4j_index_config("code")
     runtime_index_cfg = _neo4j_index_config("runtime")
+    code_embed_dim = _embedding_dimension_for_query(paths.code_dir, embed)
+    runtime_embed_dim = _embedding_dimension_for_query(paths.runtime_dir, embed)
+
+    def _format_runtime_sources(source_nodes: list) -> str:
+        hotspots = []
+        metrics = []
+        evidence = []
+        for source in source_nodes:
+            metadata = getattr(source.node, "metadata", {}) if hasattr(source, "node") else {}
+            node_type = metadata.get("type")
+            text = getattr(source.node, "text", "")
+            if node_type == "runtime_hotspot":
+                hotspots.append(
+                    {
+                        "symbol": metadata.get("symbol"),
+                        "score": metadata.get("score"),
+                        "file_path": metadata.get("file_path"),
+                        "line_start": metadata.get("line_start"),
+                        "line_end": metadata.get("line_end"),
+                        "text": text,
+                    }
+                )
+            elif node_type == "runtime_metric":
+                metrics.append(
+                    {
+                        "metric_name": metadata.get("metric_name"),
+                        "value": metadata.get("value"),
+                        "unit": metadata.get("unit"),
+                        "text": text,
+                    }
+                )
+            elif node_type == "evidence_pack":
+                evidence.append(text)
+        lines = []
+        if hotspots:
+            lines.append("Top runtime hotspots:")
+            for item in hotspots:
+                lines.append(
+                    f"- {item.get('symbol')} score={item.get('score')} "
+                    f"path={item.get('file_path')} lines={item.get('line_start')}-{item.get('line_end')}"
+                )
+        if metrics:
+            lines.append("Runtime metrics:")
+            for item in metrics:
+                lines.append(
+                    f"- {item.get('metric_name')} value={item.get('value')} unit={item.get('unit')}"
+                )
+        if evidence:
+            lines.append("Runtime evidence excerpt:")
+            lines.extend(evidence[:1])
+        return "\n".join(lines).strip()
 
     def _engine(dir_path: Path):
         index_cfg = runtime_index_cfg if dir_path == paths.runtime_dir else code_index_cfg
+        embed_dim = runtime_embed_dim if dir_path == paths.runtime_dir else code_embed_dim
         _ensure_embedding_compat(
             dir_path,
             embed_model=config.llm.embedding_model,
@@ -565,10 +631,16 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
             node_label=index_cfg.node_label,
             embed_model=embed,
         )
-        return index.as_query_engine(llm=llm, similarity_top_k=10, response_mode="compact")
+        top_k = (
+            config.indexing.query_runtime_top_k
+            if dir_path == paths.runtime_dir
+            else config.indexing.query_code_top_k
+        )
+        return index.as_query_engine(llm=llm, similarity_top_k=top_k, response_mode="compact")
 
     def _graph_engine(dir_path: Path):
         index_cfg = code_index_cfg
+        embed_dim = code_embed_dim
         _ensure_embedding_compat(
             dir_path,
             embed_model=config.llm.embedding_model,
@@ -599,7 +671,11 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
             embed_kg_nodes=False,
             storage_context=storage,
         )
-        return graph_index.as_query_engine(llm=llm, similarity_top_k=3, response_mode="compact")
+        return graph_index.as_query_engine(
+            llm=llm,
+            similarity_top_k=config.indexing.query_graph_top_k,
+            response_mode="compact",
+        )
 
     def _runtime_to_code_query() -> str:
         runtime_response = _engine(paths.runtime_dir).query(query)
@@ -613,7 +689,13 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
     if mode == "code":
         return str(_graph_engine(paths.code_dir).query(query))
     if mode == "runtime":
-        return str(_engine(paths.runtime_dir).query(query))
+        runtime_response = _engine(paths.runtime_dir).query(query)
+        response_text = str(runtime_response).strip()
+        if response_text:
+            return response_text
+        source_nodes = getattr(runtime_response, "source_nodes", []) or []
+        fallback = _format_runtime_sources(source_nodes)
+        return fallback or "No runtime results available."
     if mode == "graph":
         return str(_graph_engine(paths.code_dir).query(query))
     if mode == "runtime_code":

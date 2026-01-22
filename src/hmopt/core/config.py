@@ -114,9 +114,13 @@ class IndexingConfig(BaseModel):
     persist_dir: Path = Path("data/llamaindex")
     llm_enrich: bool = False
     llm_enrich_limit: int = 50
+    runtime_evidence_max_chars: int = 20000
     hotspot_top_k: int = 20
     hotspot_min_ratio: float = 0.001
     hotspot_min_abs: float = 10.0
+    query_code_top_k: int = 10
+    query_runtime_top_k: int = 10
+    query_graph_top_k: int = 3
     neo4j: Neo4jConfig = Neo4jConfig()
     clangd: ClangdConfig = ClangdConfig()
 
@@ -295,9 +299,13 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "persist_dir": Path(indexing_cfg.get("persist_dir", "data/llamaindex")),
         "llm_enrich": indexing_cfg.get("llm_enrich", False),
         "llm_enrich_limit": int(indexing_cfg.get("llm_enrich_limit", 50)),
+        "runtime_evidence_max_chars": int(indexing_cfg.get("runtime_evidence_max_chars", 20000)),
         "hotspot_top_k": int(indexing_cfg.get("hotspot_top_k", 20)),
         "hotspot_min_ratio": float(indexing_cfg.get("hotspot_min_ratio", 0.001)),
         "hotspot_min_abs": float(indexing_cfg.get("hotspot_min_abs", 10.0)),
+        "query_code_top_k": int(indexing_cfg.get("query_code_top_k", 10)),
+        "query_runtime_top_k": int(indexing_cfg.get("query_runtime_top_k", 10)),
+        "query_graph_top_k": int(indexing_cfg.get("query_graph_top_k", 3)),
         "neo4j": neo4j_norm,
         "clangd": clangd_norm,
     }
