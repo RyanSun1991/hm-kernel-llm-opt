@@ -17,31 +17,22 @@ from llama_index.core import (
 )
 from llama_index.core.graph_stores.types import EntityNode, Relation
 from llama_index.core.schema import TextNode
-from llama_index.core.data_structs.data_structs import IndexStructType
 from llama_index.embeddings.openai import OpenAIEmbedding
-from hmopt.indexing.openai_like import OpenAILike, OpenAIEmbeddingLike
+from llama_index.llms.openai import OpenAI
+from hmopt.indexing.openai_like import OpenAILike,OpenAIEmbeddingLike
 
+# from hmopt.indexing.llama_embeddings import OpenAICompatEmbedding
 from hmopt.core.config import AppConfig
 from hmopt.indexing.clangd_client import ClangdConfig as LspClangdConfig
 from hmopt.indexing.clangd_indexer import CodeIndex, CodeChunk, index_kernel_code
 from hmopt.indexing.runtime_ingestion import build_runtime_nodes
 from hmopt.storage.db.engine import init_engine, session_scope
 
+
+from llama_index.graph_stores.neo4j.neo4j_property_graph import Neo4jPropertyGraphStore
+from llama_index.vector_stores.neo4jvector import Neo4jVectorStore
+
 logger = logging.getLogger(__name__)
-
-try:
-    from llama_index.graph_stores.neo4j.neo4j_property_graph import Neo4jPropertyGraphStore
-except ImportError:  # pragma: no cover - optional
-    Neo4jPropertyGraphStore = None
-
-try:
-    from llama_index.vector_stores.neo4jvector import Neo4jVectorStore
-except ImportError:  # pragma: no cover - optional
-    try:
-        from llama_index.vector_stores.neo4j import Neo4jVectorStore
-    except ImportError:  # pragma: no cover - optional
-        Neo4jVectorStore = None
-
 
 @dataclass
 class IndexPaths:
@@ -49,36 +40,35 @@ class IndexPaths:
     code_dir: Path
     runtime_dir: Path
 
-
 @dataclass
 class Neo4jIndexConfig:
     index_name: str
     node_label: str
-
 
 def _index_paths(config: AppConfig) -> IndexPaths:
     base = Path(config.indexing.persist_dir)
     return IndexPaths(base_dir=base, code_dir=base / "code", runtime_dir=base / "runtime")
 
 
-def _build_llama_models(config: AppConfig) -> tuple[OpenAILike, OpenAIEmbedding]:
+def _build_llama_models(config: AppConfig) -> tuple[OpenAILike, OpenAIEmbeddingLike]:
     if not config.llm.api_key:
         raise RuntimeError("LLM API key is required for LlamaIndex indexing")
     if config.llm.api_key:
         os.environ.setdefault("OPENAI_API_KEY", config.llm.api_key)
     if config.llm.base_url:
         os.environ.setdefault("OPENAI_API_BASE", config.llm.base_url)
-    llm = OpenAILike(
-        model=config.llm.model,
-        api_key=config.llm.api_key,
-        api_base=config.llm.base_url,
-        max_tokens=512,
-    )
+    llm = OpenAILike(model=config.llm.model,
+                    api_key=config.llm.api_key,
+                    api_base=config.llm.base_url,
+                    timeout = 120,
+                    max_tokens=2048,
+                    temperature=0)
     embed = OpenAIEmbeddingLike(
-        model=config.llm.embedding_model, api_key=config.llm.api_key, api_base=config.llm.base_url
+        model=config.llm.embedding_model,
+        api_base=config.llm.base_url,
+        api_key=config.llm.api_key,
     )
     return llm, embed
-
 
 def _embedding_metadata_path(persist_dir: Path) -> Path:
     return persist_dir / "embedding_meta.json"
@@ -119,7 +109,7 @@ def _load_embedding_metadata(persist_dir: Path) -> Optional[dict]:
         return None
 
 
-def _infer_embedding_dimension(embed: OpenAIEmbedding) -> int:
+def _infer_embedding_dimension(embed: OpenAIEmbeddingLike) -> int:
     return len(embed.get_text_embedding("dimension probe"))
 
 
@@ -168,14 +158,15 @@ def _ensure_embedding_compat(
         )
 
 
+
 def _storage_context(
-    config: AppConfig,
-    persist_dir: Path,
-    *,
-    embedding_dimension: Optional[int] = None,
-    index_name: str = "vector",
-    node_label: str = "Chunk",
-) -> StorageContext:
+            config: AppConfig,
+            persist_dir: Path,
+            *,
+            embedding_dimension: Optional[int] = None,
+            index_name: str = "vector",
+            node_label: str = "Chunk",
+        ) -> StorageContext:
     if config.indexing.neo4j.enabled and Neo4jPropertyGraphStore and Neo4jVectorStore:
         if embedding_dimension is None:
             raise RuntimeError("Embedding dimension is required for Neo4j vector store usage.")
@@ -194,6 +185,8 @@ def _storage_context(
             index_name=index_name,
             node_label=node_label,
         )
+        # if not for_load:
+        #     return StorageContext.from_defaults(property_graph_store=property_graph_store, vector_store=vector_store)
         return StorageContext.from_defaults(
             persist_dir=str(persist_dir),
             property_graph_store=property_graph_store,
@@ -201,6 +194,8 @@ def _storage_context(
         )
     if config.indexing.neo4j.enabled:
         logger.warning("Neo4j stores not available; falling back to local storage")
+    # if not for_load:
+    #     return StorageContext.from_defaults(property_graph_store=property_graph_store, vector_store=vector_store)
     return StorageContext.from_defaults(persist_dir=str(persist_dir))
 
 
@@ -290,7 +285,6 @@ def _index_to_nodes(index: CodeIndex) -> list[TextNode]:
         )
     return nodes
 
-
 def _build_graph_entities(index: CodeIndex) -> tuple[list[EntityNode], list[Relation]]:
     nodes: dict[str, EntityNode] = {}
 
@@ -370,16 +364,16 @@ def _build_graph_entities(index: CodeIndex) -> tuple[list[EntityNode], list[Rela
 
 
 def _upsert_clangd_graph(storage: StorageContext, index: CodeIndex, nodes: list[TextNode]) -> None:
-    graph_store = storage.property_graph_store
-    if not graph_store:
+    property_graph_store = storage.property_graph_store
+    if not property_graph_store:
         logger.warning("Property graph store unavailable; skipping clangd relation upsert")
         return
-    graph_store.upsert_llama_nodes(nodes)
+    property_graph_store.upsert_llama_nodes(nodes)
     entity_nodes, relations = _build_graph_entities(index)
     if entity_nodes:
-        graph_store.upsert_nodes(entity_nodes)
+        property_graph_store.upsert_nodes(entity_nodes)
     if relations:
-        graph_store.upsert_relations(relations)
+        property_graph_store.upsert_relations(relations)
 
 
 def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> IndexPaths:
@@ -462,7 +456,11 @@ def build_runtime_index(config: AppConfig, run_id: str) -> IndexPaths:
     )
     engine = init_engine(config.storage.db_url, schema_path=Path("src/hmopt/storage/db/schema.sql"))
     with session_scope(engine) as session:
-        nodes = build_runtime_nodes(session, run_id)
+        nodes = build_runtime_nodes(
+            session,
+            run_id,
+            max_evidence_chars=config.indexing.runtime_evidence_max_chars,
+        )
     storage = _storage_context(
         config,
         paths.runtime_dir,
@@ -470,7 +468,12 @@ def build_runtime_index(config: AppConfig, run_id: str) -> IndexPaths:
         index_name=neo4j_cfg.index_name,
         node_label=neo4j_cfg.node_label,
     )
-    index = VectorStoreIndex(nodes, storage_context=storage, embed_model=embed)
+    index = VectorStoreIndex(
+        nodes,
+        storage_context=storage,
+        embed_model=embed,
+        store_nodes_override=True,
+    )
     storage.persist(persist_dir=str(paths.runtime_dir))
     _persist_embedding_metadata(
         paths.runtime_dir,
@@ -516,11 +519,7 @@ def _load_index(
     index_structs = storage.index_store.index_structs()
     vector_structs = [struct for struct in index_structs if struct.get_type() == IndexStructType.VECTOR_STORE]
     if len(vector_structs) == 1:
-        return load_index_from_storage(
-            storage,
-            index_id=vector_structs[0].index_id,
-            embed_model=embed_model,
-        )
+        return load_index_from_storage(storage, index_id=vector_structs[0].index_id, embed_model=embed_model)
     if not index_structs:
         raise RuntimeError(f"No indexes found in storage at {persist_dir}.")
     index_ids = ", ".join(struct.index_id for struct in index_structs)
@@ -566,7 +565,7 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
             node_label=index_cfg.node_label,
             embed_model=embed,
         )
-        return index.as_query_engine(llm=llm, similarity_top_k=3, response_mode="compact")
+        return index.as_query_engine(llm=llm, similarity_top_k=10, response_mode="compact")
 
     def _graph_engine(dir_path: Path):
         index_cfg = code_index_cfg
