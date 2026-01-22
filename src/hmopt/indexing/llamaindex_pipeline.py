@@ -68,7 +68,12 @@ def _build_llama_models(config: AppConfig) -> tuple[OpenAILike, OpenAIEmbedding]
         os.environ.setdefault("OPENAI_API_KEY", config.llm.api_key)
     if config.llm.base_url:
         os.environ.setdefault("OPENAI_API_BASE", config.llm.base_url)
-    llm = OpenAILike(model=config.llm.model, api_key=config.llm.api_key, api_base=config.llm.base_url)
+    llm = OpenAILike(
+        model=config.llm.model,
+        api_key=config.llm.api_key,
+        api_base=config.llm.base_url,
+        max_tokens=512,
+    )
     embed = OpenAIEmbeddingLike(
         model=config.llm.embedding_model, api_key=config.llm.api_key, api_base=config.llm.base_url
     )
@@ -495,6 +500,15 @@ def _load_index(
         index_name=index_name,
         node_label=node_label,
     )
+    if config.indexing.neo4j.enabled and storage.vector_store:
+        try:
+            return VectorStoreIndex.from_vector_store(
+                storage.vector_store,
+                storage_context=storage,
+                embed_model=embed_model,
+            )
+        except Exception as exc:
+            logger.warning("Failed to load Neo4j vector store directly: %s", exc)
     metadata = _load_embedding_metadata(persist_dir) or {}
     index_id = metadata.get("index_id")
     if index_id:
@@ -515,6 +529,17 @@ def _load_index(
         f"Persist dir={persist_dir} index_ids=[{index_ids}]. "
         "Rebuild the index to regenerate metadata or specify index_id explicitly."
     )
+
+
+def _docstore_has_nodes(storage: StorageContext) -> bool:
+    docstore = storage.docstore
+    docs = getattr(docstore, "docs", None)
+    if isinstance(docs, dict):
+        return bool(docs)
+    try:
+        return bool(docstore.get_all_document_hashes())
+    except Exception:
+        return False
 
 
 def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
@@ -541,7 +566,7 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
             node_label=index_cfg.node_label,
             embed_model=embed,
         )
-        return index.as_query_engine(llm=llm)
+        return index.as_query_engine(llm=llm, similarity_top_k=3, response_mode="compact")
 
     def _graph_engine(dir_path: Path):
         index_cfg = code_index_cfg
@@ -561,6 +586,12 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
         )
         if not storage.property_graph_store:
             return _engine(dir_path)
+        if config.indexing.neo4j.enabled and not _docstore_has_nodes(storage):
+            logger.warning(
+                "Docstore is empty for %s; falling back to Neo4j vector query engine.",
+                dir_path,
+            )
+            return _engine(dir_path)
         graph_index = PropertyGraphIndex.from_existing(
             property_graph_store=storage.property_graph_store,
             vector_store=storage.vector_store,
@@ -569,7 +600,7 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
             embed_kg_nodes=False,
             storage_context=storage,
         )
-        return graph_index.as_query_engine(llm=llm)
+        return graph_index.as_query_engine(llm=llm, similarity_top_k=3, response_mode="compact")
 
     def _runtime_to_code_query() -> str:
         runtime_response = _engine(paths.runtime_dir).query(query)
