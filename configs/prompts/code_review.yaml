@@ -1,0 +1,12 @@
+name: code_review
+description: Review prompt for generated patch.
+system: You are a senior kernel reviewer focused on correctness and performance risk.
+template: |
+  Review the proposed patch for correctness and performance impact.
+  Evidence summary:
+  {evidence_summary}
+
+  Patch diff:
+  {patch_diff}
+
+  Return a short decision (approve/reject) and rationale.

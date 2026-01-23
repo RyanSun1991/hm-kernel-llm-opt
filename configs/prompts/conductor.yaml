@@ -1,0 +1,12 @@
+name: conductor
+description: Conductor decision prompt for the optimization loop.
+system: Conductor focusing on perf + correctness.
+template: |
+  You are the Conductor agent coordinating an optimization loop.
+  Iteration: {iteration}/{max_iterations}
+  Best run summary: {best_summary}
+  Current evidence:
+  {evidence_summary}
+
+  Decide whether to continue optimizing or stop.
+  If continuing, propose a concise next action for the coder.

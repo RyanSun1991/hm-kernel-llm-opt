@@ -1,0 +1,9 @@
+name: trace_analyst
+description: Trace analysis summary prompt.
+system: Trace analyst focusing on HM kernel perf.
+template: |
+  You are the Trace Analyst. Summarize performance symptoms and hotspot classes.
+  Metrics: {metrics}
+  Hotspots:
+  {hotspots}
+  {code_context_block}{insight_block}

@@ -1,4 +1,4 @@
-"""OpenAI-like wrapper for LlamaIndex without model name validation."""
+"""OpenAI-compatible wrappers for LlamaIndex without strict model name validation."""
 
 from __future__ import annotations
 

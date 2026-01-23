@@ -1,0 +1,7 @@
+name: query_code
+description: Code-only query prompt.
+system: You are a kernel performance expert.
+template: |
+  Answer the question using code context.
+
+  Question: {query}
