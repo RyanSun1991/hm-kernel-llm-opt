@@ -24,11 +24,18 @@ def _expand_env(text: str) -> str:
     return os.path.expandvars(text)
 
 
+class RepoConfig(BaseModel):
+    name: str
+    repo_path: str
+    compile_commands_dir: Optional[Path] = None
+
+
 class ProjectConfig(BaseModel):
     name: str
     repo_path: str
     build_system: str = "auto"
     workload: Optional[str] = None
+    repos: list[RepoConfig] = Field(default_factory=list)
 
 
 class ModelConfig(BaseModel):
@@ -112,6 +119,17 @@ class ClangdConfig(BaseModel):
 class IndexingConfig(BaseModel):
     enabled: bool = True
     persist_dir: Path = Path("data/llamaindex")
+    code_index_root: Optional[Path] = None
+    runtime_index_root: Optional[Path] = None
+    code_index_version: Optional[str] = None
+    runtime_index_version: Optional[str] = None
+    versioning_scheme: str = "git_commit"
+    include_dirty_suffix: bool = True
+    allow_legacy_paths: bool = True
+    index_registry_path: Path = Path("data/llamaindex/index_registry.json")
+    incremental_base_ref: str = "HEAD~1"
+    incremental_mode: str = "rebuild"  # rebuild|merge
+    incremental_max_changed_files: int = 5000
     llm_enrich: bool = False
     llm_enrich_limit: int = 50
     runtime_evidence_max_chars: int = 20000
@@ -121,6 +139,9 @@ class IndexingConfig(BaseModel):
     query_code_top_k: int = 10
     query_runtime_top_k: int = 10
     query_graph_top_k: int = 3
+    query_code_filter_top_k: int = 30
+    query_runtime_symbol_top_k: int = 20
+    query_runtime_path_top_k: int = 20
     neo4j: Neo4jConfig = Neo4jConfig()
     clangd: ClangdConfig = ClangdConfig()
 
@@ -297,6 +318,25 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
     indexing_norm = {
         "enabled": indexing_cfg.get("enabled", True),
         "persist_dir": Path(indexing_cfg.get("persist_dir", "data/llamaindex")),
+        "code_index_root": Path(indexing_cfg["code_index_root"])
+        if indexing_cfg.get("code_index_root")
+        else None,
+        "runtime_index_root": Path(indexing_cfg["runtime_index_root"])
+        if indexing_cfg.get("runtime_index_root")
+        else None,
+        "code_index_version": indexing_cfg.get("code_index_version"),
+        "runtime_index_version": indexing_cfg.get("runtime_index_version"),
+        "versioning_scheme": indexing_cfg.get("versioning_scheme", "git_commit"),
+        "include_dirty_suffix": bool(indexing_cfg.get("include_dirty_suffix", True)),
+        "allow_legacy_paths": bool(indexing_cfg.get("allow_legacy_paths", True)),
+        "index_registry_path": Path(
+            indexing_cfg.get("index_registry_path", "data/llamaindex/index_registry.json")
+        ),
+        "incremental_base_ref": indexing_cfg.get("incremental_base_ref", "HEAD~1"),
+        "incremental_mode": indexing_cfg.get("incremental_mode", "rebuild"),
+        "incremental_max_changed_files": int(
+            indexing_cfg.get("incremental_max_changed_files", 5000)
+        ),
         "llm_enrich": indexing_cfg.get("llm_enrich", False),
         "llm_enrich_limit": int(indexing_cfg.get("llm_enrich_limit", 50)),
         "runtime_evidence_max_chars": int(indexing_cfg.get("runtime_evidence_max_chars", 20000)),
@@ -306,9 +346,43 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "query_code_top_k": int(indexing_cfg.get("query_code_top_k", 10)),
         "query_runtime_top_k": int(indexing_cfg.get("query_runtime_top_k", 10)),
         "query_graph_top_k": int(indexing_cfg.get("query_graph_top_k", 3)),
+        "query_code_filter_top_k": int(indexing_cfg.get("query_code_filter_top_k", 30)),
+        "query_runtime_symbol_top_k": int(indexing_cfg.get("query_runtime_symbol_top_k", 20)),
+        "query_runtime_path_top_k": int(indexing_cfg.get("query_runtime_path_top_k", 20)),
         "neo4j": neo4j_norm,
         "clangd": clangd_norm,
     }
+
+    # Normalize multi-repo project config.
+    repos_cfg = project_cfg.get("repos") or []
+    normalized_repos: list[dict[str, Any]] = []
+    if isinstance(repos_cfg, list):
+        for entry in repos_cfg:
+            if isinstance(entry, str):
+                repo_path = entry
+                name = Path(repo_path).name
+                normalized_repos.append(
+                    {
+                        "name": name,
+                        "repo_path": repo_path,
+                        "compile_commands_dir": None,
+                    }
+                )
+            elif isinstance(entry, dict):
+                repo_path = entry.get("repo_path") or entry.get("path") or ""
+                name = entry.get("name") or Path(repo_path).name or "repo"
+                normalized_repos.append(
+                    {
+                        "name": name,
+                        "repo_path": repo_path,
+                        "compile_commands_dir": entry.get("compile_commands_dir"),
+                    }
+                )
+    if normalized_repos:
+        project_cfg = dict(project_cfg)
+        project_cfg["repos"] = normalized_repos
+        if not project_cfg.get("repo_path") and normalized_repos:
+            project_cfg["repo_path"] = normalized_repos[0]["repo_path"]
 
     return {
         "project": project_cfg,

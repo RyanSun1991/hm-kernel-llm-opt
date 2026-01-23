@@ -5,13 +5,19 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import typer
 
 from hmopt.core.config import AppConfig
 from hmopt.orchestration import run_artifact_analysis, run_pipeline
-from hmopt.indexing import build_kernel_index, build_runtime_index, route_query
+from hmopt.indexing import (
+    build_kernel_index,
+    build_kernel_indexes,
+    build_runtime_aggregate_index,
+    build_runtime_index,
+    route_query,
+)
 from hmopt.storage.artifact_store import ArtifactStore
 from hmopt.storage.db.engine import init_engine
 from hmopt.storage.db import models
@@ -162,17 +168,47 @@ def index_kernel(
     compile_commands_dir: Optional[str] = typer.Option(
         None, help="Directory containing compile_commands.json"
     ),
+    repo_name: Optional[str] = typer.Option(None, help="Repo name (for multi-repo configs)"),
+    all_repos: bool = typer.Option(False, help="Index all repos in config.project.repos"),
+    index_version: Optional[str] = typer.Option(None, help="Override code index version tag"),
+    incremental: bool = typer.Option(False, help="Use git diff incremental indexing"),
+    base_ref: Optional[str] = typer.Option(None, help="Base git ref for incremental diff"),
+    incremental_mode: Optional[str] = typer.Option(
+        None, help="Incremental mode: rebuild|merge"
+    ),
 ) -> None:
     # Demo: python -m hmopt.cli index-kernel --repo-path /path/to/hm-verif-kernel \
     #          --compile-commands-dir /path/to/hm-verif-kernel
+    # Demo: python -m hmopt.cli index-kernel --incremental --base-ref HEAD~1
     # Purpose: build kernel code ingestion + LlamaIndex index (clangd preferred).
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
-    if repo_path:
-        cfg.project.repo_path = repo_path
+    repo_path_override = repo_path or None
+    if repo_path_override:
+        cfg.project.repo_path = repo_path_override
     if compile_commands_dir:
         cfg.indexing.clangd.compile_commands_dir = Path(compile_commands_dir)
-    build_kernel_index(cfg, repo_path=cfg.project.repo_path)
+    if all_repos:
+        build_kernel_indexes(
+            cfg,
+            repo_names=None,
+            index_version=index_version,
+            incremental=incremental,
+            base_ref=base_ref,
+            incremental_mode=incremental_mode,
+        )
+        typer.echo("Kernel code indexes built for all repos")
+        return
+    build_kernel_index(
+        cfg,
+        repo_path=repo_path_override,
+        repo_name=repo_name,
+        compile_commands_dir=compile_commands_dir,
+        index_version=index_version,
+        incremental=incremental,
+        base_ref=base_ref,
+        incremental_mode=incremental_mode,
+    )
     typer.echo("Kernel code index built")
 
 
@@ -180,26 +216,63 @@ def index_kernel(
 def index_runtime(
     run_id: str = typer.Argument(..., help="Run ID to index runtime data"),
     config: str = typer.Option("configs/app.yaml", help="Config YAML"),
+    index_version: Optional[str] = typer.Option(None, help="Override runtime index version tag"),
+    repo_name: Optional[str] = typer.Option(None, help="Repo name for runtime index path"),
 ) -> None:
     # Demo: python -m hmopt.cli index-runtime <run_id>
     # Purpose: build runtime metrics/hotspots index for a run.
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
-    build_runtime_index(cfg, run_id)
+    build_runtime_index(cfg, run_id, index_version=index_version, repo_name=repo_name)
     typer.echo(f"Runtime index built for run_id={run_id}")
+
+
+@app.command()
+def index_runtime_aggregate(
+    run_id: List[str] = typer.Option(..., "--run-id", "-r", help="Run IDs to include"),
+    group_name: str = typer.Option("aggregate", help="Aggregate group name"),
+    index_version: Optional[str] = typer.Option(None, help="Override aggregate index version tag"),
+    repo_name: Optional[str] = typer.Option(None, help="Repo name for aggregate index path"),
+    config: str = typer.Option("configs/app.yaml", help="Config YAML"),
+) -> None:
+    # Demo: python -m hmopt.cli index-runtime-aggregate -r run1 -r run2 --group-name perf-batch
+    # Purpose: build a cross-run runtime aggregate index.
+    logging.basicConfig(level=logging.INFO)
+    cfg = _load_config(config)
+    build_runtime_aggregate_index(
+        cfg,
+        run_id,
+        group_name=group_name,
+        index_version=index_version,
+        repo_name=repo_name,
+    )
+    typer.echo(f"Runtime aggregate index built: group={group_name} runs={len(run_id)}")
 
 
 @app.command()
 def query(
     query_str: str = typer.Argument(..., help="Query to run against indexes"),
-    mode: str = typer.Option("auto", help="auto|code|runtime"),
+    mode: str = typer.Option("auto", help="auto|code|runtime|graph|runtime_code"),
     config: str = typer.Option("configs/app.yaml", help="Config YAML"),
+    code_version: Optional[str] = typer.Option(None, help="Code index version tag"),
+    runtime_version: Optional[str] = typer.Option(None, help="Runtime index version tag"),
+    run_id: Optional[str] = typer.Option(None, help="Runtime run_id for versioned lookup"),
+    repo_name: Optional[str] = typer.Option(None, help="Repo name for multi-repo indexes"),
 ) -> None:
     # Demo: python -m hmopt.cli query "Which function is hot?" --mode runtime
+    # Demo: python -m hmopt.cli query "Optimize hotspots" --mode runtime_code --run-id <run_id>
     # Purpose: query routing across code/runtime indexes.
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
-    response = route_query(cfg, query_str, mode=mode)
+    response = route_query(
+        cfg,
+        query_str,
+        mode=mode,
+        code_version=code_version,
+        runtime_version=runtime_version,
+        run_id=run_id,
+        repo_name=repo_name,
+    )
     typer.echo(response)
 
 
