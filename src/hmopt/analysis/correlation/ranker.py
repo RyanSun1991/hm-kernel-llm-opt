@@ -24,6 +24,7 @@ def rank_correlated(
             line_end=h.line_end,
             score=h.score * boost,
             evidence_artifacts=h.evidence_artifacts,
+            call_stacks=h.call_stacks,
         )
         for h in hotspots
     ]
