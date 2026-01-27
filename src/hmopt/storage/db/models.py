@@ -63,6 +63,7 @@ class Hotspot(Base):
     line_end = Column(Integer, nullable=True)
     score = Column(Float)
     evidence_artifact_ids = Column(JSON, default=[])
+    call_stacks_json = Column(JSON, default=[])
 
 
 class Graph(Base):

@@ -121,6 +121,8 @@ class IndexingConfig(BaseModel):
     query_code_top_k: int = 10
     query_runtime_top_k: int = 10
     query_graph_top_k: int = 3
+    query_prompt_file: Optional[Path] = None
+    query_system_prompt_file: Optional[Path] = None
     neo4j: Neo4jConfig = Neo4jConfig()
     clangd: ClangdConfig = ClangdConfig()
 
@@ -306,6 +308,10 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "query_code_top_k": int(indexing_cfg.get("query_code_top_k", 10)),
         "query_runtime_top_k": int(indexing_cfg.get("query_runtime_top_k", 10)),
         "query_graph_top_k": int(indexing_cfg.get("query_graph_top_k", 3)),
+        "query_prompt_file": Path(indexing_cfg["query_prompt_file"])
+            if indexing_cfg.get("query_prompt_file") else None,
+        "query_system_prompt_file": Path(indexing_cfg["query_system_prompt_file"])
+            if indexing_cfg.get("query_system_prompt_file") else None,
         "neo4j": neo4j_norm,
         "clangd": clangd_norm,
     }

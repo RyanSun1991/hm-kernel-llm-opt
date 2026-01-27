@@ -192,14 +192,22 @@ def index_runtime(
 @app.command()
 def query(
     query_str: str = typer.Argument(..., help="Query to run against indexes"),
-    mode: str = typer.Option("auto", help="auto|code|runtime"),
+    mode: str = typer.Option("auto", help="auto|code|runtime|runtime_code|graph"),
     config: str = typer.Option("configs/app.yaml", help="Config YAML"),
+    prompt_file: Optional[str] = typer.Option(
+        None,
+        "--prompt-file",
+        "-p",
+        help="Path to prompt template file (txt/md/json)",
+    ),
 ) -> None:
     # Demo: python -m hmopt.cli query "Which function is hot?" --mode runtime
-    # Purpose: query routing across code/runtime indexes.
+    # Demo: python -m hmopt.cli query "analyze hotspots" --prompt-file configs/prompts/analysis.md
+    # Purpose: query routing across code/runtime indexes with optional custom prompt.
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
-    response = route_query(cfg, query_str, mode=mode)
+    prompt_path = Path(prompt_file) if prompt_file else None
+    response = route_query(cfg, query_str, mode=mode, prompt_file=prompt_path)
     typer.echo(response)
 
 

@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS hotspots (
     line_start INTEGER,
     line_end INTEGER,
     score REAL,
-    evidence_artifact_ids TEXT
+    evidence_artifact_ids TEXT,
+    call_stacks_json TEXT
 );
 
 CREATE TABLE IF NOT EXISTS graphs (
