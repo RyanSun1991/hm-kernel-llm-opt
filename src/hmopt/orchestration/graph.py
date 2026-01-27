@@ -73,12 +73,21 @@ def _hotspots_from_symbol_counts(
     min_ratio: float = 0.001,
     min_abs: float = 0.0,
     total: float | None = None,
+    call_stacks: list[dict] | None = None,
 ) -> list[HotspotCandidate]:
     threshold = min_abs
     if total:
         threshold = max(threshold, total * min_ratio)
     filtered = [(name, score) for name, score in symbol_counts.items() if score >= threshold]
     ordered = sorted(filtered, key=lambda x: x[1], reverse=True)[:top_n]
+
+    symbol_stacks: dict[str, list[dict]] = {}
+    if call_stacks:
+        for stack in call_stacks:
+            leaf = stack.get("leaf_symbol")
+            if leaf:
+                symbol_stacks.setdefault(leaf, []).append(stack)
+
     return [
         HotspotCandidate(
             symbol=name,
@@ -87,6 +96,7 @@ def _hotspots_from_symbol_counts(
             line_end=None,
             score=score,
             evidence_artifacts=[],
+            call_stacks=symbol_stacks.get(name, [])[:10],
         )
         for name, score in ordered
     ]
@@ -447,6 +457,18 @@ def _format_evidence_report(
 def _store_flamegraph_maps(services: PipelineServices, run_id: str, result, source_path: Path | None) -> None:
     source_value = source_path or getattr(result, "source_path", None)
     metadata = {"source": str(source_value)} if source_value else {}
+    if getattr(result, "call_stacks", None):
+        call_stacks = result.call_stacks
+        if call_stacks:
+            stacks_art = services.ctx.artifact_store.store_json(
+                call_stacks,
+                kind="flamegraph_call_stacks",
+                run_id=run_id,
+                session=services.ctx.session,
+                metadata=metadata,
+            )
+            logger.info("Stored flamegraph call stacks: artifact=%s count=%d",
+                       stacks_art.artifact_id, len(call_stacks))
     if getattr(result, "name_maps", None):
         payload = result.name_maps.to_dict()
         map_art = services.ctx.artifact_store.store_json(
@@ -636,6 +658,7 @@ def _hotspot_to_dict(h: HotspotCandidate) -> dict:
         "line_end": h.line_end,
         "score": h.score,
         "evidence_artifacts": h.evidence_artifacts or [],
+        "call_stacks": h.call_stacks or [],
     }
 
 
@@ -647,6 +670,7 @@ def _hotspot_from_dict(data: dict) -> HotspotCandidate:
         line_end=data.get("line_end"),
         score=data.get("score", 0.0),
         evidence_artifacts=data.get("evidence_artifacts", []),
+        call_stacks=data.get("call_stacks", []),
     )
 
 
@@ -721,6 +745,7 @@ def _profile_and_analyze(services: PipelineServices, state: RunState, label: str
                     min_ratio=services.config.indexing.hotspot_min_ratio,
                     min_abs=services.config.indexing.hotspot_min_abs,
                     total=fg.event_count_total,
+                    call_stacks=fg.call_stacks,
                 )
                 if services.psg:
                     fg_hotspots = align_hotspots_to_psg(fg_hotspots, services.psg)
@@ -1188,6 +1213,7 @@ def run_artifact_analysis(
                         min_ratio=services.config.indexing.hotspot_min_ratio,
                         min_abs=services.config.indexing.hotspot_min_abs,
                         total=fg.event_count_total,
+                        call_stacks=fg.call_stacks,
                     )
                     if services.psg:
                         fg_hotspots = align_hotspots_to_psg(fg_hotspots, services.psg)

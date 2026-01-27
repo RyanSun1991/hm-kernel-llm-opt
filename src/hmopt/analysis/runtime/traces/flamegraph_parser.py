@@ -43,6 +43,7 @@ class FlamegraphResult:
     lib_summaries: dict[str, dict] = field(default_factory=dict)
     pcg_nodes: dict[str, dict] = field(default_factory=dict)
     pcg_edges: list[dict] = field(default_factory=list)
+    call_stacks: list[dict] = field(default_factory=list)
     source_path: Optional[str] = None
 
     def to_metrics(self) -> list[Metric]:
@@ -139,24 +140,47 @@ def _walk_call_tree(
     name_maps: FlamegraphNameMaps,
     node_stats: dict[str, dict],
     edge_stats: dict[tuple[str, str, str], float],
+    call_stacks: list[dict],
     *,
     parent: Optional[str] = None,
     direction: str = "call",
+    current_stack: Optional[List[str]] = None,
+    thread_id: Optional[str] = None,
 ) -> None:
+    if current_stack is None:
+        current_stack = []
     if not isinstance(node, dict):
         return
     symbol_id = node.get("symbol")
     current: Optional[str] = parent
+    new_stack = current_stack
+
     if symbol_id not in (None, -1):
         raw = name_maps.resolve_symbol(symbol_id)
         norm = _normalize_symbol(raw)
         current = norm
+        new_stack = current_stack + [norm]
+
         stats = node_stats.setdefault(norm, {"self_events": 0.0, "sub_events": 0.0, "label": raw})
-        stats["self_events"] += float(node.get("selfEvents", 0) or 0)
-        stats["sub_events"] += float(node.get("subEvents", 0) or 0)
+        self_events = float(node.get("selfEvents", 0) or 0)
+        sub_events = float(node.get("subEvents", 0) or 0)
+        stats["self_events"] += self_events
+        stats["sub_events"] += sub_events
+
         if parent:
             key = (parent, norm, direction)
-            edge_stats[key] = edge_stats.get(key, 0.0) + float(node.get("subEvents", 0) or 0)
+            edge_stats[key] = edge_stats.get(key, 0.0) + sub_events
+
+        children = node.get("callStack", []) or []
+        if self_events > 0 or not children:
+            call_stacks.append({
+                "stack": new_stack,
+                "leaf_symbol": norm,
+                "total_events": sub_events,
+                "self_events": self_events,
+                "thread_id": thread_id,
+                "direction": direction,
+            })
 
     for child in node.get("callStack", []) or []:
         if isinstance(child, dict):
@@ -165,8 +189,11 @@ def _walk_call_tree(
                 name_maps,
                 node_stats,
                 edge_stats,
+                call_stacks,
                 parent=current,
                 direction=direction,
+                current_stack=new_stack,
+                thread_id=thread_id,
             )
 
 
@@ -341,6 +368,7 @@ def _parse_sample_info(data: dict, path: Path) -> FlamegraphResult:
     event_counts: dict[str, float] = {}
     node_stats: dict[str, dict] = {}
     edge_stats: dict[tuple[str, str, str], float] = {}
+    call_stacks: list[dict] = []
     for info in record_infos:
         event_name = info.get("eventConfigName") or "event"
         count = float(info.get("eventCount", 0) or 0)
@@ -386,14 +414,18 @@ def _parse_sample_info(data: dict, path: Path) -> FlamegraphResult:
                     thread_summaries[str(tid)]["sample_count"] += int(thread.get("sampleCount", 0) or 0)
 
                 call_order = thread.get("CallOrder")
+                thread_id_str = str(tid) if tid is not None else None
                 if isinstance(call_order, dict):
                     _walk_call_tree(
                         call_order,
                         name_maps,
                         node_stats,
                         edge_stats,
+                        call_stacks,
                         parent=None,
                         direction="call",
+                        current_stack=[],
+                        thread_id=thread_id_str,
                     )
                 called_order = thread.get("CalledOrder")
                 if isinstance(called_order, dict):
@@ -402,8 +434,11 @@ def _parse_sample_info(data: dict, path: Path) -> FlamegraphResult:
                         name_maps,
                         node_stats,
                         edge_stats,
+                        call_stacks,
                         parent=None,
                         direction="called",
+                        current_stack=[],
+                        thread_id=thread_id_str,
                     )
                 for lib in thread.get("libs", []) or []:
                     file_id = lib.get("fileId")
@@ -502,5 +537,6 @@ def _parse_sample_info(data: dict, path: Path) -> FlamegraphResult:
         lib_summaries=lib_summaries,
         pcg_nodes=node_stats,
         pcg_edges=pcg_edges,
+        call_stacks=call_stacks,
         source_path=str(path),
     )

@@ -61,9 +61,22 @@ def build_runtime_nodes(
         )
 
     for hotspot in hotspots:
+        call_stacks = hotspot.call_stacks_json or []
+        call_stack_text = ""
+        if call_stacks:
+            stack_lines = []
+            for idx, stack in enumerate(call_stacks[:5]):
+                if isinstance(stack, dict):
+                    path = " -> ".join(stack.get("stack", []))
+                    events = stack.get("self_events", 0)
+                    stack_lines.append(f"  [{idx+1}] {path} (events: {events:.0f})")
+            if stack_lines:
+                call_stack_text = "\nCall stacks:\n" + "\n".join(stack_lines)
+
         text = (
             f"hotspot {hotspot.symbol} score {hotspot.score} "
             f"file {hotspot.file_path or ''} lines {hotspot.line_start}-{hotspot.line_end}"
+            f"{call_stack_text}"
         )
         nodes.append(
             TextNode(
@@ -76,6 +89,7 @@ def build_runtime_nodes(
                     "line_start": _normalize_metadata_value(hotspot.line_start),
                     "line_end": _normalize_metadata_value(hotspot.line_end),
                     "score": _normalize_metadata_value(hotspot.score),
+                    "call_stacks": _normalize_metadata_value(call_stacks),
                 },
             )
         )

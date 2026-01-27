@@ -1,0 +1,3 @@
+{
+  "prompt": "You are analyzing kernel performance data.\n\nRuntime Data:\n{runtime_context}\n\nQuestion: {query}\n\nProvide a concise analysis with:\n1. Top hotspots and their call paths\n2. Root cause hypothesis\n3. Suggested optimizations\n\nBe specific and reference the actual symbols and call stacks from the data."
+}

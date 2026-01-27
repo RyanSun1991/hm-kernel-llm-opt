@@ -50,6 +50,66 @@ def _index_paths(config: AppConfig) -> IndexPaths:
     return IndexPaths(base_dir=base, code_dir=base / "code", runtime_dir=base / "runtime")
 
 
+def _load_prompt_file(path: Optional[Path]) -> Optional[str]:
+    """Load prompt content from a file.
+
+    Supports:
+    - Plain text files (.txt)
+    - Markdown files (.md)
+    - JSON files (.json) with "prompt" or "content" key
+    """
+    if not path or not path.exists():
+        return None
+
+    try:
+        content = path.read_text(encoding="utf-8")
+
+        if path.suffix.lower() == ".json":
+            data = json.loads(content)
+            if isinstance(data, dict):
+                return data.get("prompt") or data.get("content") or str(data)
+            return str(data)
+
+        return content.strip()
+
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to load prompt file %s: %s", path, exc)
+        return None
+
+
+def _format_query_with_prompt(
+    query: str,
+    prompt_template: Optional[str],
+    runtime_context: str = "",
+    code_context: str = "",
+) -> str:
+    """Format query using prompt template with context placeholders.
+
+    Template variables:
+    - {query}: The user's query
+    - {runtime_context}: Runtime findings (hotspots, metrics, call stacks)
+    - {code_context}: Relevant code snippets
+    """
+    if not prompt_template:
+        if runtime_context:
+            return (
+                "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
+                f"Runtime findings:\n{runtime_context}\n\n"
+                f"Question: {query}"
+            )
+        return query
+
+    try:
+        return prompt_template.format(
+            query=query,
+            runtime_context=runtime_context or "(No runtime context available)",
+            code_context=code_context or "(No code context available)",
+        )
+    except KeyError as exc:
+        logger.warning("Prompt template missing placeholder %s, using default format", exc)
+        return query
+
+
 def _build_llama_models(config: AppConfig) -> tuple[OpenAILike, OpenAIEmbeddingLike]:
     if not config.llm.api_key:
         raise RuntimeError("LLM API key is required for LlamaIndex indexing")
@@ -556,13 +616,21 @@ def _docstore_has_nodes(storage: StorageContext) -> bool:
         return False
 
 
-def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
+def route_query(
+    config: AppConfig,
+    query: str,
+    mode: str = "auto",
+    prompt_file: Optional[Path] = None,
+) -> str:
     paths = _index_paths(config)
     llm, embed = _build_llama_models(config)
     code_index_cfg = _neo4j_index_config("code")
     runtime_index_cfg = _neo4j_index_config("runtime")
     code_embed_dim = _embedding_dimension_for_query(paths.code_dir, embed)
     runtime_embed_dim = _embedding_dimension_for_query(paths.runtime_dir, embed)
+
+    prompt_path = prompt_file or config.indexing.query_prompt_file
+    prompt_template = _load_prompt_file(prompt_path)
 
     def _format_runtime_sources(source_nodes: list) -> str:
         hotspots = []
@@ -573,6 +641,15 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
             node_type = metadata.get("type")
             text = getattr(source.node, "text", "")
             if node_type == "runtime_hotspot":
+                call_stacks_raw = metadata.get("call_stacks")
+                call_stacks = []
+                if isinstance(call_stacks_raw, str):
+                    try:
+                        call_stacks = json.loads(call_stacks_raw)
+                    except json.JSONDecodeError:
+                        pass
+                elif isinstance(call_stacks_raw, list):
+                    call_stacks = call_stacks_raw
                 hotspots.append(
                     {
                         "symbol": metadata.get("symbol"),
@@ -581,6 +658,7 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
                         "line_start": metadata.get("line_start"),
                         "line_end": metadata.get("line_end"),
                         "text": text,
+                        "call_stacks": call_stacks,
                     }
                 )
             elif node_type == "runtime_metric":
@@ -602,6 +680,13 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
                     f"- {item.get('symbol')} score={item.get('score')} "
                     f"path={item.get('file_path')} lines={item.get('line_start')}-{item.get('line_end')}"
                 )
+                call_stacks = item.get("call_stacks", [])
+                if call_stacks:
+                    lines.append("  Call paths:")
+                    for stack in call_stacks[:3]:
+                        if isinstance(stack, dict):
+                            path = " -> ".join(stack.get("stack", []))
+                            lines.append(f"    {path}")
         if metrics:
             lines.append("Runtime metrics:")
             for item in metrics:
@@ -679,11 +764,44 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
 
     def _runtime_to_code_query() -> str:
         runtime_response = _engine(paths.runtime_dir).query(query)
-        combined_query = (
-            "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
-            f"Runtime findings:\n{runtime_response}\n\n"
-            f"Question: {query}"
-        )
+
+        source_nodes = getattr(runtime_response, "source_nodes", []) or []
+        call_stack_symbols: set[str] = set()
+        for source in source_nodes:
+            metadata = getattr(source.node, "metadata", {}) if hasattr(source, "node") else {}
+            call_stacks_raw = metadata.get("call_stacks")
+            call_stacks = []
+            if isinstance(call_stacks_raw, str):
+                try:
+                    call_stacks = json.loads(call_stacks_raw)
+                except json.JSONDecodeError:
+                    pass
+            elif isinstance(call_stacks_raw, list):
+                call_stacks = call_stacks_raw
+            for stack in call_stacks:
+                if isinstance(stack, dict):
+                    for symbol in stack.get("stack", []):
+                        call_stack_symbols.add(symbol)
+
+        call_stack_context = ""
+        if call_stack_symbols:
+            symbols_text = ", ".join(list(call_stack_symbols)[:20])
+            call_stack_context = f"\nRelated symbols from call stacks: {symbols_text}"
+
+        runtime_context = f"{runtime_response}\n{call_stack_context}"
+
+        if prompt_template:
+            combined_query = _format_query_with_prompt(
+                query=query,
+                prompt_template=prompt_template,
+                runtime_context=runtime_context,
+            )
+        else:
+            combined_query = (
+                "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
+                f"Runtime findings:\n{runtime_context}\n"
+                f"\nQuestion: {query}"
+            )
         return str(_graph_engine(paths.code_dir).query(combined_query))
 
     if mode == "code":

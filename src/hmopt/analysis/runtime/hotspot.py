@@ -18,6 +18,7 @@ class HotspotCandidate:
     line_end: Optional[int]
     score: float
     evidence_artifacts: list[str] | None = None
+    call_stacks: list[dict] | None = None
 
 
 def _funcrank_scores(edge_costs: Dict[tuple[str, str], float], damping: float = 0.85) -> Dict[str, float]:
@@ -80,6 +81,7 @@ def persist_hotspots(session, run_id: str, hotspots: Iterable[HotspotCandidate])
                 line_end=hs.line_end,
                 score=hs.score,
                 evidence_artifact_ids=hs.evidence_artifacts or [],
+                call_stacks_json=hs.call_stacks or [],
             )
         )
     session.flush()
