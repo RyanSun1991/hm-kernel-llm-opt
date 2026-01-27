@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -24,12 +24,29 @@ def create_db_engine(db_url: str, echo: bool = False) -> Engine:
 def bootstrap(engine: Engine, schema_path: Path | None = None) -> None:
     """Create tables and optionally run raw schema SQL."""
     Base.metadata.create_all(engine)
+    _ensure_hotspots_columns(engine)
     if schema_path and schema_path.exists():
         sql = schema_path.read_text(encoding="utf-8").strip()
         if sql:
             with engine.begin() as conn:
                 raw = conn.connection
                 raw.executescript(sql)  # type: ignore[attr-defined]
+
+
+def _ensure_hotspots_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if "hotspots" not in inspector.get_table_names():
+        return
+    existing = {col["name"] for col in inspector.get_columns("hotspots")}
+    if "call_stacks_json" in existing:
+        return
+    dialect = engine.dialect.name
+    if dialect == "postgresql":
+        ddl = "ALTER TABLE hotspots ADD COLUMN call_stacks_json JSON"
+    else:
+        ddl = "ALTER TABLE hotspots ADD COLUMN call_stacks_json TEXT"
+    with engine.begin() as conn:
+        conn.execute(text(ddl))
 
 
 def init_engine(db_url: str, schema_path: Path | None = None, echo: bool = False) -> Engine:
