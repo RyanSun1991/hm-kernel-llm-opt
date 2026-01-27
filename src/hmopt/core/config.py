@@ -146,16 +146,6 @@ class IndexingConfig(BaseModel):
     clangd: ClangdConfig = ClangdConfig()
 
 
-class PromptConfig(BaseModel):
-    dir: Path = Path("configs/prompts")
-    overrides: dict[str, dict[str, str]] = Field(default_factory=dict)
-    profile: str = "analysis"
-    profiles: dict[str, dict[str, str]] = Field(default_factory=dict)
-    stage_profiles: dict[str, str] = Field(default_factory=dict)
-    review_enabled: bool = False
-    review_block_on_reject: bool = False
-
-
 class AppConfig(BaseModel):
     project: ProjectConfig
     llm: ModelConfig
@@ -163,7 +153,6 @@ class AppConfig(BaseModel):
     adapters: AdapterConfig = AdapterConfig()
     workloads: list[WorkloadConfig] = Field(default_factory=list)
     indexing: IndexingConfig = IndexingConfig()
-    prompts: PromptConfig = PromptConfig()
     iterations: int = 2
     profiling_enabled: bool = True
     pipeline: str = "optimize_kernel"
@@ -274,16 +263,6 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
     workloads_cfg = raw.get("workloads", [])
-    prompts_cfg = raw.get("prompts", {}) or {}
-    prompts_norm = {
-        "dir": Path(prompts_cfg.get("dir", "configs/prompts")),
-        "overrides": prompts_cfg.get("overrides", {}) or {},
-        "profile": prompts_cfg.get("profile", "analysis"),
-        "profiles": prompts_cfg.get("profiles", {}) or {},
-        "stage_profiles": prompts_cfg.get("stage_profiles", {}) or {},
-        "review_enabled": bool(prompts_cfg.get("review_enabled", False)),
-        "review_block_on_reject": bool(prompts_cfg.get("review_block_on_reject", False)),
-    }
     indexing_cfg = raw.get("indexing", {})
 
     neo4j_cfg = indexing_cfg.get("neo4j", {})
@@ -411,7 +390,6 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "storage": storage_norm,
         "adapters": adapters_norm,
         "workloads": workloads_cfg,
-        "prompts": prompts_norm,
         "indexing": indexing_norm,
         "iterations": raw.get("iterations", raw.get("max_iterations", 2)),
         "profiling_enabled": raw.get("profiling", {}).get("enabled", True),

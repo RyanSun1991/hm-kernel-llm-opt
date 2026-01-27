@@ -7,7 +7,6 @@ from typing import Mapping
 import logging
 
 from hmopt.core.llm import ChatMessage, LLMClient
-from hmopt.prompting import PromptRegistry
 
 from .safety import SafetyGuard
 
@@ -21,57 +20,9 @@ class ConductorDecision(dict):
 
 
 class ConductorAgent:
-    def __init__(
-        self,
-        llm: LLMClient,
-        safety: SafetyGuard,
-        *,
-        prompts: PromptRegistry | None = None,
-        prompt_name: str = "conductor",
-    ):
+    def __init__(self, llm: LLMClient, safety: SafetyGuard):
         self.llm = llm
         self.safety = safety
-        self.prompts = prompts
-        self.prompt_name = prompt_name
-        self.default_system_prompt = "Conductor focusing on perf + correctness."
-        self.default_template = (
-            "You are the Conductor agent coordinating an optimization loop.\n"
-            "Iteration: {iteration}/{max_iterations}\n"
-            "Best run summary: {best_summary}\n"
-            "Current evidence:\n{evidence_summary}\n"
-            "Decide whether to continue optimizing or stop. "
-            "If continuing, propose a concise next action for the coder."
-        )
-
-    def _render_prompt(
-        self, *, evidence_summary: str, best_summary: str, iteration: int, max_iterations: int
-    ) -> tuple[str, str]:
-        system_prompt = self.default_system_prompt
-        template = self.default_template
-        if self.prompts:
-            try:
-                spec = self.prompts.load(self.prompt_name)
-                system_prompt = spec.system or system_prompt
-                template = spec.template or template
-            except Exception as exc:
-                logger.warning("Prompt load failed for %s: %s", self.prompt_name, exc)
-        try:
-            prompt = template.format(
-                evidence_summary=evidence_summary,
-                best_summary=best_summary,
-                iteration=iteration,
-                max_iterations=max_iterations,
-            )
-        except KeyError as exc:
-            logger.warning("Prompt render failed for %s: %s", self.prompt_name, exc)
-            prompt = self.default_template.format(
-                evidence_summary=evidence_summary,
-                best_summary=best_summary,
-                iteration=iteration,
-                max_iterations=max_iterations,
-            )
-            system_prompt = self.default_system_prompt
-        return system_prompt, prompt
 
     def decide(
         self,
@@ -89,14 +40,16 @@ class ConductorAgent:
                 next_action="report",
             )
 
-        system_prompt, prompt = self._render_prompt(
-            evidence_summary=evidence_summary,
-            best_summary=best_summary,
-            iteration=iteration,
-            max_iterations=max_iterations,
+        prompt = (
+            "You are the Conductor agent coordinating an optimization loop.\n"
+            f"Iteration: {iteration}/{max_iterations}\n"
+            f"Best run summary: {best_summary}\n"
+            f"Current evidence:\n{evidence_summary}\n"
+            "Decide whether to continue optimizing or stop. "
+            "If continuing, propose a concise next action for the coder."
         )
         messages = [
-            ChatMessage(role="system", content=system_prompt),
+            ChatMessage(role="system", content="Conductor focusing on perf + correctness."),
             ChatMessage(role="user", content=self.safety.redact(prompt)),
         ]
         reply = self.llm.chat(messages)

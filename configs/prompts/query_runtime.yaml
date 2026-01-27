@@ -1,7 +1,0 @@
-name: query_runtime
-description: Runtime-only query prompt.
-system: You are a kernel performance analyst.
-template: |
-  Answer the question using runtime evidence.
-
-  Question: {query}

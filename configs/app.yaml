@@ -41,28 +41,6 @@ profiling:
 pipelines:
   default: optimize_kernel
 
-prompts:
-  dir: configs/prompts
-  profile: analysis
-  profiles:
-    analysis:
-      conductor: conductor
-      trace_analyst: trace_analyst
-      query_code: query_code
-      query_runtime: query_runtime
-      query_graph: query_graph
-      query_runtime_code: query_runtime_code
-    patch:
-      coder: coder
-    review:
-      review: code_review
-  stage_profiles:
-    coder: patch
-    review: review
-  overrides: {}
-  review_enabled: false
-  review_block_on_reject: false
-
 indexing:
   enabled: true
   persist_dir: data/llamaindex

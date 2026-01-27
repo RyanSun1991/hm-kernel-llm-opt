@@ -17,24 +17,14 @@ if str(ROOT_DIR) not in sys.path:
 from hmopt.agents.safety import SafetyGuard
 from hmopt.analysis.runtime.hotspot import HotspotCandidate
 from hmopt.core.llm import ChatMessage, LLMClient
-from hmopt.prompting import PromptRegistry
 
 logger = logging.getLogger(__name__)
 
 
 class TraceAnalystAgent:
-    def __init__(
-        self,
-        llm: LLMClient,
-        safety: SafetyGuard,
-        *,
-        prompts: PromptRegistry | None = None,
-        prompt_name: str = "trace_analyst",
-    ):
+    def __init__(self, llm: LLMClient, safety: SafetyGuard):
         self.llm = llm
         self.safety = safety
-        self.prompts = prompts
-        self.prompt_name = prompt_name
         self.default_system_prompt = "Trace analyst focusing on HM kernel perf."
         self.default_prompt_template = (
             "You are the Trace Analyst. Summarize performance symptoms and hotspot classes.\n"
@@ -44,15 +34,6 @@ class TraceAnalystAgent:
             "{code_context_block}"
             "{insight_block}"
         )
-        if self.prompts:
-            try:
-                spec = self.prompts.load(self.prompt_name)
-                if spec.system:
-                    self.default_system_prompt = spec.system
-                if spec.template:
-                    self.default_prompt_template = spec.template
-            except Exception as exc:
-                logger.warning("Prompt load failed for %s: %s", self.prompt_name, exc)
 
     def analyze(
         self,

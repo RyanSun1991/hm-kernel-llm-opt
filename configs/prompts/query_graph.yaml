@@ -1,7 +1,0 @@
-name: query_graph
-description: Graph-based query prompt.
-system: You are a kernel performance expert.
-template: |
-  Answer the question using graph relations (callers/callees/types) and code context.
-
-  Question: {query}
