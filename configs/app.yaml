@@ -6,13 +6,6 @@ project:
   name: hm-verif-kernel
   repo_path: /home/ryan/work/hmdev_rt/self_source/hm-verif-kernel/
   build_system: auto   # auto|make|cmake|bazel|custom
-  # repos:
-  #   - name: kernel-core
-  #     repo_path: /path/to/hm-verif-kernel
-  #     compile_commands_dir: /path/to/hm-verif-kernel
-  #   - name: kernel-drivers
-  #     repo_path: /path/to/hm-verif-kernel-drivers
-  #     compile_commands_dir: /path/to/hm-verif-kernel-drivers
 
 llm:
   provider: openai_compatible
@@ -44,17 +37,6 @@ pipelines:
 indexing:
   enabled: true
   persist_dir: data/llamaindex
-  code_index_root: data/llamaindex/code
-  runtime_index_root: data/llamaindex/runtime
-  code_index_version: null        # auto when null (uses git commit)
-  runtime_index_version: null     # auto when null (uses run_id)
-  versioning_scheme: git_commit   # git_commit|timestamp|custom
-  include_dirty_suffix: true
-  allow_legacy_paths: true
-  index_registry_path: data/llamaindex/index_registry.json
-  incremental_base_ref: HEAD~1
-  incremental_mode: rebuild       # rebuild|merge
-  incremental_max_changed_files: 5000
   llm_enrich: false
   llm_enrich_limit: 50
   runtime_evidence_max_chars: 20000
@@ -64,9 +46,6 @@ indexing:
   query_code_top_k: 10
   query_runtime_top_k: 10
   query_graph_top_k: 3
-  query_code_filter_top_k: 30
-  query_runtime_symbol_top_k: 20
-  query_runtime_path_top_k: 20
   clangd:
     enabled: true
     binary: clangd

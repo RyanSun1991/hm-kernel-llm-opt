@@ -403,7 +403,6 @@ def index_kernel_code(
     *,
     clangd_config: Optional[ClangdConfig],
     max_files: int = 5000,
-    files: Optional[Iterable[Path]] = None,
 ) -> CodeIndex:
     if not clangd_config or not clangd_config.compile_commands_dir:
         logger.warning("clangd config missing, fallback to regex indexer")
@@ -413,20 +412,12 @@ def index_kernel_code(
         return _fallback_index(repo_path)
 
     compile_commands = Path(clangd_config.compile_commands_dir) / "compile_commands.json"
-    if files is None:
-        files = _load_compile_commands(compile_commands)
-        if not files:
-            logger.warning("compile_commands.json empty or missing, fallback to regex")
-            return _fallback_index(repo_path)
-    else:
-        resolved: list[Path] = []
-        for path in files:
-            p = Path(path)
-            if not p.is_absolute():
-                p = (repo_path / p).resolve()
-            resolved.append(p)
-        files = resolved
-    files = list(files)[:max_files]
+    files = _load_compile_commands(compile_commands)
+    if not files:
+        logger.warning("compile_commands.json empty or missing, fallback to regex")
+        return _fallback_index(repo_path)
+
+    files = files[:max_files]
     client = ClangdClient(clangd_config, repo_path)
     records: list[SymbolRecord] = []
     relations: dict[tuple[str, str, str], CodeRelation] = {}

@@ -1,17 +1,5 @@
 """Indexing and query routing with LlamaIndex."""
 
-from .llamaindex_pipeline import (
-    build_kernel_index,
-    build_kernel_indexes,
-    build_runtime_aggregate_index,
-    build_runtime_index,
-    route_query,
-)
+from .llamaindex_pipeline import build_kernel_index, build_runtime_index, route_query
 
-__all__ = [
-    "build_kernel_index",
-    "build_kernel_indexes",
-    "build_runtime_index",
-    "build_runtime_aggregate_index",
-    "route_query",
-]
+__all__ = ["build_kernel_index", "build_runtime_index", "route_query"]
