@@ -172,7 +172,14 @@ def _walk_call_tree(
             edge_stats[key] = edge_stats.get(key, 0.0) + sub_events
 
         children = node.get("callStack", []) or []
-        if self_events > 0 or not children:
+        # Record call stacks when:
+        # 1. Node has self_events (actual work done at this symbol)
+        # 2. Node has sub_events (work done in subtree)
+        # 3. Node is a leaf (no children)
+        # This ensures we capture both leaf nodes and intermediate nodes with events
+        has_events = self_events > 0 or sub_events > 0
+        is_leaf = not children
+        if has_events or is_leaf:
             call_stacks.append({
                 "stack": new_stack,
                 "leaf_symbol": norm,
