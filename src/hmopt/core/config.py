@@ -123,6 +123,7 @@ class IndexingConfig(BaseModel):
     query_graph_top_k: int = 3
     query_prompt_file: Optional[Path] = None
     query_system_prompt_file: Optional[Path] = None
+    hotspot_focus_symbol: Optional[str] = None
     neo4j: Neo4jConfig = Neo4jConfig()
     clangd: ClangdConfig = ClangdConfig()
 
@@ -305,6 +306,7 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "hotspot_top_k": int(indexing_cfg.get("hotspot_top_k", 20)),
         "hotspot_min_ratio": float(indexing_cfg.get("hotspot_min_ratio", 0.001)),
         "hotspot_min_abs": float(indexing_cfg.get("hotspot_min_abs", 10.0)),
+        "hotspot_focus_symbol": indexing_cfg.get("hotspot_focus_symbol"),
         "query_code_top_k": int(indexing_cfg.get("query_code_top_k", 10)),
         "query_runtime_top_k": int(indexing_cfg.get("query_runtime_top_k", 10)),
         "query_graph_top_k": int(indexing_cfg.get("query_graph_top_k", 3)),

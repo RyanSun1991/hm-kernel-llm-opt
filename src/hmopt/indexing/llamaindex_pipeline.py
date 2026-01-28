@@ -640,7 +640,7 @@ def route_query(
 
     prompt_path = prompt_file or config.indexing.query_prompt_file
     prompt_template = _load_prompt_file(prompt_path)
-    max_code_snippets = 5
+    max_code_snippets = 3
     max_code_chars = 1600
     max_runtime_chars = 6000
 
@@ -676,10 +676,13 @@ def route_query(
             )
         return formatted
 
-    def _format_runtime_sources(source_nodes: list) -> str:
+    def _filter_runtime_hotspots(items: list[dict], focus_symbol: str | None) -> list[dict]:
+        if not focus_symbol:
+            return items
+        return [item for item in items if item.get("symbol") == focus_symbol]
+
+    def _collect_runtime_hotspots(source_nodes: list) -> tuple[list[dict], list[dict]]:
         hotspots = []
-        metrics = []
-        evidence = []
         evidence_hotspots: list[dict] = []
         for source in source_nodes:
             node = getattr(source, "node", source)
@@ -707,7 +710,23 @@ def route_query(
                         "call_stacks": call_stacks,
                     }
                 )
-            elif node_type == "runtime_metric":
+            elif node_type == "evidence_pack":
+                text = getattr(node, "text", "")
+                payload = _parse_evidence_pack(text)
+                if payload:
+                    evidence_hotspots.extend(_format_evidence_hotspots(payload))
+        return hotspots, evidence_hotspots
+
+    def _format_runtime_sources(source_nodes: list, *, focus_symbol: str | None) -> str:
+        hotspots, evidence_hotspots = _collect_runtime_hotspots(source_nodes)
+        metrics = []
+        evidence = []
+        for source in source_nodes:
+            node = getattr(source, "node", source)
+            metadata = getattr(node, "metadata", {}) if node else {}
+            node_type = metadata.get("type")
+            text = getattr(node, "text", "")
+            if node_type == "runtime_metric":
                 metrics.append(
                     {
                         "metric_name": metadata.get("metric_name"),
@@ -718,13 +737,13 @@ def route_query(
                 )
             elif node_type == "evidence_pack":
                 evidence.append(text)
-                payload = _parse_evidence_pack(text)
-                if payload:
-                    evidence_hotspots.extend(_format_evidence_hotspots(payload))
         lines = []
         if hotspots or evidence_hotspots:
             lines.append("Top runtime hotspots:")
-            for item in (hotspots or evidence_hotspots):
+            runtime_items = _filter_runtime_hotspots(hotspots, focus_symbol) or _filter_runtime_hotspots(
+                evidence_hotspots, focus_symbol
+            )
+            for item in runtime_items[:1]:
                 lines.append(
                     f"- {item.get('symbol')} score={item.get('score')} "
                     f"path={item.get('file_path')} lines={item.get('line_start')}-{item.get('line_end')}"
@@ -732,10 +751,11 @@ def route_query(
                 call_stacks = item.get("call_stacks", [])
                 if call_stacks:
                     lines.append("  Call paths:")
-                    for stack in call_stacks[:3]:
+                    for stack in call_stacks[:5]:
                         if isinstance(stack, dict):
                             path = " -> ".join(stack.get("stack", []))
-                            lines.append(f"    {path}")
+                            direction = stack.get("direction", "call")
+                            lines.append(f"    ({direction}) {path}")
         if metrics:
             lines.append("Runtime metrics:")
             for item in metrics:
@@ -753,7 +773,11 @@ def route_query(
             )
         return runtime_text
 
-    def _format_code_sources(source_nodes: list) -> str:
+    def _format_code_sources(source_nodes: list, *, include_snippets: bool) -> str:
+        if not include_snippets:
+            return (
+                "Code snippets omitted to reduce context. Use MCP/RAG retrieval for specific symbols."
+            )
         snippets = []
         for source in source_nodes:
             node = getattr(source, "node", source)
@@ -769,13 +793,13 @@ def route_query(
             return ""
         return "Relevant code snippets:\n" + "\n\n".join(snippets)
 
-    def _extract_runtime_symbols(source_nodes: list) -> list[str]:
+    def _extract_runtime_symbols(source_nodes: list, *, focus_symbol: str | None) -> list[str]:
         symbols: set[str] = set()
         for source in source_nodes:
             node = getattr(source, "node", source)
             metadata = getattr(node, "metadata", {}) if node else {}
             symbol = metadata.get("symbol")
-            if symbol:
+            if symbol and (not focus_symbol or symbol == focus_symbol):
                 symbols.add(symbol)
             call_stacks_raw = metadata.get("call_stacks")
             call_stacks = []
@@ -789,7 +813,7 @@ def route_query(
             for stack in call_stacks:
                 if isinstance(stack, dict):
                     for stack_symbol in stack.get("stack", []):
-                        if stack_symbol:
+                        if stack_symbol and (not focus_symbol or stack_symbol == focus_symbol):
                             symbols.add(stack_symbol)
             text = getattr(node, "text", "")
             payload = _parse_evidence_pack(text)
@@ -798,12 +822,12 @@ def route_query(
                     if not isinstance(item, dict):
                         continue
                     hs_symbol = item.get("symbol")
-                    if hs_symbol:
+                    if hs_symbol and (not focus_symbol or hs_symbol == focus_symbol):
                         symbols.add(hs_symbol)
                     for stack in item.get("call_stacks", []) or []:
                         if isinstance(stack, dict):
                             for stack_symbol in stack.get("stack", []):
-                                if stack_symbol:
+                                if stack_symbol and (not focus_symbol or stack_symbol == focus_symbol):
                                     symbols.add(stack_symbol)
         return list(symbols)
 
@@ -889,49 +913,60 @@ def route_query(
             runtime_response_text = str(runtime_response).strip()
             source_nodes = getattr(runtime_response, "source_nodes", []) or []
 
-        runtime_context = _format_runtime_sources(source_nodes)
-        if not runtime_context:
-            runtime_context = runtime_response_text
-
-        runtime_symbols = _extract_runtime_symbols(source_nodes)
-        code_context = ""
-        if runtime_symbols:
-            symbol_query = " ".join(runtime_symbols[:30])
-            _ensure_embedding_compat(
-                paths.code_dir,
-                embed_model=config.llm.embedding_model,
-                embed_dim=code_embed_dim,
-                index_name=code_index_cfg.index_name,
-                node_label=code_index_cfg.node_label,
-            )
-            code_index = _load_index(
-                config,
-                paths.code_dir,
-                embedding_dimension=code_embed_dim,
-                index_name=code_index_cfg.index_name,
-                node_label=code_index_cfg.node_label,
-                embed_model=embed,
-            )
-            code_nodes = code_index.as_retriever(
-                similarity_top_k=config.indexing.query_code_top_k
-            ).retrieve(symbol_query)
-            code_context = _format_code_sources(code_nodes)
-
-        if prompt_template:
+        focus_symbol = config.indexing.hotspot_focus_symbol
+        hotspots, evidence_hotspots = _collect_runtime_hotspots(source_nodes)
+        runtime_items = hotspots or evidence_hotspots
+        if focus_symbol:
+            symbol_queue = [focus_symbol]
+        else:
+            seen: set[str] = set()
+            symbol_queue = []
+            for item in runtime_items[:20]:
+                symbol = item.get("symbol")
+                if symbol and symbol not in seen:
+                    seen.add(symbol)
+                    symbol_queue.append(symbol)
+        if not symbol_queue:
+            runtime_context = _format_runtime_sources(source_nodes, focus_symbol=focus_symbol)
+            runtime_context = runtime_context or runtime_response_text
             combined_query = _format_query_with_prompt(
                 query=query,
                 prompt_template=prompt_template,
                 runtime_context=runtime_context,
-                code_context=code_context,
-            )
-        else:
-            combined_query = (
+                code_context="",
+            ) if prompt_template else (
                 "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
                 f"Runtime findings:\n{runtime_context}\n\n"
-                f"{code_context}\n\n"
                 f"Question: {query}"
             )
-        return str(_graph_engine(paths.code_dir).query(combined_query))
+            return str(_graph_engine(paths.code_dir).query(combined_query))
+
+        engine = _graph_engine(paths.code_dir)
+        responses: list[str] = []
+        for symbol in symbol_queue:
+            runtime_context = _format_runtime_sources(source_nodes, focus_symbol=symbol)
+            if not runtime_context:
+                runtime_context = runtime_response_text
+            code_context = (
+                "Code snippets omitted to reduce context. Use MCP/RAG retrieval for specific symbols."
+            )
+            if prompt_template:
+                combined_query = _format_query_with_prompt(
+                    query=query,
+                    prompt_template=prompt_template,
+                    runtime_context=runtime_context,
+                    code_context=code_context,
+                )
+            else:
+                combined_query = (
+                    "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
+                    f"Runtime findings:\n{runtime_context}\n\n"
+                    f"{code_context}\n\n"
+                    f"Question: {query}"
+                )
+            response = str(engine.query(combined_query))
+            responses.append(f"## Hotspot {symbol}\n{response}".strip())
+        return "\n\n".join(responses)
 
     if mode == "code":
         return str(_graph_engine(paths.code_dir).query(query))
@@ -941,7 +976,9 @@ def route_query(
         if response_text:
             return response_text
         source_nodes = getattr(runtime_response, "source_nodes", []) or []
-        fallback = _format_runtime_sources(source_nodes)
+        fallback = _format_runtime_sources(
+            source_nodes, focus_symbol=config.indexing.hotspot_focus_symbol
+        )
         return fallback or "No runtime results available."
     if mode == "graph":
         return str(_graph_engine(paths.code_dir).query(query))

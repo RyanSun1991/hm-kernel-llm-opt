@@ -48,23 +48,26 @@ class TraceAnalystAgent:
         system_prompt: str | None = None,
     ) -> str:
         hotspot_list = list(hotspots)
-        prompt = self._build_prompt(
-            metrics,
-            hotspot_list,
-            trace_insights,
-            include_code_context=include_code_context,
-            code_root=code_root,
-            max_code_lines=max_code_lines,
-            prompt_template=prompt_template,
-        )
-        messages = self._build_messages(prompt, system_prompt=system_prompt)
         logger.info(
             "TraceAnalyst analyzing metrics=%d hotspots=%d flamegraphs=%d",
             len(metrics),
             len(hotspot_list),
             len(trace_insights or []),
         )
-        return self.llm.chat(messages)
+        responses: list[str] = []
+        for hotspot in hotspot_list or [None]:
+            prompt = self._build_prompt(
+                metrics,
+                [hotspot] if hotspot else [],
+                trace_insights,
+                include_code_context=include_code_context,
+                code_root=code_root,
+                max_code_lines=max_code_lines,
+                prompt_template=prompt_template,
+            )
+            messages = self._build_messages(prompt, system_prompt=system_prompt)
+            responses.append(self.llm.chat(messages))
+        return "\n\n".join([r for r in responses if r])
 
     def _build_prompt(
         self,
@@ -99,6 +102,10 @@ class TraceAnalystAgent:
                 + "\n".join(insight_lines)
                 + "\n"
             )
+        call_stack_lines = self._format_hotspot_call_stacks(hotspot_list)
+        if call_stack_lines:
+            insight_text += "Hotspot call stacks (caller->callee and callee->caller):\n"
+            insight_text += "\n".join(call_stack_lines) + "\n"
         template = prompt_template or self.default_prompt_template
         return template.format(
             metrics=metrics_text,
@@ -192,6 +199,25 @@ class TraceAnalystAgent:
             for offset, line in enumerate(excerpt, start=start_line):
                 context_lines.append(f"    {offset:>5} | {line}")
         return context_lines
+
+    @staticmethod
+    def _format_hotspot_call_stacks(hotspots: Sequence[HotspotCandidate]) -> list[str]:
+        lines: list[str] = []
+        for hotspot in hotspots:
+            call_stacks = hotspot.call_stacks or []
+            if not call_stacks:
+                continue
+            lines.append(f"- {hotspot.symbol}:")
+            for stack in call_stacks[:8]:
+                if not isinstance(stack, dict):
+                    continue
+                path = " -> ".join(stack.get("stack", []))
+                direction = stack.get("direction", "call")
+                events = stack.get("self_events", 0)
+                thread_id = stack.get("thread_id")
+                thread_text = f" tid={thread_id}" if thread_id is not None else ""
+                lines.append(f"  ({direction}){thread_text} {path} (events: {events:.0f})")
+        return lines
 
     @staticmethod
     def hotspots_to_json(hotspots: Iterable[HotspotCandidate]) -> list[dict[str, object]]:
