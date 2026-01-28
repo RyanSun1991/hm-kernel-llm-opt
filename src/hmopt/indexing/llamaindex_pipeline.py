@@ -45,9 +45,12 @@ class Neo4jIndexConfig:
     index_name: str
     node_label: str
 
-def _index_paths(config: AppConfig) -> IndexPaths:
+def _index_paths(config: AppConfig, *, run_id: Optional[str] = None) -> IndexPaths:
     base = Path(config.indexing.persist_dir)
-    return IndexPaths(base_dir=base, code_dir=base / "code", runtime_dir=base / "runtime")
+    runtime_dir = base / "runtime"
+    if run_id:
+        runtime_dir = runtime_dir / run_id
+    return IndexPaths(base_dir=base, code_dir=base / "code", runtime_dir=runtime_dir)
 
 
 def _load_prompt_file(path: Optional[Path]) -> Optional[str]:
@@ -235,6 +238,7 @@ def _storage_context(
             index_name: str = "vector",
             node_label: str = "Chunk",
         ) -> StorageContext:
+    use_persist_dir = (persist_dir / "docstore.json").exists()
     if config.indexing.neo4j.enabled and Neo4jPropertyGraphStore and Neo4jVectorStore:
         if embedding_dimension is None:
             raise RuntimeError("Embedding dimension is required for Neo4j vector store usage.")
@@ -255,16 +259,20 @@ def _storage_context(
         )
         # if not for_load:
         #     return StorageContext.from_defaults(property_graph_store=property_graph_store, vector_store=vector_store)
-        return StorageContext.from_defaults(
-            persist_dir=str(persist_dir),
-            property_graph_store=property_graph_store,
-            vector_store=vector_store,
-        )
+        kwargs = {
+            "property_graph_store": property_graph_store,
+            "vector_store": vector_store,
+        }
+        if use_persist_dir:
+            kwargs["persist_dir"] = str(persist_dir)
+        return StorageContext.from_defaults(**kwargs)
     if config.indexing.neo4j.enabled:
         logger.warning("Neo4j stores not available; falling back to local storage")
     # if not for_load:
     #     return StorageContext.from_defaults(property_graph_store=property_graph_store, vector_store=vector_store)
-    return StorageContext.from_defaults(persist_dir=str(persist_dir))
+    if use_persist_dir:
+        return StorageContext.from_defaults(persist_dir=str(persist_dir))
+    return StorageContext.from_defaults()
 
 
 def _neo4j_index_config(kind: str) -> Neo4jIndexConfig:
@@ -513,7 +521,7 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
 
 
 def build_runtime_index(config: AppConfig, run_id: str) -> IndexPaths:
-    paths = _index_paths(config)
+    paths = _index_paths(config, run_id=run_id)
     paths.runtime_dir.mkdir(parents=True, exist_ok=True)
     llm, embed = _build_llama_models(config)
     embed_dim = _infer_embedding_dimension(embed)
@@ -621,8 +629,9 @@ def route_query(
     query: str,
     mode: str = "auto",
     prompt_file: Optional[Path] = None,
+    run_id: Optional[str] = None,
 ) -> str:
-    paths = _index_paths(config)
+    paths = _index_paths(config, run_id=run_id)
     llm, embed = _build_llama_models(config)
     code_index_cfg = _neo4j_index_config("code")
     runtime_index_cfg = _neo4j_index_config("runtime")
@@ -631,18 +640,55 @@ def route_query(
 
     prompt_path = prompt_file or config.indexing.query_prompt_file
     prompt_template = _load_prompt_file(prompt_path)
+    max_code_snippets = 5
+    max_code_chars = 1600
+    max_runtime_chars = 6000
+
+    def _parse_evidence_pack(text: str) -> Optional[dict]:
+        if not text:
+            return None
+        prefix = "evidence_pack"
+        if text.startswith(prefix):
+            payload = text[len(prefix):].strip()
+            if payload:
+                try:
+                    return json.loads(payload)
+                except json.JSONDecodeError:
+                    return None
+        return None
+
+    def _format_evidence_hotspots(payload: dict) -> list[dict]:
+        hotspots_payload = payload.get("hotspots", []) if isinstance(payload, dict) else []
+        formatted: list[dict] = []
+        for item in hotspots_payload:
+            if not isinstance(item, dict):
+                continue
+            formatted.append(
+                {
+                    "symbol": item.get("symbol"),
+                    "score": item.get("score"),
+                    "file_path": item.get("file_path"),
+                    "line_start": item.get("line_start"),
+                    "line_end": item.get("line_end"),
+                    "text": "",
+                    "call_stacks": item.get("call_stacks", []) or [],
+                }
+            )
+        return formatted
 
     def _format_runtime_sources(source_nodes: list) -> str:
         hotspots = []
         metrics = []
         evidence = []
+        evidence_hotspots: list[dict] = []
         for source in source_nodes:
-            metadata = getattr(source.node, "metadata", {}) if hasattr(source, "node") else {}
+            node = getattr(source, "node", source)
+            metadata = getattr(node, "metadata", {}) if node else {}
             node_type = metadata.get("type")
-            text = getattr(source.node, "text", "")
+            text = getattr(node, "text", "")
+            call_stacks: list = []
             if node_type == "runtime_hotspot":
                 call_stacks_raw = metadata.get("call_stacks")
-                call_stacks = []
                 if isinstance(call_stacks_raw, str):
                     try:
                         call_stacks = json.loads(call_stacks_raw)
@@ -672,10 +718,13 @@ def route_query(
                 )
             elif node_type == "evidence_pack":
                 evidence.append(text)
+                payload = _parse_evidence_pack(text)
+                if payload:
+                    evidence_hotspots.extend(_format_evidence_hotspots(payload))
         lines = []
-        if hotspots:
+        if hotspots or evidence_hotspots:
             lines.append("Top runtime hotspots:")
-            for item in hotspots:
+            for item in (hotspots or evidence_hotspots):
                 lines.append(
                     f"- {item.get('symbol')} score={item.get('score')} "
                     f"path={item.get('file_path')} lines={item.get('line_start')}-{item.get('line_end')}"
@@ -696,7 +745,67 @@ def route_query(
         if evidence:
             lines.append("Runtime evidence excerpt:")
             lines.extend(evidence[:1])
-        return "\n".join(lines).strip()
+        runtime_text = "\n".join(lines).strip()
+        if len(runtime_text) > max_runtime_chars:
+            runtime_text = (
+                f"{runtime_text[:max_runtime_chars]}\n"
+                f"...[truncated {len(runtime_text) - max_runtime_chars} chars]"
+            )
+        return runtime_text
+
+    def _format_code_sources(source_nodes: list) -> str:
+        snippets = []
+        for source in source_nodes:
+            node = getattr(source, "node", source)
+            text = getattr(node, "text", "")
+            if not text:
+                continue
+            if len(text) > max_code_chars:
+                text = f"{text[:max_code_chars]}\n...[truncated {len(text) - max_code_chars} chars]"
+            snippets.append(text)
+            if len(snippets) >= max_code_snippets:
+                break
+        if not snippets:
+            return ""
+        return "Relevant code snippets:\n" + "\n\n".join(snippets)
+
+    def _extract_runtime_symbols(source_nodes: list) -> list[str]:
+        symbols: set[str] = set()
+        for source in source_nodes:
+            node = getattr(source, "node", source)
+            metadata = getattr(node, "metadata", {}) if node else {}
+            symbol = metadata.get("symbol")
+            if symbol:
+                symbols.add(symbol)
+            call_stacks_raw = metadata.get("call_stacks")
+            call_stacks = []
+            if isinstance(call_stacks_raw, str):
+                try:
+                    call_stacks = json.loads(call_stacks_raw)
+                except json.JSONDecodeError:
+                    pass
+            elif isinstance(call_stacks_raw, list):
+                call_stacks = call_stacks_raw
+            for stack in call_stacks:
+                if isinstance(stack, dict):
+                    for stack_symbol in stack.get("stack", []):
+                        if stack_symbol:
+                            symbols.add(stack_symbol)
+            text = getattr(node, "text", "")
+            payload = _parse_evidence_pack(text)
+            if payload:
+                for item in payload.get("hotspots", []) or []:
+                    if not isinstance(item, dict):
+                        continue
+                    hs_symbol = item.get("symbol")
+                    if hs_symbol:
+                        symbols.add(hs_symbol)
+                    for stack in item.get("call_stacks", []) or []:
+                        if isinstance(stack, dict):
+                            for stack_symbol in stack.get("stack", []):
+                                if stack_symbol:
+                                    symbols.add(stack_symbol)
+        return list(symbols)
 
     def _engine(dir_path: Path):
         index_cfg = runtime_index_cfg if dir_path == paths.runtime_dir else code_index_cfg
@@ -763,44 +872,64 @@ def route_query(
         )
 
     def _runtime_to_code_query() -> str:
-        runtime_response = _engine(paths.runtime_dir).query(query)
+        runtime_response_text = ""
+        if run_id:
+            engine = init_engine(
+                config.storage.db_url,
+                schema_path=Path("src/hmopt/storage/db/schema.sql"),
+            )
+            with session_scope(engine) as session:
+                source_nodes = build_runtime_nodes(
+                    session,
+                    run_id,
+                    max_evidence_chars=config.indexing.runtime_evidence_max_chars,
+                )
+        else:
+            runtime_response = _engine(paths.runtime_dir).query(query)
+            runtime_response_text = str(runtime_response).strip()
+            source_nodes = getattr(runtime_response, "source_nodes", []) or []
 
-        source_nodes = getattr(runtime_response, "source_nodes", []) or []
-        call_stack_symbols: set[str] = set()
-        for source in source_nodes:
-            metadata = getattr(source.node, "metadata", {}) if hasattr(source, "node") else {}
-            call_stacks_raw = metadata.get("call_stacks")
-            call_stacks = []
-            if isinstance(call_stacks_raw, str):
-                try:
-                    call_stacks = json.loads(call_stacks_raw)
-                except json.JSONDecodeError:
-                    pass
-            elif isinstance(call_stacks_raw, list):
-                call_stacks = call_stacks_raw
-            for stack in call_stacks:
-                if isinstance(stack, dict):
-                    for symbol in stack.get("stack", []):
-                        call_stack_symbols.add(symbol)
+        runtime_context = _format_runtime_sources(source_nodes)
+        if not runtime_context:
+            runtime_context = runtime_response_text
 
-        call_stack_context = ""
-        if call_stack_symbols:
-            symbols_text = ", ".join(list(call_stack_symbols)[:20])
-            call_stack_context = f"\nRelated symbols from call stacks: {symbols_text}"
-
-        runtime_context = f"{runtime_response}\n{call_stack_context}"
+        runtime_symbols = _extract_runtime_symbols(source_nodes)
+        code_context = ""
+        if runtime_symbols:
+            symbol_query = " ".join(runtime_symbols[:30])
+            _ensure_embedding_compat(
+                paths.code_dir,
+                embed_model=config.llm.embedding_model,
+                embed_dim=code_embed_dim,
+                index_name=code_index_cfg.index_name,
+                node_label=code_index_cfg.node_label,
+            )
+            code_index = _load_index(
+                config,
+                paths.code_dir,
+                embedding_dimension=code_embed_dim,
+                index_name=code_index_cfg.index_name,
+                node_label=code_index_cfg.node_label,
+                embed_model=embed,
+            )
+            code_nodes = code_index.as_retriever(
+                similarity_top_k=config.indexing.query_code_top_k
+            ).retrieve(symbol_query)
+            code_context = _format_code_sources(code_nodes)
 
         if prompt_template:
             combined_query = _format_query_with_prompt(
                 query=query,
                 prompt_template=prompt_template,
                 runtime_context=runtime_context,
+                code_context=code_context,
             )
         else:
             combined_query = (
                 "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
-                f"Runtime findings:\n{runtime_context}\n"
-                f"\nQuestion: {query}"
+                f"Runtime findings:\n{runtime_context}\n\n"
+                f"{code_context}\n\n"
+                f"Question: {query}"
             )
         return str(_graph_engine(paths.code_dir).query(combined_query))
 

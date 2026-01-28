@@ -129,11 +129,12 @@ def query_indexes(payload: dict) -> dict:
     """Query routed across code/runtime indexes."""
     query_str = payload.get("query", "")
     mode = payload.get("mode", "auto")
+    run_id = payload.get("run_id")
     if not query_str:
         raise HTTPException(status_code=400, detail="query is required")
     cfg = AppConfig.from_yaml(CONFIG_PATH)
-    response = route_query(cfg, query_str, mode=mode)
-    return {"mode": mode, "response": response}
+    response = route_query(cfg, query_str, mode=mode, run_id=run_id)
+    return {"mode": mode, "run_id": run_id, "response": response}
 
 
 @app.get("/runs/{run_id}/report")

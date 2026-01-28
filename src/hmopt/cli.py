@@ -193,6 +193,9 @@ def index_runtime(
 def query(
     query_str: str = typer.Argument(..., help="Query to run against indexes"),
     mode: str = typer.Option("auto", help="auto|code|runtime|runtime_code|graph"),
+    run_id: Optional[str] = typer.Option(
+        None, "--run-id", help="Run ID for selecting runtime index"
+    ),
     config: str = typer.Option("configs/app.yaml", help="Config YAML"),
     prompt_file: Optional[str] = typer.Option(
         None,
@@ -207,7 +210,7 @@ def query(
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
     prompt_path = Path(prompt_file) if prompt_file else None
-    response = route_query(cfg, query_str, mode=mode, prompt_file=prompt_path)
+    response = route_query(cfg, query_str, mode=mode, prompt_file=prompt_path, run_id=run_id)
     typer.echo(response)
 
 
