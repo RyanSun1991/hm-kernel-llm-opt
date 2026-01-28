@@ -69,7 +69,10 @@ def build_runtime_nodes(
                 if isinstance(stack, dict):
                     path = " -> ".join(stack.get("stack", []))
                     events = stack.get("self_events", 0)
-                    stack_lines.append(f"  [{idx+1}] {path} (events: {events:.0f})")
+                    direction = stack.get("direction", "call")
+                    stack_lines.append(
+                        f"  [{idx+1}] ({direction}) {path} (events: {events:.0f})"
+                    )
             if stack_lines:
                 call_stack_text = "\nCall stacks:\n" + "\n".join(stack_lines)
 

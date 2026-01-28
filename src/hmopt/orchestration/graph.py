@@ -84,9 +84,15 @@ def _hotspots_from_symbol_counts(
     symbol_stacks: dict[str, list[dict]] = {}
     if call_stacks:
         for stack in call_stacks:
-            leaf = stack.get("leaf_symbol")
-            if leaf:
-                symbol_stacks.setdefault(leaf, []).append(stack)
+            if not isinstance(stack, dict):
+                continue
+            stack_symbols = stack.get("stack") or []
+            if not isinstance(stack_symbols, list) or not stack_symbols:
+                continue
+            for symbol in stack_symbols:
+                if not symbol:
+                    continue
+                symbol_stacks.setdefault(symbol, []).append(stack)
 
     return [
         HotspotCandidate(
@@ -96,10 +102,44 @@ def _hotspots_from_symbol_counts(
             line_end=None,
             score=score,
             evidence_artifacts=[],
-            call_stacks=symbol_stacks.get(name, [])[:10],
+            call_stacks=_expand_symbol_call_stacks(name, symbol_stacks.get(name, [])),
         )
         for name, score in ordered
     ]
+
+
+def _expand_symbol_call_stacks(symbol: str, stacks: list[dict]) -> list[dict]:
+    if not stacks:
+        return []
+    normalized: list[dict] = []
+    seen: set[tuple[str, tuple[str, ...], str | None]] = set()
+    for stack in stacks:
+        path = stack.get("stack") or []
+        if not isinstance(path, list) or symbol not in path:
+            continue
+        direction = stack.get("direction") or "call"
+        try:
+            symbol_idx = path.index(symbol)
+        except ValueError:
+            continue
+        if direction == "called":
+            trimmed = path[symbol_idx:]
+        else:
+            trimmed = path[: symbol_idx + 1]
+        key = (direction, tuple(trimmed), stack.get("thread_id"))
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(
+            {
+                "stack": trimmed,
+                "direction": direction,
+                "thread_id": stack.get("thread_id"),
+                "self_events": stack.get("self_events"),
+                "total_events": stack.get("total_events"),
+            }
+        )
+    return normalized
 
 
 def _top_weighted_items(weights: dict[str, float], *, top_n: int, total: float | None = None) -> list[dict[str, float]]:
@@ -330,6 +370,7 @@ def _format_evidence_report(
     hotspots: list[HotspotCandidate],
     trace_insights: list[dict[str, Any]],
     summary: str,
+    hotspot_focus_symbol: str | None = None,
 ) -> str:
     lines: list[str] = [
         f"# Evidence snapshot for run {run_id}",
@@ -338,6 +379,8 @@ def _format_evidence_report(
         summary or "No summary available.",
         "## Metrics",
     ]
+    if hotspot_focus_symbol:
+        lines.append(f"Focused hotspot: {hotspot_focus_symbol}")
     if metrics:
         for key, value in metrics.items():
             lines.append(f"- {key}: {value}")
@@ -452,6 +495,14 @@ def _format_evidence_report(
                     lines.append(f"    - {name}: {weight:.2f}{ratio_text}")
 
     return "\n".join(lines)
+
+
+def _filter_hotspots_by_symbol(
+    hotspots: list[HotspotCandidate], focus_symbol: str | None
+) -> list[HotspotCandidate]:
+    if not focus_symbol:
+        return hotspots
+    return [hs for hs in hotspots if hs.symbol == focus_symbol]
 
 
 def _store_flamegraph_maps(services: PipelineServices, run_id: str, result, source_path: Path | None) -> None:
@@ -796,20 +847,29 @@ def _build_evidence(services: PipelineServices, state: RunState) -> RunState:
     logger.info("Building evidence pack for iteration=%s", state["iteration"])
     metrics = state.get("candidate_metrics") or state.get("baseline_metrics") or {}
     hotspots = [_hotspot_from_dict(h) for h in state.get("hotspots", [])]
+    focus_symbol = services.config.indexing.hotspot_focus_symbol
+    filtered_hotspots = _filter_hotspots_by_symbol(hotspots, focus_symbol)
     trace_insights = state.get("trace_insights", [])
-    summary = services.trace_analyst.analyze(metrics, hotspots, trace_insights)
+    summary = services.trace_analyst.analyze(metrics, filtered_hotspots, trace_insights)
     pack = {
         "iteration": state["iteration"],
         "metrics": metrics,
-        "hotspots": [h.__dict__ for h in hotspots],
+        "hotspots": [h.__dict__ for h in filtered_hotspots],
         "summary": summary,
         "trace_insights": trace_insights,
+        "hotspot_focus_symbol": focus_symbol,
     }
     artifact = services.ctx.artifact_store.store_json(
         pack, kind="evidence_pack", run_id=state["run_id"], session=services.ctx.session
     )
     report_text = _format_evidence_report(
-        state["run_id"], state["iteration"], metrics, hotspots, trace_insights, summary
+        state["run_id"],
+        state["iteration"],
+        metrics,
+        filtered_hotspots,
+        trace_insights,
+        summary,
+        hotspot_focus_symbol=focus_symbol,
     )
     report_artifact = services.ctx.artifact_store.store_text(
         report_text,
