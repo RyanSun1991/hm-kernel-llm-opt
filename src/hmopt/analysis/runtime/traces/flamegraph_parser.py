@@ -43,6 +43,7 @@ class FlamegraphResult:
     lib_summaries: dict[str, dict] = field(default_factory=dict)
     pcg_nodes: dict[str, dict] = field(default_factory=dict)
     pcg_edges: list[dict] = field(default_factory=list)
+    call_stacks: dict[str, list[dict]] = field(default_factory=dict)
     source_path: Optional[str] = None
 
     def to_metrics(self) -> list[Metric]:
@@ -139,21 +140,50 @@ def _walk_call_tree(
     name_maps: FlamegraphNameMaps,
     node_stats: dict[str, dict],
     edge_stats: dict[tuple[str, str, str], float],
+    callstack_stats: dict[tuple[str, str, tuple[str, ...]], dict],
     *,
     parent: Optional[str] = None,
     direction: str = "call",
+    stack: Optional[list[str]] = None,
+    context: Optional[dict] = None,
 ) -> None:
     if not isinstance(node, dict):
         return
+    if stack is None:
+        stack = []
     symbol_id = node.get("symbol")
     current: Optional[str] = parent
+    current_stack = stack
     if symbol_id not in (None, -1):
         raw = name_maps.resolve_symbol(symbol_id)
         norm = _normalize_symbol(raw)
         current = norm
+        current_stack = [*stack, norm]
         stats = node_stats.setdefault(norm, {"self_events": 0.0, "sub_events": 0.0, "label": raw})
         stats["self_events"] += float(node.get("selfEvents", 0) or 0)
         stats["sub_events"] += float(node.get("subEvents", 0) or 0)
+        stack_key = (norm, direction, tuple(current_stack))
+        entry = callstack_stats.setdefault(
+            stack_key,
+            {
+                "symbol": norm,
+                "direction": direction,
+                "path": list(current_stack),
+                "self_events": 0.0,
+                "sub_events": 0.0,
+                "tids": set(),
+                "pids": set(),
+            },
+        )
+        entry["self_events"] += float(node.get("selfEvents", 0) or 0)
+        entry["sub_events"] += float(node.get("subEvents", 0) or 0)
+        if context:
+            tid = context.get("tid")
+            pid = context.get("pid")
+            if tid is not None:
+                entry["tids"].add(int(tid))
+            if pid is not None:
+                entry["pids"].add(int(pid))
         if parent:
             key = (parent, norm, direction)
             edge_stats[key] = edge_stats.get(key, 0.0) + float(node.get("subEvents", 0) or 0)
@@ -165,8 +195,11 @@ def _walk_call_tree(
                 name_maps,
                 node_stats,
                 edge_stats,
+                callstack_stats,
                 parent=current,
                 direction=direction,
+                stack=current_stack,
+                context=context,
             )
 
 
@@ -341,6 +374,7 @@ def _parse_sample_info(data: dict, path: Path) -> FlamegraphResult:
     event_counts: dict[str, float] = {}
     node_stats: dict[str, dict] = {}
     edge_stats: dict[tuple[str, str, str], float] = {}
+    callstack_stats: dict[tuple[str, str, tuple[str, ...]], dict] = {}
     for info in record_infos:
         event_name = info.get("eventConfigName") or "event"
         count = float(info.get("eventCount", 0) or 0)
@@ -392,8 +426,10 @@ def _parse_sample_info(data: dict, path: Path) -> FlamegraphResult:
                         name_maps,
                         node_stats,
                         edge_stats,
+                        callstack_stats,
                         parent=None,
                         direction="call",
+                        context={"pid": pid, "tid": tid},
                     )
                 called_order = thread.get("CalledOrder")
                 if isinstance(called_order, dict):
@@ -402,8 +438,10 @@ def _parse_sample_info(data: dict, path: Path) -> FlamegraphResult:
                         name_maps,
                         node_stats,
                         edge_stats,
+                        callstack_stats,
                         parent=None,
                         direction="called",
+                        context={"pid": pid, "tid": tid},
                     )
                 for lib in thread.get("libs", []) or []:
                     file_id = lib.get("fileId")
@@ -472,6 +510,18 @@ def _parse_sample_info(data: dict, path: Path) -> FlamegraphResult:
         for (src, dst, direction), weight in edge_stats.items()
     ]
 
+    call_stacks: dict[str, list[dict]] = {}
+    for entry in callstack_stats.values():
+        symbol = entry.get("symbol")
+        if not symbol:
+            continue
+        out = dict(entry)
+        out["tids"] = sorted(entry.get("tids", []))
+        out["pids"] = sorted(entry.get("pids", []))
+        call_stacks.setdefault(symbol, []).append(out)
+    for symbol, entries in call_stacks.items():
+        entries.sort(key=lambda item: item.get("sub_events", 0.0), reverse=True)
+
     logger.info(
         "Flamegraph sample parsed: file=%s events=%.0f samples=%d processes=%d threads=%d symbols=%d",
         path,
@@ -502,5 +552,6 @@ def _parse_sample_info(data: dict, path: Path) -> FlamegraphResult:
         lib_summaries=lib_summaries,
         pcg_nodes=node_stats,
         pcg_edges=pcg_edges,
+        call_stacks=call_stacks,
         source_path=str(path),
     )

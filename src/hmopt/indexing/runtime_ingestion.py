@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
-from typing import Any, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from llama_index.core.schema import TextNode
 from sqlalchemy.orm import Session
 
 from hmopt.storage.db import models
+
+_CALLSTACK_TOP_K = 10
 
 
 def _read_evidence_text(path: str, max_chars: Optional[int]) -> str:
@@ -76,6 +79,59 @@ def build_runtime_nodes(
                     "line_start": _normalize_metadata_value(hotspot.line_start),
                     "line_end": _normalize_metadata_value(hotspot.line_end),
                     "score": _normalize_metadata_value(hotspot.score),
+                },
+            )
+        )
+
+    callstack_artifacts = (
+        session.query(models.Artifact)
+        .filter(models.Artifact.run_id == run_id, models.Artifact.kind == "flamegraph_call_stacks")
+        .all()
+    )
+    callstack_groups: Dict[Tuple[str, str], List[dict]] = {}
+    for artifact in callstack_artifacts:
+        try:
+            payload = json.loads(Path(artifact.path).read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        for symbol, stacks in payload.items():
+            if not isinstance(stacks, list):
+                continue
+            for entry in stacks:
+                if not isinstance(entry, dict):
+                    continue
+                direction = str(entry.get("direction") or "call")
+                callstack_groups.setdefault((symbol, direction), []).append(entry)
+
+    for (symbol, direction), entries in callstack_groups.items():
+        entries.sort(key=lambda item: item.get("sub_events", 0.0), reverse=True)
+        top_entries = entries[:_CALLSTACK_TOP_K]
+        lines = [
+            f"callstack symbol {symbol} direction {direction} total_entries {len(entries)}"
+        ]
+        for entry in top_entries:
+            path = entry.get("path") or []
+            path_str = " -> ".join(path)
+            lines.append(
+                f"- sub_events {entry.get('sub_events', 0)} self_events {entry.get('self_events', 0)} "
+                f"path {path_str}"
+            )
+            tids = entry.get("tids") or []
+            pids = entry.get("pids") or []
+            if tids or pids:
+                lines.append(f"  tids {tids} pids {pids}")
+        text = "\n".join(lines)
+        nodes.append(
+            TextNode(
+                text=text,
+                metadata={
+                    "type": "runtime_callstack",
+                    "run_id": run_id,
+                    "symbol": symbol,
+                    "direction": direction,
+                    "entry_count": len(entries),
                 },
             )
         )

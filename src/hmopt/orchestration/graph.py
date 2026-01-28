@@ -489,6 +489,17 @@ def _store_flamegraph_maps(services: PipelineServices, run_id: str, result, sour
                 "Stored flamegraph per-thread symbol counts: artifact=%s",
                 counts_art.artifact_id,
             )
+    if getattr(result, "call_stacks", None):
+        call_stacks = result.call_stacks
+        if call_stacks:
+            stacks_art = services.ctx.artifact_store.store_json(
+                call_stacks,
+                kind="flamegraph_call_stacks",
+                run_id=run_id,
+                session=services.ctx.session,
+                metadata=metadata,
+            )
+            logger.info("Stored flamegraph call stacks: artifact=%s", stacks_art.artifact_id)
     _store_flamegraph_pcg(services, run_id, result, metadata)
     _store_name_maps_in_vector_store(services, run_id, result)
     _store_name_map_summaries(services, run_id, result, metadata)

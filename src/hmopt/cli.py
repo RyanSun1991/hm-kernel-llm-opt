@@ -191,11 +191,14 @@ def index_runtime(
 
 @app.command()
 def query(
-    query_str: str = typer.Argument(..., help="Query to run against indexes"),
+    query_str: str = typer.Argument(
+        ..., help="Query text or @/path to a prompt file (e.g. @prompt.md)"
+    ),
     mode: str = typer.Option("auto", help="auto|code|runtime"),
     config: str = typer.Option("configs/app.yaml", help="Config YAML"),
 ) -> None:
     # Demo: python -m hmopt.cli query "Which function is hot?" --mode runtime
+    # Demo: python -m hmopt.cli query @queries/runtime_prompt.md --mode runtime_code
     # Purpose: query routing across code/runtime indexes.
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)

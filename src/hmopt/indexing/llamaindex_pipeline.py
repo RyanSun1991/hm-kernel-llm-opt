@@ -556,6 +556,22 @@ def _docstore_has_nodes(storage: StorageContext) -> bool:
         return False
 
 
+def _load_query_text(query: str) -> str:
+    if not query:
+        return query
+    raw = query.strip()
+    if raw.startswith("@"):
+        candidate = raw[1:].strip()
+        if candidate:
+            path = Path(candidate)
+            if path.exists() and path.is_file():
+                return path.read_text(encoding="utf-8", errors="ignore")
+    path = Path(raw)
+    if path.exists() and path.is_file():
+        return path.read_text(encoding="utf-8", errors="ignore")
+    return query
+
+
 def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
     paths = _index_paths(config)
     llm, embed = _build_llama_models(config)
@@ -563,11 +579,13 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
     runtime_index_cfg = _neo4j_index_config("runtime")
     code_embed_dim = _embedding_dimension_for_query(paths.code_dir, embed)
     runtime_embed_dim = _embedding_dimension_for_query(paths.runtime_dir, embed)
+    query_text = _load_query_text(query)
 
     def _format_runtime_sources(source_nodes: list) -> str:
         hotspots = []
         metrics = []
         evidence = []
+        callstacks = []
         for source in source_nodes:
             metadata = getattr(source.node, "metadata", {}) if hasattr(source, "node") else {}
             node_type = metadata.get("type")
@@ -594,6 +612,8 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
                 )
             elif node_type == "evidence_pack":
                 evidence.append(text)
+            elif node_type == "runtime_callstack":
+                callstacks.append(text)
         lines = []
         if hotspots:
             lines.append("Top runtime hotspots:")
@@ -608,6 +628,9 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
                 lines.append(
                     f"- {item.get('metric_name')} value={item.get('value')} unit={item.get('unit')}"
                 )
+        if callstacks:
+            lines.append("Runtime call stacks:")
+            lines.extend(callstacks[:5])
         if evidence:
             lines.append("Runtime evidence excerpt:")
             lines.extend(evidence[:1])
@@ -678,18 +701,20 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
         )
 
     def _runtime_to_code_query() -> str:
-        runtime_response = _engine(paths.runtime_dir).query(query)
+        runtime_response = _engine(paths.runtime_dir).query(query_text)
+        source_nodes = getattr(runtime_response, "source_nodes", []) or []
+        runtime_summary = _format_runtime_sources(source_nodes)
         combined_query = (
             "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
-            f"Runtime findings:\n{runtime_response}\n\n"
-            f"Question: {query}"
+            f"Runtime findings:\n{runtime_summary or runtime_response}\n\n"
+            f"Question: {query_text}"
         )
         return str(_graph_engine(paths.code_dir).query(combined_query))
 
     if mode == "code":
-        return str(_graph_engine(paths.code_dir).query(query))
+        return str(_graph_engine(paths.code_dir).query(query_text))
     if mode == "runtime":
-        runtime_response = _engine(paths.runtime_dir).query(query)
+        runtime_response = _engine(paths.runtime_dir).query(query_text)
         response_text = str(runtime_response).strip()
         if response_text:
             return response_text
@@ -697,11 +722,11 @@ def route_query(config: AppConfig, query: str, mode: str = "auto") -> str:
         fallback = _format_runtime_sources(source_nodes)
         return fallback or "No runtime results available."
     if mode == "graph":
-        return str(_graph_engine(paths.code_dir).query(query))
+        return str(_graph_engine(paths.code_dir).query(query_text))
     if mode == "runtime_code":
         return _runtime_to_code_query()
 
     keywords_runtime = ["perf", "trace", "runtime", "framegraph", "instruction", "hotspot"]
-    if any(k in query.lower() for k in keywords_runtime):
+    if any(k in query_text.lower() for k in keywords_runtime):
         return _runtime_to_code_query()
-    return str(_graph_engine(paths.code_dir).query(query))
+    return str(_graph_engine(paths.code_dir).query(query_text))
