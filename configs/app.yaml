@@ -46,6 +46,7 @@ indexing:
   query_code_top_k: 10
   query_runtime_top_k: 10
   query_graph_top_k: 3
+  query_code_context_mode: mcp   # mcp|snippets
   clangd:
     enabled: true
     binary: clangd

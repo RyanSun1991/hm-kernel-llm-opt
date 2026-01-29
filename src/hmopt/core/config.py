@@ -123,6 +123,7 @@ class IndexingConfig(BaseModel):
     query_graph_top_k: int = 3
     query_prompt_file: Optional[Path] = None
     query_system_prompt_file: Optional[Path] = None
+    query_code_context_mode: str = "mcp"
     hotspot_focus_symbol: Optional[str] = None
     neo4j: Neo4jConfig = Neo4jConfig()
     clangd: ClangdConfig = ClangdConfig()
@@ -314,6 +315,7 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
             if indexing_cfg.get("query_prompt_file") else None,
         "query_system_prompt_file": Path(indexing_cfg["query_system_prompt_file"])
             if indexing_cfg.get("query_system_prompt_file") else None,
+        "query_code_context_mode": indexing_cfg.get("query_code_context_mode", "mcp"),
         "neo4j": neo4j_norm,
         "clangd": clangd_norm,
     }

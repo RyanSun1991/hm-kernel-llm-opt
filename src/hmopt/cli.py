@@ -191,7 +191,9 @@ def index_runtime(
 
 @app.command()
 def query(
-    query_str: str = typer.Argument(..., help="Query to run against indexes"),
+    query_str: str = typer.Argument(
+        ..., help="Query text or @/path to a prompt file"
+    ),
     mode: str = typer.Option("auto", help="auto|code|runtime|runtime_code|graph"),
     run_id: Optional[str] = typer.Option(
         None, "--run-id", help="Run ID for selecting runtime index"
@@ -205,6 +207,7 @@ def query(
     ),
 ) -> None:
     # Demo: python -m hmopt.cli query "Which function is hot?" --mode runtime
+    # Demo: python -m hmopt.cli query @queries/runtime_prompt.md --mode runtime_code
     # Demo: python -m hmopt.cli query "analyze hotspots" --prompt-file configs/prompts/analysis.md
     # Purpose: query routing across code/runtime indexes with optional custom prompt.
     logging.basicConfig(level=logging.INFO)

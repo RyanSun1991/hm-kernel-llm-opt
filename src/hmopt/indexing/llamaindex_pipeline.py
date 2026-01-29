@@ -80,6 +80,30 @@ def _load_prompt_file(path: Optional[Path]) -> Optional[str]:
         return None
 
 
+def _load_query_text(query: str) -> str:
+    """Load query content from a file path or @path shorthand."""
+    if not query:
+        return query
+    raw = query.strip()
+    if raw.startswith("@"):
+        candidate = raw[1:].strip()
+        if candidate:
+            path = Path(candidate)
+            if path.exists() and path.is_file():
+                try:
+                    return path.read_text(encoding="utf-8", errors="ignore").strip()
+                except OSError as exc:
+                    logger.warning("Failed to read query file %s: %s", path, exc)
+                    return query
+    path = Path(raw)
+    if path.exists() and path.is_file():
+        try:
+            return path.read_text(encoding="utf-8", errors="ignore").strip()
+        except OSError as exc:
+            logger.warning("Failed to read query file %s: %s", path, exc)
+    return query
+
+
 def _format_query_with_prompt(
     query: str,
     prompt_template: Optional[str],
@@ -640,6 +664,7 @@ def route_query(
 
     prompt_path = prompt_file or config.indexing.query_prompt_file
     prompt_template = _load_prompt_file(prompt_path)
+    query_text = _load_query_text(query)
     max_code_snippets = 3
     max_code_chars = 1600
     max_runtime_chars = 6000
@@ -675,6 +700,33 @@ def route_query(
                 }
             )
         return formatted
+
+    def _format_evidence_excerpt(payload: dict, focus_symbol: str | None) -> list[str]:
+        if not isinstance(payload, dict):
+            return []
+        hotspots = payload.get("hotspots", []) or []
+        if focus_symbol:
+            hotspots = [
+                item for item in hotspots
+                if isinstance(item, dict) and item.get("symbol") == focus_symbol
+            ]
+        lines: list[str] = []
+        for item in hotspots[:3]:
+            if not isinstance(item, dict):
+                continue
+            lines.append(
+                f"- {item.get('symbol')} score={item.get('score')} "
+                f"path={item.get('file_path')} lines={item.get('line_start')}-{item.get('line_end')}"
+            )
+            call_stacks = item.get("call_stacks", []) or []
+            if call_stacks:
+                lines.append("  Call paths:")
+                for stack in call_stacks[:3]:
+                    if isinstance(stack, dict):
+                        path = " -> ".join(stack.get("stack", []))
+                        direction = stack.get("direction", "call")
+                        lines.append(f"    ({direction}) {path}")
+        return lines
 
     def _filter_runtime_hotspots(items: list[dict], focus_symbol: str | None) -> list[dict]:
         if not focus_symbol:
@@ -720,7 +772,7 @@ def route_query(
     def _format_runtime_sources(source_nodes: list, *, focus_symbol: str | None) -> str:
         hotspots, evidence_hotspots = _collect_runtime_hotspots(source_nodes)
         metrics = []
-        evidence = []
+        evidence_lines: list[str] = []
         for source in source_nodes:
             node = getattr(source, "node", source)
             metadata = getattr(node, "metadata", {}) if node else {}
@@ -736,7 +788,9 @@ def route_query(
                     }
                 )
             elif node_type == "evidence_pack":
-                evidence.append(text)
+                payload = _parse_evidence_pack(text)
+                if payload:
+                    evidence_lines.extend(_format_evidence_excerpt(payload, focus_symbol))
         lines = []
         if hotspots or evidence_hotspots:
             lines.append("Top runtime hotspots:")
@@ -762,9 +816,9 @@ def route_query(
                 lines.append(
                     f"- {item.get('metric_name')} value={item.get('value')} unit={item.get('unit')}"
                 )
-        if evidence:
+        if evidence_lines:
             lines.append("Runtime evidence excerpt:")
-            lines.extend(evidence[:1])
+            lines.extend(evidence_lines)
         runtime_text = "\n".join(lines).strip()
         if len(runtime_text) > max_runtime_chars:
             runtime_text = (
@@ -792,6 +846,20 @@ def route_query(
         if not snippets:
             return ""
         return "Relevant code snippets:\n" + "\n\n".join(snippets)
+
+    def _retrieve_code_sources(text: str) -> list:
+        if not text:
+            return []
+        index = _load_index(
+            config,
+            paths.code_dir,
+            embedding_dimension=code_embed_dim,
+            index_name=code_index_cfg.index_name,
+            node_label=code_index_cfg.node_label,
+            embed_model=embed,
+        )
+        retriever = index.as_retriever(similarity_top_k=config.indexing.query_code_top_k)
+        return retriever.retrieve(text)
 
     def _extract_runtime_symbols(source_nodes: list, *, focus_symbol: str | None) -> list[str]:
         symbols: set[str] = set()
@@ -909,7 +977,7 @@ def route_query(
                     max_evidence_chars=config.indexing.runtime_evidence_max_chars,
                 )
         else:
-            runtime_response = _engine(paths.runtime_dir).query(query)
+            runtime_response = _engine(paths.runtime_dir).query(query_text)
             runtime_response_text = str(runtime_response).strip()
             source_nodes = getattr(runtime_response, "source_nodes", []) or []
 
@@ -929,15 +997,20 @@ def route_query(
         if not symbol_queue:
             runtime_context = _format_runtime_sources(source_nodes, focus_symbol=focus_symbol)
             runtime_context = runtime_context or runtime_response_text
+            code_context = ""
+            if config.indexing.query_code_context_mode == "snippets":
+                code_sources = _retrieve_code_sources(query_text)
+                code_context = _format_code_sources(code_sources, include_snippets=True)
             combined_query = _format_query_with_prompt(
-                query=query,
+                query=query_text,
                 prompt_template=prompt_template,
                 runtime_context=runtime_context,
-                code_context="",
+                code_context=code_context,
             ) if prompt_template else (
                 "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
                 f"Runtime findings:\n{runtime_context}\n\n"
-                f"Question: {query}"
+                f"{code_context}\n\n"
+                f"Question: {query_text}"
             )
             return str(_graph_engine(paths.code_dir).query(combined_query))
 
@@ -947,12 +1020,15 @@ def route_query(
             runtime_context = _format_runtime_sources(source_nodes, focus_symbol=symbol)
             if not runtime_context:
                 runtime_context = runtime_response_text
-            code_context = (
-                "Code snippets omitted to reduce context. Use MCP/RAG retrieval for specific symbols."
-            )
+            code_context_mode = config.indexing.query_code_context_mode
+            if code_context_mode == "snippets":
+                code_sources = _retrieve_code_sources(symbol or query_text)
+                code_context = _format_code_sources(code_sources, include_snippets=True)
+            else:
+                code_context = _format_code_sources([], include_snippets=False)
             if prompt_template:
                 combined_query = _format_query_with_prompt(
-                    query=query,
+                    query=query_text,
                     prompt_template=prompt_template,
                     runtime_context=runtime_context,
                     code_context=code_context,
@@ -962,16 +1038,16 @@ def route_query(
                     "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
                     f"Runtime findings:\n{runtime_context}\n\n"
                     f"{code_context}\n\n"
-                    f"Question: {query}"
+                    f"Question: {query_text}"
                 )
             response = str(engine.query(combined_query))
             responses.append(f"## Hotspot {symbol}\n{response}".strip())
         return "\n\n".join(responses)
 
     if mode == "code":
-        return str(_graph_engine(paths.code_dir).query(query))
+        return str(_graph_engine(paths.code_dir).query(query_text))
     if mode == "runtime":
-        runtime_response = _engine(paths.runtime_dir).query(query)
+        runtime_response = _engine(paths.runtime_dir).query(query_text)
         response_text = str(runtime_response).strip()
         if response_text:
             return response_text
@@ -981,11 +1057,11 @@ def route_query(
         )
         return fallback or "No runtime results available."
     if mode == "graph":
-        return str(_graph_engine(paths.code_dir).query(query))
+        return str(_graph_engine(paths.code_dir).query(query_text))
     if mode == "runtime_code":
         return _runtime_to_code_query()
 
     keywords_runtime = ["perf", "trace", "runtime", "framegraph", "instruction", "hotspot"]
-    if any(k in query.lower() for k in keywords_runtime):
+    if any(k in query_text.lower() for k in keywords_runtime):
         return _runtime_to_code_query()
-    return str(_graph_engine(paths.code_dir).query(query))
+    return str(_graph_engine(paths.code_dir).query(query_text))
