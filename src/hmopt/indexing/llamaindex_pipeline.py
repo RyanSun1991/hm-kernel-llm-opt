@@ -7,7 +7,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 from llama_index.core import (
     PropertyGraphIndex,
@@ -668,6 +668,85 @@ def route_query(
     max_code_snippets = 3
     max_code_chars = 1600
     max_runtime_chars = 6000
+    max_graph_lines = config.indexing.query_graph_expand_limit
+
+    def _escape_cypher_value(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("'", "\\'")
+
+    def _cypher_list(values: Sequence[str]) -> str:
+        return "[" + ", ".join(f"'{_escape_cypher_value(v)}'" for v in values) + "]"
+
+    def _expand_graph_context(symbols: list[str]) -> str:
+        if not config.indexing.neo4j.enabled or not Neo4jVectorStore:
+            return ""
+        if not symbols:
+            return ""
+        max_symbols = config.indexing.query_graph_expand_symbols
+        depth = max(1, config.indexing.query_graph_expand_depth)
+        rel_types = config.indexing.query_graph_relation_types or []
+        limited_symbols = symbols[:max_symbols]
+        symbol_list = _cypher_list(limited_symbols)
+        rel_filter = ""
+        if rel_types:
+            rel_list = _cypher_list(rel_types)
+            rel_filter = f"WHERE all(rel in r WHERE type(rel) IN {rel_list})"
+
+        vector_store = Neo4jVectorStore(
+            username=config.indexing.neo4j.user,
+            password=config.indexing.neo4j.password,
+            url=config.indexing.neo4j.uri,
+            database=config.indexing.neo4j.database,
+            embedding_dimension=code_embed_dim,
+            index_name=code_index_cfg.index_name,
+            node_label=code_index_cfg.node_label,
+        )
+        lines: list[str] = []
+        try:
+            outgoing_query = (
+                "MATCH (s) "
+                f"WHERE s.symbol_name IN {symbol_list} OR s.symbol_qualname IN {symbol_list} "
+                f"MATCH p=(s)-[r*1..{depth}]->(t) "
+                f"{rel_filter} "
+                "RETURN s.symbol_name AS src, [rel IN r | type(rel)] AS rels, "
+                "t.symbol_name AS dst, t.symbol_kind AS dst_kind, t.path AS dst_path "
+                f"LIMIT {max_graph_lines}"
+            )
+            outgoing = vector_store.database_query(outgoing_query)
+            for row in outgoing or []:
+                rels = "->".join(row.get("rels", [])) if isinstance(row, dict) else ""
+                src = row.get("src") if isinstance(row, dict) else None
+                dst = row.get("dst") if isinstance(row, dict) else None
+                dst_kind = row.get("dst_kind") if isinstance(row, dict) else None
+                dst_path = row.get("dst_path") if isinstance(row, dict) else None
+                if src and dst:
+                    lines.append(f"- {src} -[{rels}]-> {dst} ({dst_kind}) {dst_path or ''}".strip())
+
+            incoming_query = (
+                "MATCH (t) "
+                f"WHERE t.symbol_name IN {symbol_list} OR t.symbol_qualname IN {symbol_list} "
+                f"MATCH p=(s)-[r*1..{depth}]->(t) "
+                f"{rel_filter} "
+                "RETURN s.symbol_name AS src, [rel IN r | type(rel)] AS rels, "
+                "t.symbol_name AS dst, t.symbol_kind AS dst_kind, t.path AS dst_path "
+                f"LIMIT {max_graph_lines}"
+            )
+            incoming = vector_store.database_query(incoming_query)
+            for row in incoming or []:
+                rels = "->".join(row.get("rels", [])) if isinstance(row, dict) else ""
+                src = row.get("src") if isinstance(row, dict) else None
+                dst = row.get("dst") if isinstance(row, dict) else None
+                dst_kind = row.get("dst_kind") if isinstance(row, dict) else None
+                dst_path = row.get("dst_path") if isinstance(row, dict) else None
+                if src and dst:
+                    line = f"- {src} -[{rels}]-> {dst} ({dst_kind}) {dst_path or ''}".strip()
+                    if line not in lines:
+                        lines.append(line)
+        except Exception as exc:
+            logger.warning("Graph expansion failed: %s", exc)
+            return ""
+        if not lines:
+            return ""
+        return "Graph relations:\n" + "\n".join(lines[:max_graph_lines])
 
     def _parse_evidence_pack(text: str) -> Optional[dict]:
         if not text:
@@ -1001,15 +1080,21 @@ def route_query(
             if config.indexing.query_code_context_mode == "snippets":
                 code_sources = _retrieve_code_sources(query_text)
                 code_context = _format_code_sources(code_sources, include_snippets=True)
+            graph_context = _expand_graph_context(
+                _extract_runtime_symbols(source_nodes, focus_symbol=focus_symbol)
+            )
             combined_query = _format_query_with_prompt(
                 query=query_text,
                 prompt_template=prompt_template,
                 runtime_context=runtime_context,
-                code_context=code_context,
+                code_context="\n\n".join(
+                    [ctx for ctx in [code_context, graph_context] if ctx]
+                ),
             ) if prompt_template else (
                 "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
                 f"Runtime findings:\n{runtime_context}\n\n"
                 f"{code_context}\n\n"
+                f"{graph_context}\n\n"
                 f"Question: {query_text}"
             )
             return str(_graph_engine(paths.code_dir).query(combined_query))
@@ -1026,18 +1111,23 @@ def route_query(
                 code_context = _format_code_sources(code_sources, include_snippets=True)
             else:
                 code_context = _format_code_sources([], include_snippets=False)
+            graph_symbols = _extract_runtime_symbols(source_nodes, focus_symbol=symbol)
+            graph_context = _expand_graph_context(graph_symbols)
             if prompt_template:
                 combined_query = _format_query_with_prompt(
                     query=query_text,
                     prompt_template=prompt_template,
                     runtime_context=runtime_context,
-                    code_context=code_context,
+                    code_context="\n\n".join(
+                        [ctx for ctx in [code_context, graph_context] if ctx]
+                    ),
                 )
             else:
                 combined_query = (
                     "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
                     f"Runtime findings:\n{runtime_context}\n\n"
                     f"{code_context}\n\n"
+                    f"{graph_context}\n\n"
                     f"Question: {query_text}"
                 )
             response = str(engine.query(combined_query))

@@ -47,6 +47,10 @@ indexing:
   query_runtime_top_k: 10
   query_graph_top_k: 3
   query_code_context_mode: mcp   # mcp|snippets
+  query_graph_expand_depth: 1
+  query_graph_expand_limit: 40
+  query_graph_expand_symbols: 15
+  query_graph_relation_types: []   # e.g. [calls, uses_type, uses_macro]
   clangd:
     enabled: true
     binary: clangd

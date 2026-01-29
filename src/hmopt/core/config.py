@@ -124,6 +124,10 @@ class IndexingConfig(BaseModel):
     query_prompt_file: Optional[Path] = None
     query_system_prompt_file: Optional[Path] = None
     query_code_context_mode: str = "mcp"
+    query_graph_expand_depth: int = 1
+    query_graph_expand_limit: int = 40
+    query_graph_expand_symbols: int = 15
+    query_graph_relation_types: list[str] = Field(default_factory=list)
     hotspot_focus_symbol: Optional[str] = None
     neo4j: Neo4jConfig = Neo4jConfig()
     clangd: ClangdConfig = ClangdConfig()
@@ -316,6 +320,10 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "query_system_prompt_file": Path(indexing_cfg["query_system_prompt_file"])
             if indexing_cfg.get("query_system_prompt_file") else None,
         "query_code_context_mode": indexing_cfg.get("query_code_context_mode", "mcp"),
+        "query_graph_expand_depth": int(indexing_cfg.get("query_graph_expand_depth", 1)),
+        "query_graph_expand_limit": int(indexing_cfg.get("query_graph_expand_limit", 40)),
+        "query_graph_expand_symbols": int(indexing_cfg.get("query_graph_expand_symbols", 15)),
+        "query_graph_relation_types": indexing_cfg.get("query_graph_relation_types", []),
         "neo4j": neo4j_norm,
         "clangd": clangd_norm,
     }
