@@ -34,6 +34,7 @@ from hmopt.analysis.static.psg import PsgEdge, PsgGraph, PsgNode
 from hmopt.core.config import AppConfig
 from hmopt.core.llm import LLMClient
 from hmopt.core.run_context import RunContext, build_context, register_run
+from hmopt.datasets import export_dataset
 from hmopt.orchestration.state import RunState, initial_state
 from hmopt.storage.db import models
 from hmopt.storage.vector.store import VectorRecord
@@ -84,15 +85,9 @@ def _hotspots_from_symbol_counts(
     symbol_stacks: dict[str, list[dict]] = {}
     if call_stacks:
         for stack in call_stacks:
-            if not isinstance(stack, dict):
-                continue
-            stack_symbols = stack.get("stack") or []
-            if not isinstance(stack_symbols, list) or not stack_symbols:
-                continue
-            for symbol in stack_symbols:
-                if not symbol:
-                    continue
-                symbol_stacks.setdefault(symbol, []).append(stack)
+            leaf = stack.get("leaf_symbol")
+            if leaf:
+                symbol_stacks.setdefault(leaf, []).append(stack)
 
     return [
         HotspotCandidate(
@@ -115,24 +110,18 @@ def _expand_symbol_call_stacks(symbol: str, stacks: list[dict]) -> list[dict]:
     seen: set[tuple[str, tuple[str, ...], str | None]] = set()
     for stack in stacks:
         path = stack.get("stack") or []
+        frames = stack.get("frames") or []
         if not isinstance(path, list) or symbol not in path:
             continue
         direction = stack.get("direction") or "call"
-        try:
-            symbol_idx = path.index(symbol)
-        except ValueError:
-            continue
-        if direction == "called":
-            trimmed = path[symbol_idx:]
-        else:
-            trimmed = path[: symbol_idx + 1]
-        key = (direction, tuple(trimmed), stack.get("thread_id"))
+        key = (direction, tuple(path), stack.get("thread_id"))
         if key in seen:
             continue
         seen.add(key)
         normalized.append(
             {
-                "stack": trimmed,
+                "stack": path,
+                "frames": frames if isinstance(frames, list) else [],
                 "direction": direction,
                 "thread_id": stack.get("thread_id"),
                 "self_events": stack.get("self_events"),
@@ -140,7 +129,6 @@ def _expand_symbol_call_stacks(symbol: str, stacks: list[dict]) -> list[dict]:
             }
         )
     return normalized
-
 
 def _top_weighted_items(weights: dict[str, float], *, top_n: int, total: float | None = None) -> list[dict[str, float]]:
     if not weights:
