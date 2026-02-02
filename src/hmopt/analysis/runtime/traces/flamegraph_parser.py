@@ -1,4 +1,4 @@
-"""Flamegraph parser."""
+"""Framegraph parser."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional
 
 from ..metrics import Metric, quantile
+from ..preprocess import preprocess_flamegraph_dir, preprocess_flamegraph_file
 
 logger = logging.getLogger(__name__)
 
@@ -145,10 +146,14 @@ def _walk_call_tree(
     parent: Optional[str] = None,
     direction: str = "call",
     current_stack: Optional[List[str]] = None,
+    current_frames: Optional[List[str]] = None,
     thread_id: Optional[str] = None,
+    pid: Optional[int] = None,
 ) -> None:
     if current_stack is None:
         current_stack = []
+    if current_frames is None:
+        current_frames = []
     if not isinstance(node, dict):
         return
     symbol_id = node.get("symbol")
@@ -160,10 +165,20 @@ def _walk_call_tree(
         norm = _normalize_symbol(raw)
         current = norm
         new_stack = current_stack + [norm]
-
-        stats = node_stats.setdefault(norm, {"self_events": 0.0, "sub_events": 0.0, "label": raw})
         self_events = float(node.get("selfEvents", 0) or 0)
         sub_events = float(node.get("subEvents", 0) or 0)
+
+        frame_info = {
+            "symbol": norm,
+            "self_events": self_events,
+            "sub_events": sub_events,
+            "thread_id": thread_id,
+            "pid": pid,
+        }
+        new_frames = current_frames + [frame_info]
+
+        stats = node_stats.setdefault(norm, {"self_events": 0.0, "sub_events": 0.0, "label": raw})
+
         stats["self_events"] += self_events
         stats["sub_events"] += sub_events
 
@@ -180,14 +195,19 @@ def _walk_call_tree(
         has_events = self_events > 0 or sub_events > 0
         is_leaf = not children
         if has_events or is_leaf:
+        # if is_leaf:
             call_stacks.append({
                 "stack": new_stack,
+                "frames": new_frames,
                 "leaf_symbol": norm,
                 "total_events": sub_events,
                 "self_events": self_events,
                 "thread_id": thread_id,
                 "direction": direction,
             })
+    else:
+        new_stack = current_stack
+        new_frames = current_frames
 
     for child in node.get("callStack", []) or []:
         if isinstance(child, dict):
@@ -200,9 +220,10 @@ def _walk_call_tree(
                 parent=current,
                 direction=direction,
                 current_stack=new_stack,
+                current_frames=new_frames,
                 thread_id=thread_id,
+                pid=pid,
             )
-
 
 def _samples_from_payload(frames: list[dict]) -> list[FrameSample]:
     samples = []
@@ -267,6 +288,7 @@ def _flamegraph_from_samples(
     fps_avg = (len(samples) / total_time) * 1000.0
 
     jank_threshold = expected_frame_ms * 1.3
+    jank_durations = [s.dur_ms for s in samples if s.dur_ms >= jank_threshold]
     jank_p95 = quantile([s.dur_ms for s in samples], 0.95)
     drop_rate = len([s for s in samples if s.dur_ms > expected_frame_ms * 2]) / len(samples)
 
@@ -304,26 +326,15 @@ def _flamegraph_from_samples(
     )
 
 
-def _parse_flamegraph_html(path: Path, expected_frame_ms: float = 16.67) -> FlamegraphResult | None:
-    html_text = path.read_text(encoding="utf-8", errors="ignore")
-    payload = _extract_record_data(html_text)
-    if not payload:
-        logger.warning("Flamegraph HTML missing record_data: %s", path)
-        return None
-    try:
-        data = json.loads(payload)
-    except json.JSONDecodeError as exc:
-        logger.warning("Flamegraph HTML JSON decode failed: %s error=%s", path, exc)
-        return None
-    return _parse_flamegraph_payload(data, path, expected_frame_ms)
-
-
 def parse_flamegraph(path: Path, expected_frame_ms: float = 16.67) -> list[FlamegraphResult]:
     if path.is_dir():
         html_files = sorted(path.rglob("*__sysmgr_hiperfReport.html"))
         results: list[FlamegraphResult] = []
-        for html_file in html_files:
-            parsed = _parse_flamegraph_html(html_file, expected_frame_ms)
+        outputs = preprocess_flamegraph_dir(path, path, ["sysmgr"])
+        
+        for (_, json_output_path) in outputs if outputs is not None else []:
+            # parsed = _parse_flamegraph_html(html_file, expected_frame_ms)
+            parsed = _parse_flamegraph_payload(json.loads(json_output_path.read_text("utf-8")), path, expected_frame_ms)
             if parsed:
                 results.append(parsed)
         if not results:
@@ -331,10 +342,12 @@ def parse_flamegraph(path: Path, expected_frame_ms: float = 16.67) -> list[Flame
         return results
 
     if path.suffix.lower() == ".html":
-        parsed = _parse_flamegraph_html(path, expected_frame_ms)
+        _, json_output_path = preprocess_flamegraph_file(path, path.parent, ["sysmgr"],) 
+        parsed = _parse_flamegraph_payload(json.loads(json_output_path.read_text(encoding="utf-8")), path, expected_frame_ms)
         return [parsed] if parsed else []
 
     if path.suffix.lower() == ".json":
+        _, json_output_path = preprocess_flamegraph_file(path, path.parent, ["sysmgr"])
         data = json.loads(path.read_text(encoding="utf-8"))
         return [_parse_flamegraph_payload(data, path, expected_frame_ms)]
 
@@ -384,6 +397,8 @@ def _parse_sample_info(data: dict, path: Path) -> FlamegraphResult:
         for proc in info.get("processes", []) or []:
             pid = proc.get("pid")
             if pid is not None:
+                if int(pid) != 2:
+                    continue
                 pids.add(int(pid))
                 proc_summary = process_summaries.setdefault(
                     str(pid),
@@ -432,7 +447,9 @@ def _parse_sample_info(data: dict, path: Path) -> FlamegraphResult:
                         parent=None,
                         direction="call",
                         current_stack=[],
+                        current_frames=[],
                         thread_id=thread_id_str,
+                        pid=int(pid) if pid is not None else None,
                     )
                 called_order = thread.get("CalledOrder")
                 if isinstance(called_order, dict):
@@ -445,7 +462,9 @@ def _parse_sample_info(data: dict, path: Path) -> FlamegraphResult:
                         parent=None,
                         direction="called",
                         current_stack=[],
+                        current_frames=[],
                         thread_id=thread_id_str,
+                        pid=int(pid) if pid is not None else None,
                     )
                 for lib in thread.get("libs", []) or []:
                     file_id = lib.get("fileId")
