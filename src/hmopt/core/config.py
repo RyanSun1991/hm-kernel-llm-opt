@@ -24,6 +24,31 @@ def _expand_env(text: str) -> str:
     return os.path.expandvars(text)
 
 
+def _resolve_placeholder(value: Optional[str]) -> Optional[str]:
+    """Return ``None`` when the value is an unresolved ${VAR} placeholder."""
+
+    if value is None:
+        return None
+    stripped = value.strip()
+    if stripped.startswith("${") and stripped.endswith("}"):
+        return None
+    return stripped or None
+
+
+def _normalize_base_url(llm_cfg: dict[str, Any], default: str) -> str:
+    """Pick a usable base URL and ensure it includes a scheme."""
+
+    candidate = _resolve_placeholder(llm_cfg.get("base_url")) or _resolve_placeholder(
+        llm_cfg.get("api_base")
+    )
+    candidate = candidate or default
+
+    if not candidate.startswith(("http://", "https://")):
+        candidate = f"http://{candidate}"
+
+    return candidate
+
+
 class ProjectConfig(BaseModel):
     name: str
     repo_path: str
@@ -69,7 +94,7 @@ class Neo4jConfig(BaseModel):
     enabled: bool = False
     uri: str = "bolt://localhost:7687"
     user: str = "neo4j"
-    password: Optional[str] = Field(default_factory=lambda: os.getenv("NEO4J_PASSWORD"))
+    password: Optional[str] = "@huawei2026"
     database: str = "neo4j"
 
 
@@ -114,7 +139,7 @@ class IndexingConfig(BaseModel):
     persist_dir: Path = Path("data/llamaindex")
     llm_enrich: bool = False
     llm_enrich_limit: int = 50
-    runtime_evidence_max_chars: int = 20000
+    runtime_evidence_max_chars: int | None = 20000
     hotspot_top_k: int = 20
     hotspot_min_ratio: float = 0.001
     hotspot_min_abs: float = 10.0
@@ -123,14 +148,10 @@ class IndexingConfig(BaseModel):
     query_graph_top_k: int = 3
     query_prompt_file: Optional[Path] = None
     query_system_prompt_file: Optional[Path] = None
-    query_code_context_mode: str = "mcp"
-    query_graph_expand_depth: int = 1
-    query_graph_expand_limit: int = 40
-    query_graph_expand_symbols: int = 15
-    query_graph_relation_types: list[str] = Field(default_factory=list)
     hotspot_focus_symbol: Optional[str] = None
     neo4j: Neo4jConfig = Neo4jConfig()
     clangd: ClangdConfig = ClangdConfig()
+
 
 
 class AppConfig(BaseModel):
@@ -306,8 +327,8 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "enabled": indexing_cfg.get("enabled", True),
         "persist_dir": Path(indexing_cfg.get("persist_dir", "data/llamaindex")),
         "llm_enrich": indexing_cfg.get("llm_enrich", False),
-        "llm_enrich_limit": int(indexing_cfg.get("llm_enrich_limit", 50)),
-        "runtime_evidence_max_chars": int(indexing_cfg.get("runtime_evidence_max_chars", 20000)),
+        "llm_enrich_limit": int(indexing_cfg.get("llm_enrich_limit", 50)),\
+        "runtime_evidence_max_chars": indexing_cfg.get("runtime_evidence_max_chars", 20000),
         "hotspot_top_k": int(indexing_cfg.get("hotspot_top_k", 20)),
         "hotspot_min_ratio": float(indexing_cfg.get("hotspot_min_ratio", 0.001)),
         "hotspot_min_abs": float(indexing_cfg.get("hotspot_min_abs", 10.0)),
@@ -319,11 +340,6 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
             if indexing_cfg.get("query_prompt_file") else None,
         "query_system_prompt_file": Path(indexing_cfg["query_system_prompt_file"])
             if indexing_cfg.get("query_system_prompt_file") else None,
-        "query_code_context_mode": indexing_cfg.get("query_code_context_mode", "mcp"),
-        "query_graph_expand_depth": int(indexing_cfg.get("query_graph_expand_depth", 1)),
-        "query_graph_expand_limit": int(indexing_cfg.get("query_graph_expand_limit", 40)),
-        "query_graph_expand_symbols": int(indexing_cfg.get("query_graph_expand_symbols", 15)),
-        "query_graph_relation_types": indexing_cfg.get("query_graph_relation_types", []),
         "neo4j": neo4j_norm,
         "clangd": clangd_norm,
     }
