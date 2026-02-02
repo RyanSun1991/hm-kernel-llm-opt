@@ -10,7 +10,7 @@ from typing import Optional
 import typer
 
 from hmopt.core.config import AppConfig
-from hmopt.orchestration import run_artifact_analysis, run_pipeline
+from hmopt.orchestration import run_artifact_analysis, run_pipeline, run_runtime_ingest
 from hmopt.indexing import build_kernel_index, build_runtime_index, route_query
 from hmopt.storage.artifact_store import ArtifactStore
 from hmopt.storage.db.engine import init_engine
@@ -118,10 +118,16 @@ def analyze_artifacts(
         help="Artifact spec kind:path (e.g., flamegraph:outputs/flamegraph.json). Repeatable.",
     ),
     config: str = typer.Option("configs/app.yaml", help="Config YAML"),
-    repo_path: Optional[str] = typer.Option(None, help="Override repo path for this run"),
-    with_patch: bool = typer.Option(True, help="Run Conductor+Coder to suggest patches"),
+    repo_path: Optional[str] = typer.Option(
+        None, help="Override repo path (legacy pipeline only)"
+    ),
+    with_patch: bool = typer.Option(False, help="Run Conductor+Coder to suggest patches (legacy)"),
     with_verify: bool = typer.Option(False, help="Run build/test verification after patch"),
     with_profile: bool = typer.Option(False, help="Re-profile candidate after patch"),
+    legacy_pipeline: bool = typer.Option(
+        False,
+        help="Use legacy analyze_artifacts pipeline (PSG + LLM evidence/patch).",
+    ),
 ) -> None:
     # Demo: python -m hmopt.cli analyze-artifacts \
     #          --artifact flamegraph:outputs/flamegraph.json \
@@ -131,8 +137,12 @@ def analyze_artifacts(
     # Purpose: ingest existing traces (no live profiling), run analysis -> hotspots/report.
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
-    if repo_path:
+    if repo_path and (legacy_pipeline or with_patch):
         cfg.project.repo_path = repo_path
+    elif repo_path:
+        logging.getLogger(__name__).info(
+            "Ignoring repo_path override for lightweight runtime ingest."
+        )
     artifacts = []
     for spec in artifact:
         if ":" not in spec:
@@ -140,14 +150,17 @@ def analyze_artifacts(
             raise typer.Exit(code=1)
         kind, path = spec.split(":", 1)
         artifacts.append({"kind": kind, "path": path})
-    run_id = run_artifact_analysis(
-        cfg,
-        artifacts,
-        run_conductor=with_patch,
-        run_coder=with_patch,
-        run_verify=with_verify,
-        run_profile=with_profile,
-    )
+    if legacy_pipeline or with_patch:
+        run_id = run_artifact_analysis(
+            cfg,
+            artifacts,
+            run_conductor=with_patch,
+            run_coder=with_patch,
+            run_verify=with_verify,
+            run_profile=with_profile,
+        )
+    else:
+        run_id = run_runtime_ingest(cfg, artifacts)
     typer.echo(f"Artifact analysis complete. run_id={run_id}")
 
 
@@ -195,6 +208,12 @@ def query(
         ..., help="Query text or @/path to a prompt file"
     ),
     mode: str = typer.Option("auto", help="auto|code|runtime|runtime_code|graph"),
+    symbols: Optional[str] = typer.Option(
+        None, "--symbols", help="Comma-separated symbol list to analyze"
+    ),
+    hotspot_top_k: Optional[int] = typer.Option(
+        None, "--hotspot-top-k", help="Top-K hotspots to analyze"
+    ),
     run_id: Optional[str] = typer.Option(
         None, "--run-id", help="Run ID for selecting runtime index"
     ),
@@ -213,7 +232,16 @@ def query(
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
     prompt_path = Path(prompt_file) if prompt_file else None
-    response = route_query(cfg, query_str, mode=mode, prompt_file=prompt_path, run_id=run_id)
+    symbol_list = [s.strip() for s in symbols.split(",")] if symbols else None
+    response = route_query(
+        cfg,
+        query_str,
+        mode=mode,
+        prompt_file=prompt_path,
+        run_id=run_id,
+        focus_symbols=symbol_list,
+        hotspot_top_k=hotspot_top_k,
+    )
     typer.echo(response)
 
 

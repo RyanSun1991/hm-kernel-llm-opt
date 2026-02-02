@@ -29,6 +29,7 @@ from hmopt.analysis.runtime.traces import (
     parse_hitrace,
     parse_sysfs_trace,
 )
+from hmopt.indexing import lookup_code_symbols
 from hmopt.analysis.static import build_psg, index_repo
 from hmopt.analysis.static.psg import PsgEdge, PsgGraph, PsgNode
 from hmopt.core.config import AppConfig
@@ -493,6 +494,25 @@ def _filter_hotspots_by_symbol(
     return [hs for hs in hotspots if hs.symbol == focus_symbol]
 
 
+def _align_hotspots_to_kernel_index(
+    config: AppConfig, hotspots: list[HotspotCandidate]
+) -> list[HotspotCandidate]:
+    if not hotspots:
+        return hotspots
+    symbol_lookup = lookup_code_symbols(config, [hs.symbol for hs in hotspots])
+    for hs in hotspots:
+        info = symbol_lookup.get(hs.symbol)
+        if not info:
+            continue
+        if info.get("path"):
+            hs.file_path = info.get("path")
+        if info.get("start_line") is not None:
+            hs.line_start = info.get("start_line")
+        if info.get("end_line") is not None:
+            hs.line_end = info.get("end_line")
+    return hotspots
+
+
 def _store_flamegraph_maps(services: PipelineServices, run_id: str, result, source_path: Path | None) -> None:
     source_value = source_path or getattr(result, "source_path", None)
     metadata = {"source": str(source_value)} if source_value else {}
@@ -874,6 +894,64 @@ def _build_evidence(services: PipelineServices, state: RunState) -> RunState:
         report_artifact.artifact_id,
     )
     return state
+
+
+def _build_evidence_simple(
+    services: PipelineServices,
+    run_id: str,
+    metrics: list[Metric],
+    hotspots: list[HotspotCandidate],
+    trace_insights: list[dict[str, Any]],
+) -> dict[str, Any]:
+    metrics_map = _metrics_to_map(metrics)
+    focus_symbol = services.config.indexing.hotspot_focus_symbol
+    filtered_hotspots = _filter_hotspots_by_symbol(hotspots, focus_symbol)
+    ordered = sorted(filtered_hotspots, key=lambda h: h.score or 0.0, reverse=True)
+    top_hotspots = ordered[:5]
+    summary_lines = []
+    if top_hotspots:
+        summary_lines.append("Top hotspots:")
+        for hs in top_hotspots:
+            summary_lines.append(f"- {hs.symbol} score={hs.score:.2f}")
+    if metrics_map:
+        summary_lines.append("Key metrics:")
+        for key, value in list(metrics_map.items())[:10]:
+            summary_lines.append(f"- {key}: {value}")
+    summary = "\n".join(summary_lines) or "No summary available."
+    pack = {
+        "iteration": 0,
+        "metrics": metrics_map,
+        "hotspots": [_hotspot_to_dict(h) for h in filtered_hotspots],
+        "summary": summary,
+        "trace_insights": trace_insights,
+        "hotspot_focus_symbol": focus_symbol,
+        "source": "simple_runtime_ingest",
+    }
+    artifact = services.ctx.artifact_store.store_json(
+        pack, kind="evidence_pack", run_id=run_id, session=services.ctx.session
+    )
+    report_text = _format_evidence_report(
+        run_id,
+        0,
+        metrics_map,
+        filtered_hotspots,
+        trace_insights,
+        summary,
+        hotspot_focus_symbol=focus_symbol,
+    )
+    report_artifact = services.ctx.artifact_store.store_text(
+        report_text,
+        kind="evidence_report",
+        run_id=run_id,
+        extension=".md",
+        session=services.ctx.session,
+    )
+    logger.info(
+        "Simple evidence pack stored: artifact=%s report_artifact=%s",
+        artifact.artifact_id,
+        report_artifact.artifact_id,
+    )
+    return pack
 
 
 def _conductor_decide(services: PipelineServices, state: RunState) -> RunState:
@@ -1332,4 +1410,134 @@ def run_artifact_analysis(
     services.ctx.session.commit()
     services.ctx.session.close()
     logger.info("Artifact analysis finished: run_id=%s", state["run_id"])
+    return state["run_id"]
+
+
+def run_runtime_ingest(
+    config: AppConfig,
+    artifacts: list[dict],
+) -> str:
+    """Parse runtime artifacts (flamegraph/hitrace/hiperf) without LLM steps."""
+    services = make_services(config)
+    state: RunState = initial_state(services.ctx.run_id, max_iterations=1)
+
+    register_run(services.ctx, workload_id=config.project.workload)
+    run_row = (
+        services.ctx.session.query(models.Run).filter(models.Run.run_id == state["run_id"]).one()
+    )
+    repo_path = config.project.repo_path
+    if repo_path and Path(repo_path).exists():
+        repo_state = get_repo_state(repo_path)
+        snapshot = snapshot_files(repo_path)
+        snapshot_art = services.ctx.artifact_store.store_json(
+            snapshot, kind="repo_snapshot", run_id=state["run_id"], session=services.ctx.session
+        )
+        run_row.repo_rev = repo_state.get("commit")
+        run_row.repo_uri = repo_state.get("remote")
+        run_row.repo_dirty = bool(repo_state.get("dirty"))
+        state["snapshot_artifact_id"] = snapshot_art.artifact_id
+    else:
+        logger.info("Skipping repo snapshot (repo_path missing or invalid).")
+    run_row.status = "running"
+    services.ctx.session.commit()
+
+    metrics: list[Metric] = []
+    hotspots: list[HotspotCandidate] = []
+    trace_insights: list[dict[str, Any]] = []
+
+    for item in artifacts:
+        kind = item.get("kind")
+        if kind == "framegraph":
+            kind = "flamegraph"
+        path = Path(item.get("path"))
+        if path.is_dir() and kind != "flamegraph":
+            logger.warning("Skipping directory artifact (unsupported kind=%s): %s", kind, path)
+            continue
+        if kind == "flamegraph":
+            if path.is_dir():
+                html_files = sorted(path.rglob("*__sysmgr_hiperfReport.html"))
+                if html_files:
+                    for html_file in html_files:
+                        services.ctx.artifact_store.store_file(
+                            html_file,
+                            kind=kind,
+                            run_id=state["run_id"],
+                            session=services.ctx.session,
+                            metadata={"source_dir": str(path)},
+                        )
+                else:
+                    logger.warning("Flamegraph directory had no report HTML: %s", path)
+            else:
+                services.ctx.artifact_store.store_file(
+                    path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+                )
+            fg_results = parse_flamegraph(path)
+            fg_hotspots_all: list[HotspotCandidate] = []
+            for fg in fg_results:
+                metrics.extend(fg.to_metrics())
+                _store_flamegraph_maps(services, state["run_id"], fg, path)
+                if fg.symbol_counts:
+                    fg_hotspots = _hotspots_from_symbol_counts(
+                        fg.symbol_counts,
+                        top_n=services.config.indexing.hotspot_top_k,
+                        min_ratio=services.config.indexing.hotspot_min_ratio,
+                        min_abs=services.config.indexing.hotspot_min_abs,
+                        total=fg.event_count_total,
+                        call_stacks=fg.call_stacks,
+                    )
+                    fg_hotspots_all.extend(fg_hotspots)
+                trace_insights.append(_flamegraph_trace_insight(fg, top_n=20, source_path=path))
+            comparison = _flamegraph_comparison_insight(fg_results, top_n=10)
+            if comparison:
+                trace_insights.append(comparison)
+            hotspots.extend(fg_hotspots_all)
+        elif kind == "hitrace":
+            services.ctx.artifact_store.store_file(
+                path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+            )
+            ht = parse_hitrace(path)
+            metrics.extend(ht.to_metrics())
+        elif kind == "sysfs":
+            services.ctx.artifact_store.store_file(
+                path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+            )
+            st = parse_sysfs_trace(path)
+            metrics.extend(st.to_metrics())
+        elif kind == "hiperf":
+            services.ctx.artifact_store.store_file(
+                path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+            )
+            hp = parse_hiperf(path)
+            hs = rank_hotspots(hp.hotspot_costs, hp.edge_costs, top_n=15)
+            hotspots.extend(hs)
+        else:
+            services.ctx.artifact_store.store_file(
+                path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+            )
+            logger.info("Stored artifact with no parser: %s", kind)
+
+    if hotspots:
+        metrics_map = {m.metric_name: m.value for m in metrics}
+        hotspots = rank_correlated(hotspots, metrics_map, limit=20)
+        hotspots = _align_hotspots_to_kernel_index(services.config, hotspots)
+
+    record_metrics(services.ctx.session, state["run_id"], metrics)
+    persist_hotspots(services.ctx.session, state["run_id"], hotspots)
+    services.ctx.session.commit()
+
+    _build_evidence_simple(services, state["run_id"], metrics, hotspots, trace_insights)
+    export_dataset(services.ctx.session, [state["run_id"]], services.ctx.run_dir / "dataset.json")
+    metrics_payload = _metrics_to_map(metrics)
+    metrics_artifact = services.ctx.artifact_store.store_json(
+        metrics_payload,
+        kind="metrics_summary",
+        run_id=state["run_id"],
+        session=services.ctx.session,
+    )
+    logger.info("Stored metrics summary: artifact=%s", metrics_artifact.artifact_id)
+
+    run_row.status = "succeeded"
+    services.ctx.session.commit()
+    services.ctx.session.close()
+    logger.info("Runtime ingest finished: run_id=%s", state["run_id"])
     return state["run_id"]

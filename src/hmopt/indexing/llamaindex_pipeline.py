@@ -8,7 +8,7 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Iterable
 
 from llama_index.core import (
     PropertyGraphIndex,
@@ -27,7 +27,9 @@ from hmopt.core.config import AppConfig
 from hmopt.indexing.clangd_client import ClangdConfig as LspClangdConfig
 from hmopt.indexing.clangd_indexer import CodeIndex, CodeChunk, index_kernel_code
 from hmopt.indexing.runtime_ingestion import build_runtime_nodes
+from hmopt.indexing.mcp_agent import MCPToolAgent, MCPToolAgentConfig
 from hmopt.storage.db.engine import init_engine, session_scope
+from hmopt.storage.db import models
 
 
 from llama_index.graph_stores.neo4j.neo4j_property_graph import Neo4jPropertyGraphStore
@@ -79,6 +81,23 @@ def _load_prompt_file(path: Optional[Path]) -> Optional[str]:
     except (OSError, json.JSONDecodeError) as exc:
         logger.warning("Failed to load prompt file %s: %s", path, exc)
         return None
+
+
+def _load_query_text(query: str) -> str:
+    if not query:
+        return ""
+    candidate = query[1:] if query.startswith("@") else query
+    path = Path(candidate)
+    if path.exists() and path.is_file():
+        content = _load_prompt_file(path)
+        if content:
+            return content
+        try:
+            return path.read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            logger.warning("Failed to read query file %s: %s", path, exc)
+            return query
+    return query
 
 
 def _format_query_with_prompt(
@@ -133,6 +152,24 @@ def _build_llama_models(config: AppConfig) -> tuple[OpenAILike, OpenAIEmbeddingL
         api_key=config.llm.api_key,
     )
     return llm, embed
+
+
+def _build_mcp_agent(config: AppConfig) -> MCPToolAgent | None:
+    mcp_cfg = getattr(config.indexing, "mcp", None)
+    if not mcp_cfg or not mcp_cfg.enabled:
+        return None
+    return MCPToolAgent(
+        MCPToolAgentConfig(
+            base_url=mcp_cfg.base_url,
+            api_key=mcp_cfg.api_key,
+            model=mcp_cfg.model,
+            timeout_sec=mcp_cfg.timeout_sec,
+            tool_name=mcp_cfg.tool_name,
+            top_k=mcp_cfg.top_k,
+            mcp_base_url=mcp_cfg.mcp_base_url,
+            mcp_api_key=mcp_cfg.mcp_api_key,
+        )
+    )
 
 def _embedding_metadata_path(persist_dir: Path) -> Path:
     return persist_dir / "embedding_meta.json"
@@ -625,15 +662,109 @@ def _docstore_has_nodes(storage: StorageContext) -> bool:
         return False
 
 
+def lookup_code_symbols(config: AppConfig, symbols: Iterable[str]) -> dict[str, dict]:
+    """Lookup symbol metadata (path/lines) from the persisted code index."""
+    symbol_list = [s for s in symbols if s]
+    if not symbol_list:
+        return {}
+    paths = _index_paths(config)
+    if not paths.code_dir.exists():
+        logger.warning("Code index not found at %s", paths.code_dir)
+        return {}
+    targets = set(symbol_list)
+    best: dict[str, dict] = {}
+    scores: dict[str, int] = {}
+
+    def _update(symbol: str, score: int, metadata: dict) -> None:
+        if score < scores.get(symbol, -1):
+            return
+        scores[symbol] = score
+        best[symbol] = {
+            "symbol_name": metadata.get("symbol_name"),
+            "symbol_qualname": metadata.get("symbol_qualname"),
+            "path": metadata.get("path"),
+            "start_line": metadata.get("start_line"),
+            "end_line": metadata.get("end_line"),
+        }
+
+    try:
+        storage = StorageContext.from_defaults(persist_dir=str(paths.code_dir))
+        docs = getattr(storage.docstore, "docs", {}) or {}
+        remaining = set(targets)
+        for node in docs.values():
+            metadata = getattr(node, "metadata", {}) if node else {}
+            if metadata.get("type") != "code":
+                continue
+            name = metadata.get("symbol_name")
+            qual = metadata.get("symbol_qualname")
+            if name in remaining:
+                _update(name, 2, metadata)
+            if qual in remaining:
+                _update(qual, 3, metadata)
+            if remaining:
+                for sym in list(remaining):
+                    if not sym or not qual:
+                        continue
+                    if sym in qual:
+                        _update(sym, 1, metadata)
+            if len(best) >= len(targets):
+                break
+    except Exception as exc:
+        logger.warning("Failed to scan local code index: %s", exc)
+
+    missing = [sym for sym in targets if sym not in best]
+    if missing and config.indexing.neo4j.enabled:
+        try:
+            code_index_cfg = _neo4j_index_config("code")
+            metadata = _load_embedding_metadata(paths.code_dir) or {}
+            embed_dim = metadata.get("dimension")
+            if embed_dim:
+                vector_store = Neo4jVectorStore(
+                    username=config.indexing.neo4j.user,
+                    password=config.indexing.neo4j.password,
+                    url=config.indexing.neo4j.uri,
+                    database=config.indexing.neo4j.database,
+                    embedding_dimension=int(embed_dim),
+                    index_name=code_index_cfg.index_name,
+                    node_label=code_index_cfg.node_label,
+                )
+                cypher = (
+                    "MATCH (s:symbol) "
+                    "WHERE s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols "
+                    "RETURN s.symbol_name as symbol_name, s.symbol_qualname as symbol_qualname, "
+                    "s.path as path, s.start_line as start_line, s.end_line as end_line "
+                    "LIMIT $limit"
+                )
+                records = vector_store.database_query(
+                    cypher,
+                    {"symbols": missing, "limit": max(10, len(missing) * 2)},
+                )
+                for rec in records or []:
+                    name = rec.get("symbol_name")
+                    qual = rec.get("symbol_qualname")
+                    if name and name in missing:
+                        _update(name, 2, rec)
+                    if qual and qual in missing:
+                        _update(qual, 3, rec)
+        except Exception as exc:
+            logger.warning("Neo4j symbol lookup failed: %s", exc)
+
+    return best
+
+
 def route_query(
     config: AppConfig,
     query: str,
     mode: str = "auto",
     prompt_file: Optional[Path] = None,
     run_id: Optional[str] = None,
+    focus_symbols: Optional[list[str]] = None,
+    hotspot_top_k: Optional[int] = None,
 ) -> str:
+    query_text = _load_query_text(query)
     paths = _index_paths(config, run_id=run_id)
     llm, embed = _build_llama_models(config)
+    mcp_agent = _build_mcp_agent(config)
     code_index_cfg = _neo4j_index_config("code")
     runtime_index_cfg = _neo4j_index_config("runtime")
     code_embed_dim = _embedding_dimension_for_query(paths.code_dir, embed)
@@ -701,17 +832,24 @@ def route_query(
                     continue
                 details = []
                 self_events = frame.get("self_events")
-                # if self_events is not None:
-                #     details.append(f"self_events={self_events}")
-                if total_events is not None:
-                    details.append(f"total_events={total_events}")
+                if self_events is not None:
+                    details.append(f"self={self_events}")
+                sub_events = frame.get("sub_events")
+                if sub_events is not None:
+                    details.append(f"sub={sub_events}")
                 frame_thread_id = frame.get("thread_id", thread_id)
                 # if frame_thread_id is not None:
                 #     details.append(f"thread_id={frame_thread_id}")
                 details_text = f" ({', '.join(details)})" if details else ""
                 frame_parts.append(f"{symbol}{details_text}")
             frames_text = " -> ".join(frame_parts)
-            return f"    ({direction}) {frames_text}"
+            stack_details = []
+            if total_events is not None:
+                stack_details.append(f"total_events={total_events}")
+            if thread_id is not None:
+                stack_details.append(f"thread_id={thread_id}")
+            stack_text = f" ({', '.join(stack_details)})" if stack_details else ""
+            return f"    ({direction}) {frames_text}{stack_text}"
         path = " -> ".join(stack.get("stack", []))
         details = []
         if stack.get("self_events") is not None:
@@ -928,6 +1066,74 @@ def route_query(
             )
         return runtime_text
 
+    def _load_artifacts_payloads(session, run_id: str, kind: str) -> list[dict]:
+        artifacts = (
+            session.query(models.Artifact)
+            .filter(models.Artifact.run_id == run_id, models.Artifact.kind == kind)
+            .order_by(models.Artifact.bytes.desc())
+            .all()
+        )
+        payloads: list[dict] = []
+        for art in artifacts:
+            try:
+                raw = Path(art.path).read_text(encoding="utf-8")
+                payload = json.loads(raw)
+                if isinstance(payload, dict) or isinstance(payload, list):
+                    payloads.append(payload)
+            except (OSError, json.JSONDecodeError):
+                continue
+        return payloads
+
+    def _format_flamegraph_symbol_context(
+        session, run_id: str, symbol: str
+    ) -> str:
+        lines: list[str] = []
+        if not symbol:
+            return ""
+        counts_payloads = _load_artifacts_payloads(
+            session, run_id, "flamegraph_symbol_counts"
+        )
+        if not counts_payloads:
+            counts_payloads = _load_artifacts_payloads(
+                session, run_id, "flamegraph_symbol_counts_raw"
+            )
+        score = None
+        for payload in counts_payloads:
+            if isinstance(payload, dict) and symbol in payload:
+                try:
+                    score = float(payload.get(symbol))
+                except (TypeError, ValueError):
+                    score = payload.get(symbol)
+                break
+        if score is not None:
+            lines.append(f"Flamegraph symbol stats: {symbol} score={score}")
+
+        call_stack_payloads = _load_artifacts_payloads(
+            session, run_id, "flamegraph_call_stacks"
+        )
+        call_stacks: list[dict] = []
+        for payload in call_stack_payloads:
+            if isinstance(payload, list):
+                call_stacks.extend([item for item in payload if isinstance(item, dict)])
+        if call_stacks:
+            matching = [
+                stack for stack in call_stacks
+                if symbol in (stack.get("stack") or [])
+                or stack.get("leaf_symbol") == symbol
+            ]
+            if matching:
+                sorted_stacks = sorted(
+                    matching,
+                    key=lambda s: s.get("total_events") or 0,
+                    reverse=True,
+                )
+                lines.append("Flamegraph call paths:")
+                for stack in sorted_stacks[:5]:
+                    lines.append(_format_call_stack_line(stack))
+                if len(sorted_stacks) > 5:
+                    lines.append(f"...and {len(sorted_stacks) - 5} more call paths")
+        return "\n".join(lines).strip()
+
     def _format_code_sources(source_nodes: list, *, include_snippets: bool) -> str:
         if not include_snippets:
             return (
@@ -1064,19 +1270,25 @@ def route_query(
                     max_evidence_chars=config.indexing.runtime_evidence_max_chars,
                 )
         else:
-            runtime_response = _engine(paths.runtime_dir).query(query)
+            runtime_response = _engine(paths.runtime_dir).query(query_text)
             runtime_response_text = str(runtime_response).strip()
             source_nodes = getattr(runtime_response, "source_nodes", []) or []
 
         focus_symbol = config.indexing.hotspot_focus_symbol
         hotspots, evidence_hotspots = _collect_runtime_hotspots(source_nodes)
         runtime_items = hotspots or evidence_hotspots
-        if focus_symbol:
+        if focus_symbols:
+            symbol_queue = [s for s in focus_symbols if s]
+        elif focus_symbol:
             symbol_queue = [focus_symbol]
         else:
             seen: set[str] = set()
             symbol_queue = []
-            for item in runtime_items[:20]:
+            top_k = hotspot_top_k or config.indexing.query_hotspot_top_k or config.indexing.hotspot_top_k
+            runtime_items_sorted = sorted(
+                runtime_items, key=lambda item: item.get("score") or 0, reverse=True
+            )
+            for item in runtime_items_sorted[: max(1, int(top_k))]:
                 symbol = item.get("symbol")
                 if symbol and symbol not in seen:
                     seen.add(symbol)
@@ -1085,29 +1297,39 @@ def route_query(
             runtime_context = _format_runtime_sources(source_nodes, focus_symbol=focus_symbol)
             runtime_context = runtime_context or runtime_response_text
             combined_query = _format_query_with_prompt(
-                query=query,
+                query=query_text,
                 prompt_template=prompt_template,
                 runtime_context=runtime_context,
                 code_context="",
             ) if prompt_template else (
                 "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
                 f"Runtime findings:\n{runtime_context}\n\n"
-                f"Question: {query}"
+                f"Question: {query_text}"
             )
             return str(_graph_engine(paths.code_dir).query(combined_query))
 
         engine = _graph_engine(paths.code_dir)
         responses: list[str] = []
+        code_context_mode = (config.indexing.query_code_context_mode or "snippets").lower()
         for symbol in symbol_queue:
             runtime_context = _format_runtime_sources(source_nodes, focus_symbol=symbol)
             if not runtime_context:
-                runtime_context = runtime_response_text
+                if run_id:
+                    engine_db = init_engine(
+                        config.storage.db_url,
+                        schema_path=Path("src/hmopt/storage/db/schema.sql"),
+                    )
+                    with session_scope(engine_db) as session:
+                        runtime_context = _format_flamegraph_symbol_context(session, run_id, symbol)
+                if not runtime_context:
+                    runtime_context = runtime_response_text
             # code_context = (
             #     "Code snippets omitted to reduce context. Use MCP/RAG retrieval for specific symbols."
             # )
             runtime_symbols = _extract_runtime_symbols(source_nodes, focus_symbol = symbol)
-            code_context = ""
-            if runtime_symbols:
+            code_context_parts: list[str] = []
+            include_snippets = code_context_mode in ("snippets", "hybrid")
+            if include_snippets and runtime_symbols:
                 symbol_query = " ".join(runtime_symbols[:30])
                 _ensure_embedding_compat(
                     paths.code_dir,
@@ -1127,11 +1349,28 @@ def route_query(
                 code_nodes = code_index.as_retriever(
                     similarity_top_k=config.indexing.query_code_top_k
                 ).retrieve(symbol_query)
-                code_context = _format_code_sources(code_nodes, include_snippets=True)
+                snippet_context = _format_code_sources(code_nodes, include_snippets=True)
+                if snippet_context:
+                    code_context_parts.append(snippet_context)
+            if code_context_mode in ("mcp", "hybrid") and mcp_agent:
+                symbols_hint = ", ".join(runtime_symbols[:15]) if runtime_symbols else symbol
+                mcp_query = (
+                    "Fetch kernel code context for hotspot analysis. "
+                    f"Focus symbol: {symbol}. Related symbols: {symbols_hint}."
+                )
+                try:
+                    mcp_result = mcp_agent.fetch_context(mcp_query)
+                    if mcp_result.context:
+                        code_context_parts.append(
+                            "MCP retrieved context:\n" + mcp_result.context
+                        )
+                except Exception as exc:
+                    logger.warning("MCP retrieval failed: %s", exc)
+            code_context = "\n\n".join(part for part in code_context_parts if part)
 
             if prompt_template:
                 combined_query = _format_query_with_prompt(
-                    query=query,
+                    query=query_text,
                     prompt_template=prompt_template,
                     runtime_context=runtime_context,
                     code_context=code_context,
@@ -1141,17 +1380,16 @@ def route_query(
                     "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
                     f"Runtime findings:\n{runtime_context}\n\n"
                     f"{code_context}\n\n"
-                    f"Question: {query}"
+                    f"Question: {query_text}"
                 )
-            print(combined_query)
             response = str(engine.query(combined_query))
             responses.append(f"## Hotspot {symbol}\n{response}".strip())
         return "\n\n".join(responses)
 
     if mode == "code":
-        return str(_graph_engine(paths.code_dir).query(query))
+        return str(_graph_engine(paths.code_dir).query(query_text))
     if mode == "runtime":
-        runtime_response = _engine(paths.runtime_dir).query(query)
+        runtime_response = _engine(paths.runtime_dir).query(query_text)
         response_text = str(runtime_response).strip()
         if response_text:
             return response_text
@@ -1161,14 +1399,17 @@ def route_query(
         )
         return fallback or "No runtime results available."
     if mode == "graph":
-        return str(_graph_engine(paths.code_dir).query(query))
+        return str(_graph_engine(paths.code_dir).query(query_text))
     if mode == "runtime_code":
         return _runtime_to_code_query()
 
-    keywords_runtime = ["perf", "trace", "runtime", "framegraph", "instruction", "hotspot"]
-    if any(k in query.lower() for k in keywords_runtime):
+    if run_id or focus_symbols or hotspot_top_k:
         return _runtime_to_code_query()
-    return str(_graph_engine(paths.code_dir).query(query))
+
+    keywords_runtime = ["perf", "trace", "runtime", "framegraph", "instruction", "hotspot"]
+    if any(k in query_text.lower() for k in keywords_runtime):
+        return _runtime_to_code_query()
+    return str(_graph_engine(paths.code_dir).query(query_text))
 
 
 
@@ -1187,6 +1428,7 @@ def retrieve_code_context(
     _, embed = _build_llama_models(config)
     code_index_cfg = _neo4j_index_config("code")
     code_embed_dim = _embedding_dimension_for_query(paths.code_dir, embed)
+    graph_context_lines: list[str] = []
     _ensure_embedding_compat(
         paths.code_dir,
         embed_model=config.llm.embedding_model,
@@ -1205,16 +1447,56 @@ def retrieve_code_context(
     retriever = index.as_retriever(similarity_top_k=top_k or config.indexing.query_code_top_k)
     source_nodes = retriever.retrieve(query)
     snippets = []
+    symbol_hints: list[str] = []
     for source in source_nodes:
         node = getattr(source, "node", source)
         text = getattr(node, "text", "")
         if not text:
             continue
+        metadata = getattr(node, "metadata", {}) if node else {}
+        symbol_name = metadata.get("symbol_name") or metadata.get("symbol_qualname")
+        if symbol_name:
+            symbol_hints.append(str(symbol_name))
         if len(text) > max_chars:
             text = f"{text[:max_chars]}\n...[truncated {len(text) - max_chars} chars]"
         snippets.append(text)
         if len(snippets) >= max_snippets:
             break
+    if config.indexing.neo4j.enabled and symbol_hints:
+        try:
+            vector_store = Neo4jVectorStore(
+                username=config.indexing.neo4j.user,
+                password=config.indexing.neo4j.password,
+                url=config.indexing.neo4j.uri,
+                database=config.indexing.neo4j.database,
+                embedding_dimension=code_embed_dim,
+                index_name=code_index_cfg.index_name,
+                node_label=code_index_cfg.node_label,
+            )
+            relation_limit = max(10, config.indexing.query_graph_top_k * 5)
+            cypher = (
+                "MATCH (s:symbol)-[r]->(t) "
+                "WHERE s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols "
+                "RETURN s.symbol_name as src, s.symbol_qualname as src_qual, "
+                "type(r) as rel, t.symbol_name as dst, t.symbol_qualname as dst_qual "
+                "LIMIT $limit"
+            )
+            records = vector_store.database_query(
+                cypher,
+                {"symbols": list(dict.fromkeys(symbol_hints))[:20], "limit": relation_limit},
+            )
+            if records:
+                graph_context_lines.append("Graph relations:")
+                for rec in records:
+                    src = rec.get("src") or rec.get("src_qual") or "unknown"
+                    dst = rec.get("dst") or rec.get("dst_qual") or "unknown"
+                    rel = rec.get("rel") or "related_to"
+                    graph_context_lines.append(f"- {src} -[{rel}]-> {dst}")
+        except Exception as exc:
+            logger.warning("Neo4j graph context retrieval failed: %s", exc)
     if not snippets:
         return ""
-    return "Relevant code snippets:\n" + "\n\n".join(snippets)
+    parts = ["Relevant code snippets:\n" + "\n\n".join(snippets)]
+    if graph_context_lines:
+        parts.append("\n".join(graph_context_lines))
+    return "\n\n".join(parts)

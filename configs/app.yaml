@@ -48,6 +48,8 @@ indexing:
   query_code_top_k: 10
   query_runtime_top_k: 10
   query_graph_top_k: 3
+  query_hotspot_top_k: 10
+  query_code_context_mode: snippets  # snippets|mcp|hybrid
   clangd:
     enabled: true
     binary: clangd
@@ -85,3 +87,13 @@ indexing:
     user: neo4j
     password: '@huawei2026'
     database: neo4j
+  mcp:
+    enabled: false
+    base_url: http://10.90.56.33:20010/v1
+    api_key_env: HMOPT_LLM_API_KEY
+    model: glm-4.7
+    timeout_sec: 30
+    tool_name: kernel_index_code
+    top_k: 6
+    mcp_base_url: http://localhost:8000
+    mcp_api_key_env: HMOPT_MCP_API_KEY
