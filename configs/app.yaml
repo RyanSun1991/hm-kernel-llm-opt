@@ -37,8 +37,10 @@ pipelines:
 indexing:
   enabled: true
   persist_dir: data/llamaindex
+  query_prompt_file: /home/ryan/work/hm-kernel-llm-opt-main/configs/analysis_prompt.md
+  hotspot_focus_symbol: reclaim_services
   llm_enrich: false
-  llm_enrich_limit: 50
+  llm_enrich_limit: 5000
   runtime_evidence_max_chars: 20000
   hotspot_top_k: 20
   hotspot_min_ratio: 0.001
@@ -46,11 +48,6 @@ indexing:
   query_code_top_k: 10
   query_runtime_top_k: 10
   query_graph_top_k: 3
-  query_code_context_mode: mcp   # mcp|snippets
-  query_graph_expand_depth: 1
-  query_graph_expand_limit: 40
-  query_graph_expand_symbols: 15
-  query_graph_relation_types: []   # e.g. [calls, uses_type, uses_macro]
   clangd:
     enabled: true
     binary: clangd
