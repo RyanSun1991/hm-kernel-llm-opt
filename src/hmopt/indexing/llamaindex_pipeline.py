@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Optional
 
 from llama_index.core import (
     PropertyGraphIndex,
@@ -80,30 +81,6 @@ def _load_prompt_file(path: Optional[Path]) -> Optional[str]:
         return None
 
 
-def _load_query_text(query: str) -> str:
-    """Load query content from a file path or @path shorthand."""
-    if not query:
-        return query
-    raw = query.strip()
-    if raw.startswith("@"):
-        candidate = raw[1:].strip()
-        if candidate:
-            path = Path(candidate)
-            if path.exists() and path.is_file():
-                try:
-                    return path.read_text(encoding="utf-8", errors="ignore").strip()
-                except OSError as exc:
-                    logger.warning("Failed to read query file %s: %s", path, exc)
-                    return query
-    path = Path(raw)
-    if path.exists() and path.is_file():
-        try:
-            return path.read_text(encoding="utf-8", errors="ignore").strip()
-        except OSError as exc:
-            logger.warning("Failed to read query file %s: %s", path, exc)
-    return query
-
-
 def _format_query_with_prompt(
     query: str,
     prompt_template: Optional[str],
@@ -148,7 +125,7 @@ def _build_llama_models(config: AppConfig) -> tuple[OpenAILike, OpenAIEmbeddingL
                     api_key=config.llm.api_key,
                     api_base=config.llm.base_url,
                     timeout = 120,
-                    max_tokens=2048,
+                    max_tokens=4096,
                     temperature=0)
     embed = OpenAIEmbeddingLike(
         model=config.llm.embedding_model,
@@ -664,102 +641,114 @@ def route_query(
 
     prompt_path = prompt_file or config.indexing.query_prompt_file
     prompt_template = _load_prompt_file(prompt_path)
-    query_text = _load_query_text(query)
     max_code_snippets = 3
     max_code_chars = 1600
-    max_runtime_chars = 6000
-    max_graph_lines = config.indexing.query_graph_expand_limit
+    max_runtime_chars = 60000
 
-    def _escape_cypher_value(value: str) -> str:
-        return value.replace("\\", "\\\\").replace("'", "\\'")
-
-    def _cypher_list(values: Sequence[str]) -> str:
-        return "[" + ", ".join(f"'{_escape_cypher_value(v)}'" for v in values) + "]"
-
-    def _expand_graph_context(symbols: list[str]) -> str:
-        if not config.indexing.neo4j.enabled or not Neo4jVectorStore:
-            return ""
-        if not symbols:
-            return ""
-        max_symbols = config.indexing.query_graph_expand_symbols
-        depth = max(1, config.indexing.query_graph_expand_depth)
-        rel_types = config.indexing.query_graph_relation_types or []
-        limited_symbols = symbols[:max_symbols]
-        symbol_list = _cypher_list(limited_symbols)
-        rel_filter = ""
-        if rel_types:
-            rel_list = _cypher_list(rel_types)
-            rel_filter = f"WHERE all(rel in r WHERE type(rel) IN {rel_list})"
-
-        vector_store = Neo4jVectorStore(
-            username=config.indexing.neo4j.user,
-            password=config.indexing.neo4j.password,
-            url=config.indexing.neo4j.uri,
-            database=config.indexing.neo4j.database,
-            embedding_dimension=code_embed_dim,
-            index_name=code_index_cfg.index_name,
-            node_label=code_index_cfg.node_label,
-        )
-        lines: list[str] = []
-        try:
-            outgoing_query = (
-                "MATCH (s) "
-                f"WHERE s.symbol_name IN {symbol_list} OR s.symbol_qualname IN {symbol_list} "
-                f"MATCH p=(s)-[r*1..{depth}]->(t) "
-                f"{rel_filter} "
-                "RETURN s.symbol_name AS src, [rel IN r | type(rel)] AS rels, "
-                "t.symbol_name AS dst, t.symbol_kind AS dst_kind, t.path AS dst_path "
-                f"LIMIT {max_graph_lines}"
-            )
-            outgoing = vector_store.database_query(outgoing_query)
-            for row in outgoing or []:
-                rels = "->".join(row.get("rels", [])) if isinstance(row, dict) else ""
-                src = row.get("src") if isinstance(row, dict) else None
-                dst = row.get("dst") if isinstance(row, dict) else None
-                dst_kind = row.get("dst_kind") if isinstance(row, dict) else None
-                dst_path = row.get("dst_path") if isinstance(row, dict) else None
-                if src and dst:
-                    lines.append(f"- {src} -[{rels}]-> {dst} ({dst_kind}) {dst_path or ''}".strip())
-
-            incoming_query = (
-                "MATCH (t) "
-                f"WHERE t.symbol_name IN {symbol_list} OR t.symbol_qualname IN {symbol_list} "
-                f"MATCH p=(s)-[r*1..{depth}]->(t) "
-                f"{rel_filter} "
-                "RETURN s.symbol_name AS src, [rel IN r | type(rel)] AS rels, "
-                "t.symbol_name AS dst, t.symbol_kind AS dst_kind, t.path AS dst_path "
-                f"LIMIT {max_graph_lines}"
-            )
-            incoming = vector_store.database_query(incoming_query)
-            for row in incoming or []:
-                rels = "->".join(row.get("rels", [])) if isinstance(row, dict) else ""
-                src = row.get("src") if isinstance(row, dict) else None
-                dst = row.get("dst") if isinstance(row, dict) else None
-                dst_kind = row.get("dst_kind") if isinstance(row, dict) else None
-                dst_path = row.get("dst_path") if isinstance(row, dict) else None
-                if src and dst:
-                    line = f"- {src} -[{rels}]-> {dst} ({dst_kind}) {dst_path or ''}".strip()
-                    if line not in lines:
-                        lines.append(line)
-        except Exception as exc:
-            logger.warning("Graph expansion failed: %s", exc)
-            return ""
-        if not lines:
-            return ""
-        return "Graph relations:\n" + "\n".join(lines[:max_graph_lines])
-
-    def _parse_evidence_pack(text: str) -> Optional[dict]:
-        if not text:
+    def _load_evidence_pack_from_path(metadata: Optional[dict]) -> Optional[dict]:
+        if not metadata:
             return None
+        path = metadata.get("path")
+        if not path or not isinstance(path, str):
+            return None
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+                payload = handle.read().strip()
+        except OSError:
+            return None
+        if not payload:
+            return None
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+
+    def _parse_evidence_pack(text: str, *, metadata: Optional[dict] = None) -> Optional[dict]:
+        if not text:
+            return _load_evidence_pack_from_path(metadata)
         prefix = "evidence_pack"
+        payload = text
         if text.startswith(prefix):
             payload = text[len(prefix):].strip()
-            if payload:
-                try:
-                    return json.loads(payload)
-                except json.JSONDecodeError:
-                    return None
-        return None
+        if payload:
+            try:
+                return json.loads(payload)
+            except json.JSONDecodeError:
+                truncated_marker = "\n\n...[truncated"
+                if truncated_marker in payload:
+                    payload = payload.split(truncated_marker, 1)[0].strip()
+                    if payload:
+                        try:
+                            return json.loads(payload)
+                        except json.JSONDecodeError:
+                            pass
+        return _load_evidence_pack_from_path(metadata)
+
+    def _format_call_stack_line(stack: dict) -> str:
+        direction = stack.get("direction", "call")
+        frames = stack.get("frames")
+        total_events = stack.get("total_events")
+        thread_id = stack.get("thread_id")
+        if isinstance(frames, list) and frames:
+            frame_parts = []
+            for frame in frames:
+                if not isinstance(frame, dict):
+                    continue
+                symbol = frame.get("symbol")
+                if not symbol:
+                    continue
+                details = []
+                self_events = frame.get("self_events")
+                # if self_events is not None:
+                #     details.append(f"self_events={self_events}")
+                if total_events is not None:
+                    details.append(f"total_events={total_events}")
+                frame_thread_id = frame.get("thread_id", thread_id)
+                # if frame_thread_id is not None:
+                #     details.append(f"thread_id={frame_thread_id}")
+                details_text = f" ({', '.join(details)})" if details else ""
+                frame_parts.append(f"{symbol}{details_text}")
+            frames_text = " -> ".join(frame_parts)
+            return f"    ({direction}) {frames_text}"
+        path = " -> ".join(stack.get("stack", []))
+        details = []
+        if stack.get("self_events") is not None:
+            details.append(f"self_events={stack.get('self_events')}")
+        if total_events is not None:
+            details.append(f"total_events={total_events}")
+        if thread_id is not None:
+            details.append(f"thread_id={thread_id}")
+        details_text = f" ({', '.join(details)})" if details else ""
+        return f"    ({direction}) {path}{details_text}"
+
+    def _merge_call_stacks(primary: list[dict], secondary: list[dict]) -> list[dict]:
+        if not secondary:
+            return primary
+        merged = list(primary)
+        seen: set[tuple[str, tuple[str, ...], str | None]] = set()
+        for stack in primary:
+            if not isinstance(stack, dict):
+                continue
+            path = stack.get("stack") or []
+            if not isinstance(path, list):
+                continue
+            key = (stack.get("direction", "call"), tuple(path), stack.get("thread_id"))
+            seen.add(key)
+        for stack in secondary:
+            if not isinstance(stack, dict):
+                continue
+            path = stack.get("stack") or []
+            if not isinstance(path, list):
+                continue
+            key = (stack.get("direction", "call"), tuple(path), stack.get("thread_id"))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(stack)
+        return merged
+
 
     def _format_evidence_hotspots(payload: dict) -> list[dict]:
         hotspots_payload = payload.get("hotspots", []) if isinstance(payload, dict) else []
@@ -802,18 +791,34 @@ def route_query(
                 lines.append("  Call paths:")
                 for stack in call_stacks[:3]:
                     if isinstance(stack, dict):
-                        path = " -> ".join(stack.get("stack", []))
-                        direction = stack.get("direction", "call")
-                        lines.append(f"    ({direction}) {path}")
+                        lines.append(_format_call_stack_line(stack))
+                        # path = " -> ".join(stack.get("stack", []))
+                        # direction = stack.get("direction", "call")
+                        # lines.append(f"    ({direction}) {path}")
         return lines
+
 
     def _filter_runtime_hotspots(items: list[dict], focus_symbol: str | None) -> list[dict]:
         if not focus_symbol:
             return items
         return [item for item in items if item.get("symbol") == focus_symbol]
 
+    def _dedupe_hotspots(items: list[dict]) -> list[dict]:
+        by_symbol: dict[str, dict] = {}
+        for item in items:
+            symbol = item.get("symbol")
+            if not symbol:
+                continue
+            existing = by_symbol.get(symbol)
+            if not existing:
+                by_symbol[symbol] = item
+                continue
+            if not existing.get("call_stacks") and item.get("call_stacks"):
+                by_symbol[symbol] = item
+        return list(by_symbol.values())
+
     def _collect_runtime_hotspots(source_nodes: list) -> tuple[list[dict], list[dict]]:
-        hotspots = []
+        hotspots: list[dict] = []
         evidence_hotspots: list[dict] = []
         for source in source_nodes:
             node = getattr(source, "node", source)
@@ -843,15 +848,14 @@ def route_query(
                 )
             elif node_type == "evidence_pack":
                 text = getattr(node, "text", "")
-                payload = _parse_evidence_pack(text)
+                payload = _parse_evidence_pack(text, metadata=metadata)
                 if payload:
                     evidence_hotspots.extend(_format_evidence_hotspots(payload))
-        return hotspots, evidence_hotspots
+        return _dedupe_hotspots(hotspots), _dedupe_hotspots(evidence_hotspots)
 
     def _format_runtime_sources(source_nodes: list, *, focus_symbol: str | None) -> str:
         hotspots, evidence_hotspots = _collect_runtime_hotspots(source_nodes)
         metrics = []
-        evidence_lines: list[str] = []
         for source in source_nodes:
             node = getattr(source, "node", source)
             metadata = getattr(node, "metadata", {}) if node else {}
@@ -866,17 +870,24 @@ def route_query(
                         "text": text,
                     }
                 )
-            elif node_type == "evidence_pack":
-                payload = _parse_evidence_pack(text)
-                if payload:
-                    evidence_lines.extend(_format_evidence_excerpt(payload, focus_symbol))
         lines = []
         if hotspots or evidence_hotspots:
             lines.append("Top runtime hotspots:")
             runtime_items = _filter_runtime_hotspots(hotspots, focus_symbol) or _filter_runtime_hotspots(
                 evidence_hotspots, focus_symbol
             )
-            for item in runtime_items[:1]:
+            if hotspots and evidence_hotspots:
+                evidence_map = {
+                    item.get("symbol"): item for item in _filter_runtime_hotspots(evidence_hotspots, focus_symbol)
+                }
+                for item in runtime_items:
+                    symbol = item.get("symbol")
+                    evidence_item = evidence_map.get(symbol) if symbol else None
+                    if evidence_item and evidence_item.get("call_stacks"):
+                        item["call_stacks"] = _merge_call_stacks(
+                            item.get("call_stacks", []), evidence_item.get("call_stacks", [])
+                        )
+            for item in runtime_items:
                 lines.append(
                     f"- {item.get('symbol')} score={item.get('score')} "
                     f"path={item.get('file_path')} lines={item.get('line_start')}-{item.get('line_end')}"
@@ -884,20 +895,31 @@ def route_query(
                 call_stacks = item.get("call_stacks", [])
                 if call_stacks:
                     lines.append("  Call paths:")
-                    for stack in call_stacks[:5]:
+
+                    sorted_stacks = sorted(
+                        [stack for stack in call_stacks if isinstance(stack, dict)],
+                        key=lambda s: s.get("total_events") or 0,
+                        reverse=True,
+                    )
+                    top_stacks = sorted_stacks[:20]
+                    batch = top_stacks[:5]
+                    for stack in batch:
+                        if isinstance(stack, str):
+                            stack = ast.literal_eval(stack)
                         if isinstance(stack, dict):
-                            path = " -> ".join(stack.get("stack", []))
-                            direction = stack.get("direction", "call")
-                            lines.append(f"    ({direction}) {path}")
+                            lines.append(_format_call_stack_line(stack))
+
+                    remaining = len(top_stacks) - len(batch)
+                    if remaining > 0:
+                        lines.append(f"  ...and {remaining} more call paths (top 20 by total_events)")
+
+                    # for stack in call_stacks:
         if metrics:
             lines.append("Runtime metrics:")
             for item in metrics:
                 lines.append(
                     f"- {item.get('metric_name')} value={item.get('value')} unit={item.get('unit')}"
                 )
-        if evidence_lines:
-            lines.append("Runtime evidence excerpt:")
-            lines.extend(evidence_lines)
         runtime_text = "\n".join(lines).strip()
         if len(runtime_text) > max_runtime_chars:
             runtime_text = (
@@ -926,20 +948,6 @@ def route_query(
             return ""
         return "Relevant code snippets:\n" + "\n\n".join(snippets)
 
-    def _retrieve_code_sources(text: str) -> list:
-        if not text:
-            return []
-        index = _load_index(
-            config,
-            paths.code_dir,
-            embedding_dimension=code_embed_dim,
-            index_name=code_index_cfg.index_name,
-            node_label=code_index_cfg.node_label,
-            embed_model=embed,
-        )
-        retriever = index.as_retriever(similarity_top_k=config.indexing.query_code_top_k)
-        return retriever.retrieve(text)
-
     def _extract_runtime_symbols(source_nodes: list, *, focus_symbol: str | None) -> list[str]:
         symbols: set[str] = set()
         for source in source_nodes:
@@ -963,7 +971,7 @@ def route_query(
                         if stack_symbol and (not focus_symbol or stack_symbol == focus_symbol):
                             symbols.add(stack_symbol)
             text = getattr(node, "text", "")
-            payload = _parse_evidence_pack(text)
+            payload = _parse_evidence_pack(text, metadata=metadata)
             if payload:
                 for item in payload.get("hotspots", []) or []:
                     if not isinstance(item, dict):
@@ -1056,7 +1064,7 @@ def route_query(
                     max_evidence_chars=config.indexing.runtime_evidence_max_chars,
                 )
         else:
-            runtime_response = _engine(paths.runtime_dir).query(query_text)
+            runtime_response = _engine(paths.runtime_dir).query(query)
             runtime_response_text = str(runtime_response).strip()
             source_nodes = getattr(runtime_response, "source_nodes", []) or []
 
@@ -1076,26 +1084,15 @@ def route_query(
         if not symbol_queue:
             runtime_context = _format_runtime_sources(source_nodes, focus_symbol=focus_symbol)
             runtime_context = runtime_context or runtime_response_text
-            code_context = ""
-            if config.indexing.query_code_context_mode == "snippets":
-                code_sources = _retrieve_code_sources(query_text)
-                code_context = _format_code_sources(code_sources, include_snippets=True)
-            graph_context = _expand_graph_context(
-                _extract_runtime_symbols(source_nodes, focus_symbol=focus_symbol)
-            )
             combined_query = _format_query_with_prompt(
-                query=query_text,
+                query=query,
                 prompt_template=prompt_template,
                 runtime_context=runtime_context,
-                code_context="\n\n".join(
-                    [ctx for ctx in [code_context, graph_context] if ctx]
-                ),
+                code_context="",
             ) if prompt_template else (
                 "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
                 f"Runtime findings:\n{runtime_context}\n\n"
-                f"{code_context}\n\n"
-                f"{graph_context}\n\n"
-                f"Question: {query_text}"
+                f"Question: {query}"
             )
             return str(_graph_engine(paths.code_dir).query(combined_query))
 
@@ -1105,39 +1102,56 @@ def route_query(
             runtime_context = _format_runtime_sources(source_nodes, focus_symbol=symbol)
             if not runtime_context:
                 runtime_context = runtime_response_text
-            code_context_mode = config.indexing.query_code_context_mode
-            if code_context_mode == "snippets":
-                code_sources = _retrieve_code_sources(symbol or query_text)
-                code_context = _format_code_sources(code_sources, include_snippets=True)
-            else:
-                code_context = _format_code_sources([], include_snippets=False)
-            graph_symbols = _extract_runtime_symbols(source_nodes, focus_symbol=symbol)
-            graph_context = _expand_graph_context(graph_symbols)
+            # code_context = (
+            #     "Code snippets omitted to reduce context. Use MCP/RAG retrieval for specific symbols."
+            # )
+            runtime_symbols = _extract_runtime_symbols(source_nodes, focus_symbol = symbol)
+            code_context = ""
+            if runtime_symbols:
+                symbol_query = " ".join(runtime_symbols[:30])
+                _ensure_embedding_compat(
+                    paths.code_dir,
+                    embed_model=config.llm.embedding_model,
+                    embed_dim=code_embed_dim,
+                    index_name=code_index_cfg.index_name,
+                    node_label=code_index_cfg.node_label,
+                )
+                code_index = _load_index(
+                    config,
+                    paths.code_dir,
+                    embedding_dimension=code_embed_dim,
+                    index_name=code_index_cfg.index_name,
+                    node_label=code_index_cfg.node_label,
+                    embed_model=embed,
+                )
+                code_nodes = code_index.as_retriever(
+                    similarity_top_k=config.indexing.query_code_top_k
+                ).retrieve(symbol_query)
+                code_context = _format_code_sources(code_nodes, include_snippets=True)
+
             if prompt_template:
                 combined_query = _format_query_with_prompt(
-                    query=query_text,
+                    query=query,
                     prompt_template=prompt_template,
                     runtime_context=runtime_context,
-                    code_context="\n\n".join(
-                        [ctx for ctx in [code_context, graph_context] if ctx]
-                    ),
+                    code_context=code_context,
                 )
             else:
                 combined_query = (
                     "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
                     f"Runtime findings:\n{runtime_context}\n\n"
                     f"{code_context}\n\n"
-                    f"{graph_context}\n\n"
-                    f"Question: {query_text}"
+                    f"Question: {query}"
                 )
+            print(combined_query)
             response = str(engine.query(combined_query))
             responses.append(f"## Hotspot {symbol}\n{response}".strip())
         return "\n\n".join(responses)
 
     if mode == "code":
-        return str(_graph_engine(paths.code_dir).query(query_text))
+        return str(_graph_engine(paths.code_dir).query(query))
     if mode == "runtime":
-        runtime_response = _engine(paths.runtime_dir).query(query_text)
+        runtime_response = _engine(paths.runtime_dir).query(query)
         response_text = str(runtime_response).strip()
         if response_text:
             return response_text
@@ -1147,11 +1161,60 @@ def route_query(
         )
         return fallback or "No runtime results available."
     if mode == "graph":
-        return str(_graph_engine(paths.code_dir).query(query_text))
+        return str(_graph_engine(paths.code_dir).query(query))
     if mode == "runtime_code":
         return _runtime_to_code_query()
 
     keywords_runtime = ["perf", "trace", "runtime", "framegraph", "instruction", "hotspot"]
-    if any(k in query_text.lower() for k in keywords_runtime):
+    if any(k in query.lower() for k in keywords_runtime):
         return _runtime_to_code_query()
-    return str(_graph_engine(paths.code_dir).query(query_text))
+    return str(_graph_engine(paths.code_dir).query(query))
+
+
+
+def retrieve_code_context(
+    config: AppConfig,
+    query: str,
+    *,
+    top_k: Optional[int] = None,
+    max_snippets: int = 3,
+    max_chars: int = 1600,
+) -> str:
+    """Retrieve code snippets for a query without invoking the LLM."""
+    if not query:
+        return ""
+    paths = _index_paths(config)
+    _, embed = _build_llama_models(config)
+    code_index_cfg = _neo4j_index_config("code")
+    code_embed_dim = _embedding_dimension_for_query(paths.code_dir, embed)
+    _ensure_embedding_compat(
+        paths.code_dir,
+        embed_model=config.llm.embedding_model,
+        embed_dim=code_embed_dim,
+        index_name=code_index_cfg.index_name,
+        node_label=code_index_cfg.node_label,
+    )
+    index = _load_index(
+        config,
+        paths.code_dir,
+        embedding_dimension=code_embed_dim,
+        index_name=code_index_cfg.index_name,
+        node_label=code_index_cfg.node_label,
+        embed_model=embed,
+    )
+    retriever = index.as_retriever(similarity_top_k=top_k or config.indexing.query_code_top_k)
+    source_nodes = retriever.retrieve(query)
+    snippets = []
+    for source in source_nodes:
+        node = getattr(source, "node", source)
+        text = getattr(node, "text", "")
+        if not text:
+            continue
+        if len(text) > max_chars:
+            text = f"{text[:max_chars]}\n...[truncated {len(text) - max_chars} chars]"
+        snippets.append(text)
+        if len(snippets) >= max_snippets:
+            break
+    if not snippets:
+        return ""
+    return "Relevant code snippets:\n" + "\n\n".join(snippets)
