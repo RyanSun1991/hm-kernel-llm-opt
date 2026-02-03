@@ -17,6 +17,14 @@ class MCPToolAgentConfig:
     top_k: int
     mcp_base_url: str
     mcp_api_key: str | None = None
+    tool_query_suffix: str | None = None
+    return_raw_tool_output: bool = False
+    expand_related_symbols: bool = False
+    max_related_symbols: int = 8
+    include_follow_up: bool = True
+    auto_refine_on_question: bool = True
+    max_refine_iterations: int = 2
+    use_plain_query_first: bool = True
 
 
 @dataclass(frozen=True)
@@ -74,6 +82,14 @@ class MCPToolAgent:
             arguments = call.get("arguments", {})
             query_arg = arguments.get("query", query)
             top_k = arguments.get("top_k")
+            if self._config.use_plain_query_first and self._config.tool_query_suffix:
+                plain = self._call_mcp_tool(query_arg, top_k=top_k, use_suffix=False)
+                tool_results.append(
+                    {
+                        "tool_call_id": call.get("id"),
+                        "content": plain,
+                    }
+                )
             tool_results.append(
                 {
                     "tool_call_id": call.get("id"),
@@ -83,6 +99,19 @@ class MCPToolAgent:
 
         if not tool_results:
             return MCPToolAgentResult(context="", tool_used=False, raw_response=response)
+
+        expanded_results = []
+        if self._config.expand_related_symbols:
+            expanded_results = self._expand_related_symbol_results(query, tool_results)
+        combined_raw = "\n".join(
+            result["content"] for result in (tool_results + expanded_results) if result["content"]
+        )
+        if not self._config.include_follow_up:
+            return MCPToolAgentResult(
+                context=combined_raw.strip(),
+                tool_used=True,
+                raw_response={"tool_results": tool_results, "expanded_results": expanded_results},
+            )
 
         messages.append(
             {
@@ -100,11 +129,43 @@ class MCPToolAgent:
                 }
             )
 
+        if expanded_results:
+            expanded_block = "\n".join(result["content"] for result in expanded_results if result["content"])
+            if expanded_block:
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"Additional MCP tool outputs:\n{expanded_block}",
+                    }
+                )
+
         follow_up = self._post_chat(messages, tools=[tool_spec])
+        follow_up_text = _extract_message_content(follow_up).strip()
+        if self._config.auto_refine_on_question and _looks_like_question(follow_up_text):
+            follow_up_text, combined_raw, follow_up = self._refine_with_question(
+                query,
+                follow_up_text,
+                combined_raw,
+                messages,
+                tool_spec,
+            )
+
+        if self._config.return_raw_tool_output:
+            raw_section = combined_raw.strip()
+            if follow_up_text and raw_section:
+                context = f"{follow_up_text}\n\n[MCP raw tool output]\n{raw_section}"
+            elif raw_section:
+                context = raw_section
+            else:
+                context = follow_up_text
+            raw_response = {"tool_results": tool_results, "response": follow_up}
+        else:
+            context = follow_up_text
+            raw_response = follow_up
         return MCPToolAgentResult(
-            context=_extract_message_content(follow_up).strip(),
+            context=context,
             tool_used=True,
-            raw_response=follow_up,
+            raw_response=raw_response,
         )
 
     def _post_chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
@@ -124,11 +185,18 @@ class MCPToolAgent:
         response.raise_for_status()
         return response.json()
 
-    def _call_mcp_tool(self, query: str, *, top_k: int | None = None) -> str:
+    def _call_mcp_tool(
+        self,
+        query: str,
+        *,
+        top_k: int | None = None,
+        use_suffix: bool = True,
+    ) -> str:
+        query_with_suffix = self._with_query_suffix(query) if use_suffix else query
         payload = {
             "tool": self._config.tool_name,
             "arguments": {
-                "query": query,
+                "query": query_with_suffix,
                 "top_k": top_k or self._config.top_k,
             },
         }
@@ -142,6 +210,113 @@ class MCPToolAgent:
         )
         response.raise_for_status()
         return _stringify_result(response.json()).strip()
+
+    def _with_query_suffix(self, query: str) -> str:
+        suffix = (self._config.tool_query_suffix or "").strip()
+        if not suffix:
+            return query
+        if query.rstrip().endswith(suffix):
+            return query
+        return f"{query.rstrip()}\n\n{suffix}"
+
+    def _expand_related_symbol_results(
+        self,
+        query: str,
+        tool_results: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        combined_raw = "\n".join(result["content"] for result in tool_results if result["content"])
+        symbols = _extract_related_symbols(combined_raw, max_symbols=self._config.max_related_symbols)
+        expanded = []
+        for symbol in symbols:
+            if symbol == query:
+                continue
+            expanded.append(
+                {
+                    "tool_call_id": None,
+                    "content": self._call_mcp_tool(symbol, top_k=self._config.top_k),
+                }
+            )
+        return expanded
+
+    def _refine_with_question(
+        self,
+        query: str,
+        follow_up_text: str,
+        combined_raw: str,
+        messages: list[dict[str, Any]],
+        tool_spec: dict[str, Any],
+    ) -> tuple[str, str, dict[str, Any]]:
+        messages.append({"role": "assistant", "content": follow_up_text})
+        current_text = follow_up_text
+        current_raw = combined_raw
+        current_response: dict[str, Any] = {}
+        for _ in range(self._config.max_refine_iterations):
+            if not _looks_like_question(current_text):
+                break
+            refinement_query = (
+                f"Original query: {query}\n\n"
+                f"The assistant asked: {current_text}\n\n"
+                "Please answer using the kernel index. Include full symbol implementations, "
+                "call relationships, and AST context where possible."
+            )
+            refinement_output = self._call_mcp_tool(refinement_query, top_k=self._config.top_k)
+            if refinement_output:
+                current_raw = "\n".join(filter(None, [current_raw, refinement_output]))
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"Additional MCP tool outputs:\n{refinement_output}",
+                    }
+                )
+            current_response = self._post_chat(messages, tools=[tool_spec])
+            current_text = _extract_message_content(current_response).strip()
+        return current_text, current_raw, current_response
+
+
+def _extract_related_symbols(raw: str, *, max_symbols: int) -> list[str]:
+    symbols: list[str] = []
+    for line in raw.splitlines():
+        if "symbol relations:" not in line:
+            continue
+        _, _, tail = line.partition("symbol relations:")
+        candidate = tail.strip()
+        if " (" in candidate:
+            candidate = candidate.split(" (", 1)[0].strip()
+        if candidate and candidate not in symbols:
+            symbols.append(candidate)
+        if len(symbols) >= max_symbols:
+            break
+    return symbols
+
+
+def _looks_like_question(text: str) -> bool:
+    if not text:
+        return False
+    if "?" in text:
+        return True
+    starters = (
+        "could you",
+        "can you",
+        "would you",
+        "are you",
+        "do you",
+        "what",
+        "which",
+        "where",
+        "when",
+        "why",
+        "how",
+        "is this",
+        "are these",
+    )
+    for line in text.lower().splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        for starter in starters:
+            if stripped.startswith(starter):
+                return True
+    return False
 
 
 def _extract_message_content(response: Mapping[str, Any]) -> str:

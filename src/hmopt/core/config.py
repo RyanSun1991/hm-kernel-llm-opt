@@ -144,6 +144,14 @@ class MCPConfig(BaseModel):
     top_k: int = 6
     mcp_base_url: str = "http://localhost:8000"
     mcp_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("HMOPT_MCP_API_KEY"))
+    tool_query_suffix: Optional[str] = None
+    return_raw_tool_output: bool = False
+    expand_related_symbols: bool = False
+    max_related_symbols: int = 8
+    include_follow_up: bool = True
+    auto_refine_on_question: bool = True
+    max_refine_iterations: int = 2
+    use_plain_query_first: bool = True
 
 
 class IndexingConfig(BaseModel):
@@ -351,6 +359,14 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "mcp_base_url": mcp_cfg.get("mcp_base_url", "http://localhost:8000"),
         "mcp_api_key": mcp_cfg.get("mcp_api_key")
         or (os.getenv(mcp_cfg.get("mcp_api_key_env")) if mcp_cfg.get("mcp_api_key_env") else None),
+        "tool_query_suffix": mcp_cfg.get("tool_query_suffix"),
+        "return_raw_tool_output": bool(mcp_cfg.get("return_raw_tool_output", False)),
+        "expand_related_symbols": bool(mcp_cfg.get("expand_related_symbols", False)),
+        "max_related_symbols": int(mcp_cfg.get("max_related_symbols", 8)),
+        "include_follow_up": bool(mcp_cfg.get("include_follow_up", True)),
+        "auto_refine_on_question": bool(mcp_cfg.get("auto_refine_on_question", True)),
+        "max_refine_iterations": int(mcp_cfg.get("max_refine_iterations", 2)),
+        "use_plain_query_first": bool(mcp_cfg.get("use_plain_query_first", True)),
     }
 
     indexing_norm = {

@@ -168,6 +168,14 @@ def _build_mcp_agent(config: AppConfig) -> MCPToolAgent | None:
             top_k=mcp_cfg.top_k,
             mcp_base_url=mcp_cfg.mcp_base_url,
             mcp_api_key=mcp_cfg.mcp_api_key,
+            tool_query_suffix=mcp_cfg.tool_query_suffix,
+            return_raw_tool_output=mcp_cfg.return_raw_tool_output,
+            expand_related_symbols=mcp_cfg.expand_related_symbols,
+            max_related_symbols=mcp_cfg.max_related_symbols,
+            include_follow_up=mcp_cfg.include_follow_up,
+            auto_refine_on_question=mcp_cfg.auto_refine_on_question,
+            max_refine_iterations=mcp_cfg.max_refine_iterations,
+            use_plain_query_first=mcp_cfg.use_plain_query_first,
         )
     )
 
