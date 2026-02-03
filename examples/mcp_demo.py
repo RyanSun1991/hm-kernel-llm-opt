@@ -1,4 +1,4 @@
-"""Minimal MCP demo: let the LLM call MCP tool and print the result.
+"""Minimal MCP demo: hybrid MCP retrieval (forced + LLM tool calls).
 
 Usage:
   export HMOPT_MCP_DEMO_QUERY="memcpy"
@@ -21,13 +21,12 @@ def main() -> None:
     config = AppConfig.from_yaml(os.getenv("HMOPT_DEMO_CONFIG", "configs/app.yaml"))
     query = os.getenv("HMOPT_MCP_DEMO_QUERY", "memcpy")
     mcp_url = "http://10.123.104.98:7331"#os.getenv("HMOPT_MCP_SERVER_URL", config.indexing.mcp.base_url)
-    llm_base_url = os.getenv("HMOPT_LLM_BASE_URL", config.llm.base_url)
-    llm_api_key = os.getenv("HMOPT_LLM_API_KEY", config.llm.api_key or "")
-
+    llm_base_url = os.getenv("HMOPT_LLM_BASE_URL", config.indexing.mcp.base_url or config.llm.base_url)
+    llm_api_key = os.getenv("HMOPT_LLM_API_KEY", config.indexing.mcp.api_key or config.llm.api_key or "")
     agent_cfg = MCPToolAgentConfig(
         base_url=llm_base_url,
         api_key=llm_api_key or None,
-        model=config.llm.model,
+        model=config.indexing.mcp.model or config.llm.model,
         timeout_sec=30,
         tool_name="kernel_index_code",
         top_k=10,

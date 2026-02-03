@@ -6,6 +6,7 @@ import ast
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Iterable
@@ -1418,17 +1419,17 @@ def retrieve_code_context(
     query: str,
     *,
     top_k: Optional[int] = None,
-    max_snippets: int = 3,
-    max_chars: int = 1600,
+    max_snippets: int = 8,
+    max_chars: int = 4000,
 ) -> str:
-    """Retrieve code snippets for a query without invoking the LLM."""
+    """Retrieve forced kernel context (code + graph expansion + rerank)."""
     if not query:
         return ""
     paths = _index_paths(config)
     _, embed = _build_llama_models(config)
     code_index_cfg = _neo4j_index_config("code")
     code_embed_dim = _embedding_dimension_for_query(paths.code_dir, embed)
-    graph_context_lines: list[str] = []
+    graph_edges: list[dict[str, str | int]] = []
     _ensure_embedding_compat(
         paths.code_dir,
         embed_model=config.llm.embedding_model,
@@ -1446,23 +1447,50 @@ def retrieve_code_context(
     )
     retriever = index.as_retriever(similarity_top_k=top_k or config.indexing.query_code_top_k)
     source_nodes = retriever.retrieve(query)
-    snippets = []
-    symbol_hints: list[str] = []
+
+    def _extract_query_symbols(text: str) -> list[str]:
+        tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text)
+        seen: set[str] = set()
+        result: list[str] = []
+        for tok in tokens:
+            if tok in seen:
+                continue
+            seen.add(tok)
+            result.append(tok)
+        return result[:10]
+
+    candidate_symbols: dict[str, dict] = {}
+    vector_scores: dict[str, float] = {}
     for source in source_nodes:
         node = getattr(source, "node", source)
-        text = getattr(node, "text", "")
-        if not text:
-            continue
         metadata = getattr(node, "metadata", {}) if node else {}
-        symbol_name = metadata.get("symbol_name") or metadata.get("symbol_qualname")
-        if symbol_name:
-            symbol_hints.append(str(symbol_name))
-        if len(text) > max_chars:
-            text = f"{text[:max_chars]}\n...[truncated {len(text) - max_chars} chars]"
-        snippets.append(text)
-        if len(snippets) >= max_snippets:
-            break
-    if config.indexing.neo4j.enabled and symbol_hints:
+        symbol_name = metadata.get("symbol_name")
+        symbol_qual = metadata.get("symbol_qualname")
+        score = getattr(source, "score", 0.0) or 0.0
+        for sym in (symbol_name, symbol_qual):
+            if not sym:
+                continue
+            if sym not in candidate_symbols:
+                candidate_symbols[sym] = {
+                    "symbol": sym,
+                    "metadata": metadata,
+                    "node": node,
+                }
+            vector_scores[sym] = max(vector_scores.get(sym, 0.0), float(score))
+
+    focus_symbols: list[str] = []
+    query_tokens = _extract_query_symbols(query)
+    for sym in candidate_symbols:
+        if sym in query or sym in query_tokens:
+            focus_symbols.append(sym)
+    if not focus_symbols:
+        focus_symbols = list(candidate_symbols.keys())[:3]
+    if not focus_symbols and query_tokens:
+        focus_symbols = query_tokens[:1]
+
+    depth_map: dict[str, int] = {sym: 0 for sym in focus_symbols}
+
+    if config.indexing.neo4j.enabled and focus_symbols:
         try:
             vector_store = Neo4jVectorStore(
                 username=config.indexing.neo4j.user,
@@ -1473,30 +1501,136 @@ def retrieve_code_context(
                 index_name=code_index_cfg.index_name,
                 node_label=code_index_cfg.node_label,
             )
-            relation_limit = max(10, config.indexing.query_graph_top_k * 5)
-            cypher = (
-                "MATCH (s:symbol)-[r]->(t) "
-                "WHERE s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols "
-                "RETURN s.symbol_name as src, s.symbol_qualname as src_qual, "
-                "type(r) as rel, t.symbol_name as dst, t.symbol_qualname as dst_qual "
-                "LIMIT $limit"
-            )
-            records = vector_store.database_query(
-                cypher,
-                {"symbols": list(dict.fromkeys(symbol_hints))[:20], "limit": relation_limit},
-            )
-            if records:
-                graph_context_lines.append("Graph relations:")
-                for rec in records:
-                    src = rec.get("src") or rec.get("src_qual") or "unknown"
-                    dst = rec.get("dst") or rec.get("dst_qual") or "unknown"
-                    rel = rec.get("rel") or "related_to"
-                    graph_context_lines.append(f"- {src} -[{rel}]-> {dst}")
+            graph_depth = max(1, min(3, config.indexing.query_graph_top_k or 2))
+            per_hop_limit = 50
+            frontier = set(focus_symbols)
+            visited = set(focus_symbols)
+            for depth in range(1, graph_depth + 1):
+                if not frontier:
+                    break
+                symbols_param = list(frontier)[:20]
+                outgoing = vector_store.database_query(
+                    (
+                        "MATCH (s:symbol)-[r]->(t) "
+                        "WHERE s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols "
+                        "RETURN s.symbol_name as src, s.symbol_qualname as src_qual, "
+                        "type(r) as rel, t.symbol_name as dst, t.symbol_qualname as dst_qual "
+                        "LIMIT $limit"
+                    ),
+                    {"symbols": symbols_param, "limit": per_hop_limit},
+                )
+                incoming = vector_store.database_query(
+                    (
+                        "MATCH (s:symbol)<-[r]-(t) "
+                        "WHERE s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols "
+                        "RETURN t.symbol_name as src, t.symbol_qualname as src_qual, "
+                        "type(r) as rel, s.symbol_name as dst, s.symbol_qualname as dst_qual "
+                        "LIMIT $limit"
+                    ),
+                    {"symbols": symbols_param, "limit": per_hop_limit},
+                )
+                new_frontier: set[str] = set()
+                for rec in (outgoing or []):
+                    src = rec.get("src") or rec.get("src_qual")
+                    dst = rec.get("dst") or rec.get("dst_qual")
+                    if src and dst:
+                        graph_edges.append(
+                            {"src": src, "dst": dst, "rel": rec.get("rel") or "related_to", "depth": depth}
+                        )
+                        if dst not in visited:
+                            visited.add(dst)
+                            depth_map[dst] = depth
+                            new_frontier.add(dst)
+                for rec in (incoming or []):
+                    src = rec.get("src") or rec.get("src_qual")
+                    dst = rec.get("dst") or rec.get("dst_qual")
+                    if src and dst:
+                        graph_edges.append(
+                            {"src": src, "dst": dst, "rel": rec.get("rel") or "related_to", "depth": depth}
+                        )
+                        if src not in visited:
+                            visited.add(src)
+                            depth_map[src] = depth
+                            new_frontier.add(src)
+                frontier = new_frontier
         except Exception as exc:
-            logger.warning("Neo4j graph context retrieval failed: %s", exc)
-    if not snippets:
+            logger.warning("Neo4j graph expansion failed: %s", exc)
+
+    target_symbols: set[str] = set(candidate_symbols.keys())
+    target_symbols.update(depth_map.keys())
+    if not target_symbols:
         return ""
-    parts = ["Relevant code snippets:\n" + "\n\n".join(snippets)]
-    if graph_context_lines:
-        parts.append("\n".join(graph_context_lines))
-    return "\n\n".join(parts)
+
+    # Build a lookup for code nodes by symbol name/qualname.
+    node_lookup: dict[str, TextNode] = {}
+    try:
+        storage = StorageContext.from_defaults(persist_dir=str(paths.code_dir))
+        docs = getattr(storage.docstore, "docs", {}) or {}
+        for node in docs.values():
+            metadata = getattr(node, "metadata", {}) if node else {}
+            if metadata.get("type") != "code":
+                continue
+            name = metadata.get("symbol_name")
+            qual = metadata.get("symbol_qualname")
+            if name and name in target_symbols and name not in node_lookup:
+                node_lookup[name] = node
+            if qual and qual in target_symbols and qual not in node_lookup:
+                node_lookup[qual] = node
+            if len(node_lookup) >= len(target_symbols):
+                break
+    except Exception as exc:
+        logger.warning("Failed to scan docstore for symbols: %s", exc)
+
+    ranked: list[tuple[str, float]] = []
+    for sym in target_symbols:
+        base = vector_scores.get(sym, 0.0)
+        depth = depth_map.get(sym, 3)
+        exact_bonus = 1.5 if sym in focus_symbols else 0.0
+        depth_bonus = 0.6 / (1 + depth)
+        score = base + exact_bonus + depth_bonus
+        ranked.append((sym, score))
+    ranked.sort(key=lambda item: item[1], reverse=True)
+
+    selected: list[str] = []
+    for sym in focus_symbols:
+        if sym in target_symbols and sym not in selected:
+            selected.append(sym)
+    for sym, _ in ranked:
+        if sym not in selected:
+            selected.append(sym)
+        if len(selected) >= max_snippets:
+            break
+
+    lines: list[str] = [
+        "[Kernel Index Retrieval]",
+        f"Query: {query}",
+        "Reranked symbols (vector + graph):",
+    ]
+    ranked_map = {sym: score for sym, score in ranked}
+    for sym in selected:
+        score = ranked_map.get(sym, 0.0)
+        depth = depth_map.get(sym)
+        vec_score = vector_scores.get(sym)
+        detail = [f"score={score:.4f}"]
+        if vec_score is not None:
+            detail.append(f"vector={vec_score:.4f}")
+        if depth is not None:
+            detail.append(f"depth={depth}")
+        lines.append(f"- {sym} ({', '.join(detail)})")
+        node = node_lookup.get(sym)
+        if not node:
+            continue
+        text = getattr(node, "text", "")
+        if text:
+            if len(text) > max_chars:
+                text = f"{text[:max_chars]}\n...[truncated {len(text) - max_chars} chars]"
+            lines.append(text)
+
+    if graph_edges:
+        lines.append("Graph expansion edges:")
+        for edge in graph_edges[:80]:
+            lines.append(
+                f"- {edge['src']} -[{edge['rel']}]-> {edge['dst']} (depth={edge['depth']})"
+            )
+
+    return "\n\n".join(lines).strip()

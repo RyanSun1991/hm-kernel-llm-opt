@@ -129,11 +129,13 @@ Flamegraph call paths:
 
 ## 4) MCP and Kernel Index Retrieval
 
-### MCP Flow
+### MCP Flow (hybrid: forced + tool-call)
 
 - MCP is invoked via `MCPToolAgent` when enabled and query_code_context_mode is `mcp` or `hybrid`.
+- `MCPToolAgent` **always performs an initial forced MCP retrieval**, then starts an LLM tool-call loop.
 - The MCP tool name is `kernel_index_code`.
 - The MCP server responds by calling `retrieve_code_context()`.
+- `retrieve_code_context()` returns: code implementation + graph expansion (multi-hop) + reranked symbols.
 
 ### retrieve_code_context
 

@@ -1,4 +1,4 @@
-"""MCP tool-calling agent for context retrieval."""
+"""MCP tool agent for hybrid context retrieval (forced + LLM tool calls)."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class MCPToolAgentResult:
 
 
 class MCPToolAgent:
-    """OpenAI-compatible tool-calling wrapper that delegates to MCP."""
+    """Hybrid MCP retrieval wrapper (forced first pass + LLM tool calls)."""
 
     def __init__(self, config: MCPToolAgentConfig) -> None:
         self._config = config
@@ -36,16 +36,7 @@ class MCPToolAgent:
     def fetch_context(self, query: str) -> MCPToolAgentResult:
         if not query:
             return MCPToolAgentResult(context="", tool_used=False)
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a retrieval agent. Decide whether to call the MCP tool "
-                    "to fetch kernel context. If the tool is not needed, reply with an empty string."
-                ),
-            },
-            {"role": "user", "content": query},
-        ]
+        initial_context = self._call_mcp_tool(query, top_k=self._config.top_k)
         tool_spec = {
             "type": "function",
             "function": {
@@ -61,50 +52,71 @@ class MCPToolAgent:
                 },
             },
         }
-        response = self._post_chat(messages, tools=[tool_spec], tool_choice="auto")
-        tool_calls = _extract_tool_calls(response)
-        if not tool_calls:
-            content = _extract_message_content(response).strip()
-            return MCPToolAgentResult(context=content, tool_used=False, raw_response=response)
 
-        tool_results = []
-        for call in tool_calls:
-            if call.get("name") != self._config.tool_name:
-                continue
-            arguments = call.get("arguments", {})
-            query_arg = arguments.get("query", query)
-            top_k = arguments.get("top_k")
-            tool_results.append(
-                {
-                    "tool_call_id": call.get("id"),
-                    "content": self._call_mcp_tool(query_arg, top_k=top_k),
-                }
-            )
-
-        if not tool_results:
-            return MCPToolAgentResult(context="", tool_used=False, raw_response=response)
-
-        messages.append(
+        messages = [
             {
-                "role": "assistant",
-                "tool_calls": [call.get("raw") for call in tool_calls if call.get("raw")],
-                "content": "",
-            }
-        )
-        for result in tool_results:
+                "role": "system",
+                "content": (
+                    "You are a kernel retrieval assistant. Use MCP tool calls to fetch "
+                    "additional code context when needed. Focus on symbol implementations, "
+                    "caller/callee relationships, and graph expansion."
+                ),
+            },
+            {"role": "user", "content": query},
+        ]
+        if initial_context:
             messages.append(
                 {
-                    "role": "tool",
-                    "tool_call_id": result["tool_call_id"],
-                    "content": result["content"],
+                    "role": "assistant",
+                    "content": f"Initial MCP context:\n{initial_context}",
                 }
             )
 
-        follow_up = self._post_chat(messages, tools=[tool_spec])
+        tool_outputs: list[str] = []
+        final_text = ""
+        max_rounds = 3
+        for _ in range(max_rounds):
+            response = self._post_chat(messages, tools=[tool_spec], tool_choice="auto")
+            tool_calls = _extract_tool_calls(response)
+            if not tool_calls:
+                final_text = _extract_message_content(response).strip()
+                break
+            messages.append(
+                {
+                    "role": "assistant",
+                    "tool_calls": [call.get("raw") for call in tool_calls if call.get("raw")],
+                    "content": "",
+                }
+            )
+            for call in tool_calls:
+                if call.get("name") != self._config.tool_name:
+                    continue
+                arguments = call.get("arguments", {})
+                query_arg = arguments.get("query", query)
+                top_k = arguments.get("top_k")
+                tool_content = self._call_mcp_tool(query_arg, top_k=top_k)
+                if tool_content:
+                    tool_outputs.append(tool_content)
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call.get("id"),
+                        "content": tool_content,
+                    }
+                )
+
+        parts = []
+        if initial_context:
+            parts.append("[MCP initial retrieval]\n" + initial_context.strip())
+        if tool_outputs:
+            parts.append("[MCP follow-up retrievals]\n" + "\n\n".join(tool_outputs))
+        if final_text:
+            parts.append("[MCP agent summary]\n" + final_text)
+        context = "\n\n".join(parts).strip()
         return MCPToolAgentResult(
-            context=_extract_message_content(follow_up).strip(),
+            context=context,
             tool_used=True,
-            raw_response=follow_up,
+            raw_response={"initial": initial_context, "tool_outputs": tool_outputs},
         )
 
     def _post_chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
@@ -142,6 +154,24 @@ class MCPToolAgent:
         )
         response.raise_for_status()
         return _stringify_result(response.json()).strip()
+
+
+def _stringify_result(data: Any) -> str:
+    result = data.get("result") if isinstance(data, Mapping) else None
+    payload = result if result is not None else data
+    if isinstance(payload, Mapping):
+        for key in ("content", "text", "message"):
+            value = payload.get(key)
+            if isinstance(value, str):
+                return value
+        items = payload.get("items")
+        if isinstance(items, list):
+            return "\n".join(_stringify_result(item) for item in items if item)
+    if isinstance(payload, list):
+        return "\n".join(_stringify_result(item) for item in payload if item)
+    if payload is None:
+        return ""
+    return str(payload)
 
 
 def _extract_message_content(response: Mapping[str, Any]) -> str:
@@ -193,21 +223,3 @@ def _safe_json(raw: Any) -> dict[str, Any]:
         return data if isinstance(data, dict) else {}
     except json.JSONDecodeError:
         return {}
-
-
-def _stringify_result(data: Any) -> str:
-    result = data.get("result") if isinstance(data, Mapping) else None
-    payload = result if result is not None else data
-    if isinstance(payload, Mapping):
-        for key in ("content", "text", "message"):
-            value = payload.get(key)
-            if isinstance(value, str):
-                return value
-        items = payload.get("items")
-        if isinstance(items, list):
-            return "\n".join(_stringify_result(item) for item in items if item)
-    if isinstance(payload, list):
-        return "\n".join(_stringify_result(item) for item in payload if item)
-    if payload is None:
-        return ""
-    return str(payload)
