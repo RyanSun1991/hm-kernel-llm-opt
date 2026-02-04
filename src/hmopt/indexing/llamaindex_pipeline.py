@@ -776,6 +776,44 @@ def route_query(
     max_code_snippets = 3
     max_code_chars = 1600
     max_runtime_chars = 60000
+    max_query_chars = max(0, (llm.metadata.context_window - max(llm.metadata.num_output, 0) - 256) * 4)
+
+    def _truncate_text(text: str, max_chars: int) -> str:
+        if max_chars <= 0 or not text:
+            return ""
+        if len(text) <= max_chars:
+            return text
+        return f"{text[:max_chars]}\n...[truncated {len(text) - max_chars} chars]"
+
+    def _trim_contexts(runtime_context: str, code_context: str) -> tuple[str, str]:
+        if max_query_chars <= 0:
+            return "", ""
+        if prompt_template:
+            base_prompt = _format_query_with_prompt(
+                query=query_text,
+                prompt_template=prompt_template,
+                runtime_context="",
+                code_context="",
+            )
+        else:
+            base_prompt = (
+                "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
+                "Runtime findings:\n\n\n\n"
+                f"Question: {query_text}"
+            )
+        remaining = max_query_chars - len(base_prompt)
+        if remaining <= 0:
+            return "", ""
+        if runtime_context and code_context:
+            runtime_budget = int(remaining * 0.6)
+            code_budget = remaining - runtime_budget
+        elif runtime_context:
+            runtime_budget = remaining
+            code_budget = 0
+        else:
+            runtime_budget = 0
+            code_budget = remaining
+        return _truncate_text(runtime_context, runtime_budget), _truncate_text(code_context, code_budget)
 
     def _load_evidence_pack_from_path(metadata: Optional[dict]) -> Optional[dict]:
         if not metadata:
@@ -1297,14 +1335,16 @@ def route_query(
         if not symbol_queue:
             runtime_context = _format_runtime_sources(source_nodes, focus_symbol=focus_symbol)
             runtime_context = runtime_context or runtime_response_text
+            runtime_context, code_context = _trim_contexts(runtime_context, "")
             combined_query = _format_query_with_prompt(
                 query=query_text,
                 prompt_template=prompt_template,
                 runtime_context=runtime_context,
-                code_context="",
+                code_context=code_context,
             ) if prompt_template else (
                 "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
                 f"Runtime findings:\n{runtime_context}\n\n"
+                f"{code_context}\n\n"
                 f"Question: {query_text}"
             )
             return str(_graph_engine(paths.code_dir).query(combined_query))
@@ -1357,6 +1397,8 @@ def route_query(
                 symbols_hint = ", ".join(runtime_symbols[:15]) if runtime_symbols else symbol
                 mcp_query = (
                     "Fetch kernel code context for hotspot analysis. "
+                    "Include implementation snippets (function bodies) for the focus symbol and key related "
+                    "symbols. "
                     f"Focus symbol: {symbol}. Related symbols: {symbols_hint}."
                 )
                 try:
@@ -1368,6 +1410,7 @@ def route_query(
                 except Exception as exc:
                     logger.warning("MCP retrieval failed: %s", exc)
             code_context = "\n\n".join(part for part in code_context_parts if part)
+            runtime_context, code_context = _trim_contexts(runtime_context, code_context)
 
             if prompt_template:
                 combined_query = _format_query_with_prompt(
@@ -1591,6 +1634,54 @@ def retrieve_code_context(
         ranked.append((sym, score))
     ranked.sort(key=lambda item: item[1], reverse=True)
 
+    fallback_metadata = lookup_code_symbols(
+        config, [sym for sym in target_symbols if sym not in node_lookup]
+    )
+
+    def _load_snippet_from_metadata(symbol: str, metadata: dict | None) -> str:
+        if not metadata:
+            return ""
+        path = metadata.get("path")
+        start_line = metadata.get("start_line")
+        end_line = metadata.get("end_line")
+        if not path or not start_line or not end_line:
+            return ""
+        try:
+            raw_lines = Path(path).read_text(encoding="utf-8", errors="ignore").splitlines()
+        except OSError:
+            return ""
+        start_idx = max(0, int(start_line) - 1)
+        end_idx = min(len(raw_lines), int(end_line))
+        snippet_lines = raw_lines[start_idx:end_idx]
+        if not snippet_lines:
+            return ""
+        header = f"// [SYMBOL] {metadata.get('symbol_kind', 'symbol')} {symbol} ({path}:{start_line}-{end_line})"
+        snippet = "\n".join(snippet_lines)
+        return f"{header}\n{snippet}"
+
+    def _metadata_for_symbol(symbol: str) -> dict | None:
+        if symbol in fallback_metadata:
+            return fallback_metadata.get(symbol)
+        entry = candidate_symbols.get(symbol)
+        if entry and isinstance(entry.get("metadata"), dict):
+            return entry.get("metadata")
+        for key, entry in candidate_symbols.items():
+            if key == symbol:
+                continue
+            metadata = entry.get("metadata") if entry else None
+            if not isinstance(metadata, dict):
+                continue
+            if metadata.get("symbol_qualname") == symbol or metadata.get("symbol_name") == symbol:
+                return metadata
+        for sym_key, metadata in fallback_metadata.items():
+            if sym_key == symbol:
+                return metadata
+            if not isinstance(metadata, dict):
+                continue
+            if metadata.get("symbol_qualname") == symbol or metadata.get("symbol_name") == symbol:
+                return metadata
+        return None
+
     selected: list[str] = []
     for sym in focus_symbols:
         if sym in target_symbols and sym not in selected:
@@ -1618,9 +1709,9 @@ def retrieve_code_context(
             detail.append(f"depth={depth}")
         lines.append(f"- {sym} ({', '.join(detail)})")
         node = node_lookup.get(sym)
-        if not node:
-            continue
-        text = getattr(node, "text", "")
+        text = getattr(node, "text", "") if node else ""
+        if not text:
+            text = _load_snippet_from_metadata(sym, _metadata_for_symbol(sym))
         if text:
             if len(text) > max_chars:
                 text = f"{text[:max_chars]}\n...[truncated {len(text) - max_chars} chars]"
