@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 import httpx
+import time
 
 @dataclass(frozen=True)
 class MCPToolAgentConfig:
@@ -58,8 +59,8 @@ class MCPToolAgent:
                 "role": "system",
                 "content": (
                     "You are a kernel retrieval assistant. Use MCP tool calls to fetch "
-                    "additional code context when needed. Focus on symbol implementations "
-                    "(include function bodies), caller/callee relationships, and graph expansion."
+                    "additional code context when needed. Focus on symbol implementations, "
+                    "caller/callee implementations and relationships, and graph expansion."
                 ),
             },
             {"role": "user", "content": query},
@@ -72,28 +73,12 @@ class MCPToolAgent:
                 }
             )
 
-        if not self._config.api_key:
-            context = (
-                "[MCP initial retrieval]\n" + initial_context.strip()
-                if initial_context
-                else ""
-            )
-            return MCPToolAgentResult(
-                context=context,
-                tool_used=bool(initial_context),
-                raw_response={"initial": initial_context, "tool_outputs": []},
-            )
-
         tool_outputs: list[str] = []
         final_text = ""
-        max_rounds = 3
+        max_rounds = 20
         for _ in range(max_rounds):
-            try:
-                response = self._post_chat(messages, tools=[tool_spec], tool_choice="auto")
-            except httpx.HTTPStatusError as exc:
-                if exc.response is not None and exc.response.status_code == 401:
-                    break
-                raise
+            response = self._post_chat(messages, tools=[tool_spec], tool_choice="auto")
+            print(response)
             tool_calls = _extract_tool_calls(response)
             if not tool_calls:
                 final_text = _extract_message_content(response).strip()
@@ -138,8 +123,8 @@ class MCPToolAgent:
 
     def _post_chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
-        if self._config.api_key:
-            headers["Authorization"] = f"Bearer {self._config.api_key}"
+        headers["Authorization"] = f"Bearer {self._config.api_key}"
+        print(headers)
         payload = {
             "model": self._config.model,
             "messages": messages,
