@@ -145,7 +145,7 @@ def _build_llama_models(config: AppConfig) -> tuple[OpenAILike, OpenAIEmbeddingL
                     api_key=config.llm.api_key,
                     api_base=config.llm.base_url,
                     timeout = 120,
-                    max_tokens=4096,
+                    max_tokens= 8192,
                     temperature=0)
     embed = OpenAIEmbeddingLike(
         model=config.llm.embedding_model,
@@ -776,6 +776,7 @@ def route_query(
     max_code_snippets = 3
     max_code_chars = 1600
     max_runtime_chars = 60000
+
     max_query_chars = max(0, (llm.metadata.context_window - max(llm.metadata.num_output, 0) - 256) * 4)
 
     def _truncate_text(text: str, max_chars: int) -> str:
@@ -1003,7 +1004,7 @@ def route_query(
             node_type = metadata.get("type")
             text = getattr(node, "text", "")
             call_stacks: list = []
-            if node_type == "runtime_hotspot":
+            if node_type in ("runtime_hotspot", "runtime_symbol"):
                 call_stacks_raw = metadata.get("call_stacks")
                 if isinstance(call_stacks_raw, str):
                     try:
@@ -1079,7 +1080,7 @@ def route_query(
                         reverse=True,
                     )
                     top_stacks = sorted_stacks[:20]
-                    batch = top_stacks[:5]
+                    batch = top_stacks[:10]
                     for stack in batch:
                         if isinstance(stack, str):
                             stack = ast.literal_eval(stack)
@@ -1334,7 +1335,6 @@ def route_query(
                     symbol_queue.append(symbol)
         if not symbol_queue:
             runtime_context = _format_runtime_sources(source_nodes, focus_symbol=focus_symbol)
-            runtime_context = runtime_context or runtime_response_text
             runtime_context, code_context = _trim_contexts(runtime_context, "")
             combined_query = _format_query_with_prompt(
                 query=query_text,
@@ -1364,6 +1364,8 @@ def route_query(
                         runtime_context = _format_flamegraph_symbol_context(session, run_id, symbol)
                 if not runtime_context:
                     runtime_context = runtime_response_text
+            print("runtime_context : ")
+            print(runtime_context)
             # code_context = (
             #     "Code snippets omitted to reduce context. Use MCP/RAG retrieval for specific symbols."
             # )
@@ -1409,9 +1411,10 @@ def route_query(
                         )
                 except Exception as exc:
                     logger.warning("MCP retrieval failed: %s", exc)
+            print("code_context_parts")
+            print(code_context_parts)
             code_context = "\n\n".join(part for part in code_context_parts if part)
             runtime_context, code_context = _trim_contexts(runtime_context, code_context)
-
             if prompt_template:
                 combined_query = _format_query_with_prompt(
                     query=query_text,
@@ -1606,9 +1609,19 @@ def retrieve_code_context(
 
     # Build a lookup for code nodes by symbol name/qualname.
     node_lookup: dict[str, TextNode] = {}
+    docstore_nodes: dict[str, TextNode] = {}
+    storage = None
     try:
-        storage = StorageContext.from_defaults(persist_dir=str(paths.code_dir))
+        storage = _storage_context(
+            config,
+            paths.code_dir,
+            embedding_dimension=code_embed_dim,
+            index_name=code_index_cfg.index_name,
+            node_label=code_index_cfg.node_label,
+        )
         docs = getattr(storage.docstore, "docs", {}) or {}
+        if isinstance(docs, dict):
+            docstore_nodes = docs
         for node in docs.values():
             metadata = getattr(node, "metadata", {}) if node else {}
             if metadata.get("type") != "code":
@@ -1641,23 +1654,43 @@ def retrieve_code_context(
     def _load_snippet_from_metadata(symbol: str, metadata: dict | None) -> str:
         if not metadata:
             return ""
-        path = metadata.get("path")
-        start_line = metadata.get("start_line")
-        end_line = metadata.get("end_line")
-        if not path or not start_line or not end_line:
-            return ""
-        try:
-            raw_lines = Path(path).read_text(encoding="utf-8", errors="ignore").splitlines()
-        except OSError:
-            return ""
-        start_idx = max(0, int(start_line) - 1)
-        end_idx = min(len(raw_lines), int(end_line))
-        snippet_lines = raw_lines[start_idx:end_idx]
-        if not snippet_lines:
-            return ""
-        header = f"// [SYMBOL] {metadata.get('symbol_kind', 'symbol')} {symbol} ({path}:{start_line}-{end_line})"
-        snippet = "\n".join(snippet_lines)
-        return f"{header}\n{snippet}"
+        property_graph_store = storage.property_graph_store if storage else None
+        if property_graph_store:
+            symbol_id = metadata.get("symbol_id")
+            if symbol_id:
+                try:
+                    nodes = property_graph_store.get(ids=[symbol_id])
+                except Exception as exc:
+                    logger.warning("Neo4j lookup failed for %s: %s", symbol_id, exc)
+                    nodes = []
+                for node in nodes:
+                    text = getattr(node, "text", "")
+                    if text:
+                        return text
+            for key in ("symbol_name", "symbol_qualname"):
+                prop_value = metadata.get(key) or symbol
+                if not prop_value:
+                    continue
+                try:
+                    nodes = property_graph_store.get(properties={key: prop_value})
+                except Exception as exc:
+                    logger.warning("Neo4j lookup failed for %s=%s: %s", key, prop_value, exc)
+                    nodes = []
+                for node in nodes:
+                    text = getattr(node, "text", "")
+                    if text:
+                        return text
+        symbol_id = metadata.get("symbol_id")
+        if symbol_id and symbol_id in docstore_nodes:
+            text = getattr(docstore_nodes[symbol_id], "text", "")
+            if text:
+                return text
+        node = node_lookup.get(symbol)
+        if node:
+            text = getattr(node, "text", "")
+            if text:
+                return text
+        return ""
 
     def _metadata_for_symbol(symbol: str) -> dict | None:
         if symbol in fallback_metadata:
