@@ -9,7 +9,7 @@ import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Iterable
+from typing import Any, Optional, Iterable
 
 from llama_index.core import (
     PropertyGraphIndex,
@@ -169,6 +169,13 @@ def _build_mcp_agent(config: AppConfig) -> MCPToolAgent | None:
             top_k=mcp_cfg.top_k,
             mcp_base_url=mcp_cfg.mcp_base_url,
             mcp_api_key=mcp_cfg.mcp_api_key,
+            graph_tool_name=mcp_cfg.graph_tool_name,
+            hotspot_tool_name=mcp_cfg.hotspot_tool_name,
+            default_scenario=mcp_cfg.default_scenario,
+            graph_depth=mcp_cfg.graph_depth,
+            max_snippets=mcp_cfg.max_snippets,
+            max_chars=mcp_cfg.max_chars,
+            response_format=mcp_cfg.response_format,
         )
     )
 
@@ -1467,15 +1474,58 @@ def retrieve_code_context(
     top_k: Optional[int] = None,
     max_snippets: int = 8,
     max_chars: int = 4000,
-) -> str:
+    output_format: str = "text",
+    focus_symbols: Optional[list[str]] = None,
+    graph_depth: Optional[int] = None,
+    scenario: str = "general",
+) -> str | dict[str, Any]:
     """Retrieve forced kernel context (code + graph expansion + rerank)."""
     if not query:
         return ""
+    fmt = (output_format or "text").strip().lower()
+    scenario_name = (scenario or "general").strip().lower() or "general"
     paths = _index_paths(config)
     _, embed = _build_llama_models(config)
     code_index_cfg = _neo4j_index_config("code")
     code_embed_dim = _embedding_dimension_for_query(paths.code_dir, embed)
     graph_edges: list[dict[str, str | int]] = []
+    relation_weights: dict[str, float] = {
+        "calls": 0.95,
+        "uses_type": 0.35,
+        "uses_macro": 0.25,
+        "contains": 0.2,
+        "related_to": 0.2,
+    }
+    scenario_relation_weights: dict[str, dict[str, float]] = {
+        "implementation": {
+            "contains": 0.4,
+            "uses_type": 0.45,
+        },
+        "call_graph": {
+            "calls": 1.35,
+            "contains": 0.35,
+        },
+        "impact_analysis": {
+            "calls": 1.15,
+            "uses_type": 0.6,
+            "contains": 0.4,
+            "related_to": 0.35,
+        },
+        "hotspot_debug": {
+            "calls": 1.2,
+            "uses_type": 0.55,
+            "uses_macro": 0.4,
+        },
+        "patch_planning": {
+            "calls": 1.2,
+            "uses_type": 0.55,
+            "contains": 0.45,
+            "related_to": 0.4,
+        },
+    }
+    relation_weights.update(scenario_relation_weights.get(scenario_name, {}))
+    graph_relation_bonus: dict[str, float] = {}
+    symbol_relation_counts: dict[str, dict[str, int]] = {}
     _ensure_embedding_compat(
         paths.code_dir,
         embed_model=config.llm.embedding_model,
@@ -1524,19 +1574,36 @@ def retrieve_code_context(
                 }
             vector_scores[sym] = max(vector_scores.get(sym, 0.0), float(score))
 
-    focus_symbols: list[str] = []
+    selected_focus_symbols: list[str] = []
+    if focus_symbols:
+        seen_focus: set[str] = set()
+        for sym in focus_symbols:
+            sym_text = (sym or "").strip()
+            if not sym_text or sym_text in seen_focus:
+                continue
+            seen_focus.add(sym_text)
+            selected_focus_symbols.append(sym_text)
+    selected_focus_symbols = selected_focus_symbols[:12]
+
     query_tokens = _extract_query_symbols(query)
-    for sym in candidate_symbols:
-        if sym in query or sym in query_tokens:
-            focus_symbols.append(sym)
-    if not focus_symbols:
-        focus_symbols = list(candidate_symbols.keys())[:3]
-    if not focus_symbols and query_tokens:
-        focus_symbols = query_tokens[:1]
+    if not selected_focus_symbols:
+        for sym in candidate_symbols:
+            if sym in query or sym in query_tokens:
+                selected_focus_symbols.append(sym)
+        if not selected_focus_symbols:
+            selected_focus_symbols = list(candidate_symbols.keys())[:3]
+        if not selected_focus_symbols and query_tokens:
+            selected_focus_symbols = query_tokens[:1]
 
-    depth_map: dict[str, int] = {sym: 0 for sym in focus_symbols}
+    depth_map: dict[str, int] = {sym: 0 for sym in selected_focus_symbols}
+    used_graph_depth = graph_depth if graph_depth is not None else (config.indexing.query_graph_top_k or 2)
+    try:
+        used_graph_depth = int(used_graph_depth)
+    except (TypeError, ValueError):
+        used_graph_depth = 2
+    used_graph_depth = max(1, min(4, used_graph_depth))
 
-    if config.indexing.neo4j.enabled and focus_symbols:
+    if config.indexing.neo4j.enabled and selected_focus_symbols:
         try:
             vector_store = Neo4jVectorStore(
                 username=config.indexing.neo4j.user,
@@ -1547,11 +1614,10 @@ def retrieve_code_context(
                 index_name=code_index_cfg.index_name,
                 node_label=code_index_cfg.node_label,
             )
-            graph_depth = max(1, min(3, config.indexing.query_graph_top_k or 2))
-            per_hop_limit = 50
-            frontier = set(focus_symbols)
-            visited = set(focus_symbols)
-            for depth in range(1, graph_depth + 1):
+            per_hop_limit = 80 if scenario_name in {"call_graph", "impact_analysis", "patch_planning"} else 50
+            frontier = set(selected_focus_symbols)
+            visited = set(selected_focus_symbols)
+            for depth in range(1, used_graph_depth + 1):
                 if not frontier:
                     break
                 symbols_param = list(frontier)[:20]
@@ -1580,8 +1646,15 @@ def retrieve_code_context(
                     src = rec.get("src") or rec.get("src_qual")
                     dst = rec.get("dst") or rec.get("dst_qual")
                     if src and dst:
+                        rel_name = str(rec.get("rel") or "related_to")
                         graph_edges.append(
-                            {"src": src, "dst": dst, "rel": rec.get("rel") or "related_to", "depth": depth}
+                            {"src": src, "dst": dst, "rel": rel_name, "depth": depth}
+                        )
+                        dst_rel_counts = symbol_relation_counts.setdefault(dst, {})
+                        dst_rel_counts[rel_name] = dst_rel_counts.get(rel_name, 0) + 1
+                        rel_weight = relation_weights.get(rel_name, 0.2)
+                        graph_relation_bonus[dst] = (
+                            graph_relation_bonus.get(dst, 0.0) + rel_weight / (1 + depth)
                         )
                         if dst not in visited:
                             visited.add(dst)
@@ -1591,8 +1664,15 @@ def retrieve_code_context(
                     src = rec.get("src") or rec.get("src_qual")
                     dst = rec.get("dst") or rec.get("dst_qual")
                     if src and dst:
+                        rel_name = str(rec.get("rel") or "related_to")
                         graph_edges.append(
-                            {"src": src, "dst": dst, "rel": rec.get("rel") or "related_to", "depth": depth}
+                            {"src": src, "dst": dst, "rel": rel_name, "depth": depth}
+                        )
+                        src_rel_counts = symbol_relation_counts.setdefault(src, {})
+                        src_rel_counts[rel_name] = src_rel_counts.get(rel_name, 0) + 1
+                        rel_weight = relation_weights.get(rel_name, 0.2)
+                        graph_relation_bonus[src] = (
+                            graph_relation_bonus.get(src, 0.0) + rel_weight / (1 + depth)
                         )
                         if src not in visited:
                             visited.add(src)
@@ -1641,9 +1721,12 @@ def retrieve_code_context(
     for sym in target_symbols:
         base = vector_scores.get(sym, 0.0)
         depth = depth_map.get(sym, 3)
-        exact_bonus = 1.5 if sym in focus_symbols else 0.0
+        exact_bonus = 1.5 if sym in selected_focus_symbols else 0.0
         depth_bonus = 0.6 / (1 + depth)
-        score = base + exact_bonus + depth_bonus
+        relation_bonus = graph_relation_bonus.get(sym, 0.0)
+        relation_degree = sum(symbol_relation_counts.get(sym, {}).values())
+        degree_bonus = min(0.6, 0.08 * relation_degree)
+        score = base + exact_bonus + depth_bonus + relation_bonus + degree_bonus
         ranked.append((sym, score))
     ranked.sort(key=lambda item: item[1], reverse=True)
 
@@ -1716,7 +1799,7 @@ def retrieve_code_context(
         return None
 
     selected: list[str] = []
-    for sym in focus_symbols:
+    for sym in selected_focus_symbols:
         if sym in target_symbols and sym not in selected:
             selected.append(sym)
     for sym, _ in ranked:
@@ -1725,30 +1808,107 @@ def retrieve_code_context(
         if len(selected) >= max_snippets:
             break
 
-    lines: list[str] = [
-        "[Kernel Index Retrieval]",
-        f"Query: {query}",
-        "Reranked symbols (vector + graph):",
-    ]
     ranked_map = {sym: score for sym, score in ranked}
+    selected_entries: list[dict[str, Any]] = []
+    snippet_entries: list[dict[str, Any]] = []
     for sym in selected:
         score = ranked_map.get(sym, 0.0)
         depth = depth_map.get(sym)
         vec_score = vector_scores.get(sym)
-        detail = [f"score={score:.4f}"]
-        if vec_score is not None:
-            detail.append(f"vector={vec_score:.4f}")
-        if depth is not None:
-            detail.append(f"depth={depth}")
-        lines.append(f"- {sym} ({', '.join(detail)})")
+        metadata = _metadata_for_symbol(sym) or {}
+        path = metadata.get("path")
+        start_line = metadata.get("start_line")
+        end_line = metadata.get("end_line")
+        relation_breakdown = symbol_relation_counts.get(sym, {})
+        relation_degree = sum(relation_breakdown.values())
+        selected_entries.append(
+            {
+                "symbol": sym,
+                "score": round(float(score), 6),
+                "vector_score": round(float(vec_score), 6) if vec_score is not None else None,
+                "depth": depth,
+                "relation_bonus": round(float(graph_relation_bonus.get(sym, 0.0)), 6),
+                "graph_degree": relation_degree,
+                "relation_breakdown": relation_breakdown,
+                "path": path,
+                "start_line": start_line,
+                "end_line": end_line,
+            }
+        )
         node = node_lookup.get(sym)
         text = getattr(node, "text", "") if node else ""
         if not text:
-            text = _load_snippet_from_metadata(sym, _metadata_for_symbol(sym))
+            text = _load_snippet_from_metadata(sym, metadata)
         if text:
+            truncated = False
             if len(text) > max_chars:
                 text = f"{text[:max_chars]}\n...[truncated {len(text) - max_chars} chars]"
-            lines.append(text)
+                truncated = True
+            snippet_entries.append(
+                {
+                    "symbol": sym,
+                    "path": path,
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "truncated": truncated,
+                    "text": text,
+                }
+            )
+
+    relation_counts: dict[str, int] = {}
+    for edge in graph_edges:
+        rel_name = str(edge.get("rel") or "related_to")
+        relation_counts[rel_name] = relation_counts.get(rel_name, 0) + 1
+
+    payload: dict[str, Any] = {
+        "query": query,
+        "scenario": scenario_name,
+        "retrieval_mode": "vector+neo4j-graph" if config.indexing.neo4j.enabled else "vector",
+        "vector_top_k": top_k or config.indexing.query_code_top_k,
+        "graph_depth": used_graph_depth,
+        "focus_symbols": selected_focus_symbols,
+        "ranked_symbols": selected_entries,
+        "snippets": snippet_entries,
+        "graph_edges": graph_edges[:80],
+        "graph_summary": {
+            "edge_count": len(graph_edges),
+            "relation_counts": relation_counts,
+        },
+    }
+
+    if fmt in ("json", "payload", "dict"):
+        return payload
+
+    lines: list[str] = [
+        "[Kernel Index Retrieval]",
+        f"Query: {query}",
+        f"Retrieval mode: {payload['retrieval_mode']}",
+        f"Vector top_k: {payload['vector_top_k']} | Graph depth: {payload['graph_depth']}",
+    ]
+    if selected_focus_symbols:
+        lines.append("Focus symbols: " + ", ".join(selected_focus_symbols))
+    lines.append("Reranked symbols (vector + graph):")
+
+    snippet_by_symbol = {item.get("symbol"): item for item in snippet_entries}
+    for item in selected_entries:
+        sym = item.get("symbol")
+        detail = [f"score={item.get('score'):.4f}"]
+        if item.get("vector_score") is not None:
+            detail.append(f"vector={item.get('vector_score'):.4f}")
+        if item.get("relation_bonus"):
+            detail.append(f"graph_bonus={item.get('relation_bonus'):.4f}")
+        if item.get("graph_degree"):
+            detail.append(f"graph_degree={item.get('graph_degree')}")
+        if item.get("depth") is not None:
+            detail.append(f"depth={item.get('depth')}")
+        if item.get("path"):
+            detail.append(
+                f"path={item.get('path')}:{item.get('start_line')}-{item.get('end_line')}"
+            )
+        lines.append(f"- {sym} ({', '.join(detail)})")
+        snippet_item = snippet_by_symbol.get(sym)
+        if snippet_item and snippet_item.get("text"):
+            lines.append(str(snippet_item["text"]))
 
     if graph_edges:
         lines.append("Graph expansion edges:")
@@ -1756,5 +1916,10 @@ def retrieve_code_context(
             lines.append(
                 f"- {edge['src']} -[{edge['rel']}]-> {edge['dst']} (depth={edge['depth']})"
             )
+        if relation_counts:
+            rel_summary = ", ".join(
+                f"{rel}={count}" for rel, count in sorted(relation_counts.items(), key=lambda x: x[0])
+            )
+            lines.append("Graph relation summary: " + rel_summary)
 
     return "\n\n".join(lines).strip()

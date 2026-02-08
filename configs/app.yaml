@@ -94,6 +94,13 @@ indexing:
     model: glm-4.7
     timeout_sec: 30
     tool_name: kernel_index_code
+    graph_tool_name: kernel_symbol_graph
+    hotspot_tool_name: kernel_hotspot_context
+    default_scenario: general
     top_k: 6
-    mcp_base_url: http://localhost:8000
+    graph_depth: 2
+    max_snippets: 8
+    max_chars: 4000
+    response_format: markdown
+    mcp_base_url: http://localhost:7331
     mcp_api_key_env: HMOPT_MCP_API_KEY

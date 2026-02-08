@@ -141,8 +141,15 @@ class MCPConfig(BaseModel):
     model: str = "gpt-4o-mini"
     timeout_sec: int = 30
     tool_name: str = "kernel_index_code"
+    graph_tool_name: str = "kernel_symbol_graph"
+    hotspot_tool_name: str = "kernel_hotspot_context"
+    default_scenario: str = "general"
     top_k: int = 6
-    mcp_base_url: str = "http://localhost:8000"
+    graph_depth: int = 2
+    max_snippets: int = 8
+    max_chars: int = 4000
+    response_format: str = "markdown"
+    mcp_base_url: str = "http://localhost:7331"
     mcp_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("HMOPT_MCP_API_KEY"))
 
 
@@ -347,8 +354,15 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "model": mcp_cfg.get("model", "gpt-4o-mini"),
         "timeout_sec": int(mcp_cfg.get("timeout_sec", 30)),
         "tool_name": mcp_cfg.get("tool_name", "kernel_index_code"),
+        "graph_tool_name": mcp_cfg.get("graph_tool_name", "kernel_symbol_graph"),
+        "hotspot_tool_name": mcp_cfg.get("hotspot_tool_name", "kernel_hotspot_context"),
+        "default_scenario": mcp_cfg.get("default_scenario", "general"),
         "top_k": int(mcp_cfg.get("top_k", 6)),
-        "mcp_base_url": mcp_cfg.get("mcp_base_url", "http://localhost:8000"),
+        "graph_depth": int(mcp_cfg.get("graph_depth", 2)),
+        "max_snippets": int(mcp_cfg.get("max_snippets", 8)),
+        "max_chars": int(mcp_cfg.get("max_chars", 4000)),
+        "response_format": mcp_cfg.get("response_format", "markdown"),
+        "mcp_base_url": mcp_cfg.get("mcp_base_url", "http://localhost:7331"),
         "mcp_api_key": mcp_cfg.get("mcp_api_key")
         or (os.getenv(mcp_cfg.get("mcp_api_key_env")) if mcp_cfg.get("mcp_api_key_env") else None),
     }

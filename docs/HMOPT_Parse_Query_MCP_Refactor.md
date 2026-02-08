@@ -132,10 +132,13 @@ Flamegraph call paths:
 ### MCP Flow (hybrid: forced + tool-call)
 
 - MCP is invoked via `MCPToolAgent` when enabled and query_code_context_mode is `mcp` or `hybrid`.
-- `MCPToolAgent` **always performs an initial forced MCP retrieval**, then starts an LLM tool-call loop.
-- The MCP tool name is `kernel_index_code`.
+- `MCPToolAgent` performs an initial forced MCP retrieval, then continues with an LLM tool-call loop.
+- Multiple MCP tools are supported:
+  - `kernel_index_code` (general + scenario-aware retrieval)
+  - `kernel_symbol_graph` (call-graph/dependency-centric retrieval)
+  - `kernel_hotspot_context` (runtime hotspot/perf-centric retrieval)
 - The MCP server responds by calling `retrieve_code_context()`.
-- `retrieve_code_context()` returns: code implementation + graph expansion (multi-hop) + reranked symbols.
+- `retrieve_code_context()` returns: code implementation + graph expansion (multi-hop) + relation-aware reranked symbols.
 
 ### retrieve_code_context
 
@@ -143,8 +146,9 @@ Retrieval combines:
 
 1) **Vector**: LlamaIndex code index (top_k chunks).
 2) **Graph**: Neo4j relationship expansion for matched symbols.
+3) **Scenario-aware relation weighting**: relation scores are adjusted by scenario (implementation/call_graph/hotspot/impact/patch).
 
-The returned context includes code snippets and graph relations.
+The returned context includes code snippets, graph relations, and relation breakdown metadata per ranked symbol.
 
 ## 5) Configuration
 
@@ -161,8 +165,15 @@ indexing:
     model: glm-4.7
     timeout_sec: 30
     tool_name: kernel_index_code
+    graph_tool_name: kernel_symbol_graph
+    hotspot_tool_name: kernel_hotspot_context
+    default_scenario: general
     top_k: 6
-    mcp_base_url: http://localhost:8000
+    graph_depth: 2
+    max_snippets: 8
+    max_chars: 4000
+    response_format: markdown
+    mcp_base_url: http://localhost:7331
     mcp_api_key_env: HMOPT_MCP_API_KEY
 ```
 
@@ -199,4 +210,3 @@ refactor: simplify artifact ingest and unify runtime->code query with MCP
 - extend runtime call stack formatting with per-frame self/sub events
 - update config/CLI to support new pipeline and MCP settings
 ```
-

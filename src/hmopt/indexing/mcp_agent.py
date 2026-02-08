@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 
 import httpx
-import time
+
+_SUPPORTED_SCENARIOS = {
+    "general",
+    "implementation",
+    "call_graph",
+    "impact_analysis",
+    "hotspot_debug",
+    "patch_planning",
+}
+
 
 @dataclass(frozen=True)
 class MCPToolAgentConfig:
@@ -18,6 +29,13 @@ class MCPToolAgentConfig:
     top_k: int
     mcp_base_url: str
     mcp_api_key: str | None = None
+    graph_tool_name: str = "kernel_symbol_graph"
+    hotspot_tool_name: str = "kernel_hotspot_context"
+    default_scenario: str = "general"
+    graph_depth: int = 2
+    max_snippets: int = 8
+    max_chars: int = 4000
+    response_format: str = "markdown"
 
 
 @dataclass(frozen=True)
@@ -34,36 +52,45 @@ class MCPToolAgent:
         self._config = config
         self._client = httpx.Client(timeout=config.timeout_sec)
 
-    def fetch_context(self, query: str) -> MCPToolAgentResult:
-        if not query:
+    def fetch_context(
+        self,
+        query: str,
+        *,
+        symbols: list[str] | None = None,
+        runtime_hints: str = "",
+        scenario: str | None = None,
+    ) -> MCPToolAgentResult:
+        normalized_symbols = _normalize_symbols(symbols)
+        if not query and not normalized_symbols:
             return MCPToolAgentResult(context="", tool_used=False)
-        initial_context = self._call_mcp_tool(query, top_k=self._config.top_k)
-        tool_spec = {
-            "type": "function",
-            "function": {
-                "name": self._config.tool_name,
-                "description": "Fetch kernel index context via MCP.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string"},
-                        "top_k": {"type": "integer"},
-                    },
-                    "required": ["query"],
-                },
-            },
-        }
 
-        messages = [
+        scenario_name = self._resolve_scenario(
+            scenario_override=scenario,
+            query=query,
+            runtime_hints=runtime_hints,
+        )
+        initial_tool_name, initial_arguments = self._build_initial_tool_call(
+            scenario=scenario_name,
+            query=query,
+            symbols=normalized_symbols,
+            runtime_hints=runtime_hints,
+        )
+        initial_context = self._call_mcp_tool(initial_tool_name, initial_arguments)
+        tool_specs = self._build_tool_specs()
+
+        messages: list[dict[str, Any]] = [
             {
                 "role": "system",
                 "content": (
-                    "You are a kernel retrieval assistant. Use MCP tool calls to fetch "
-                    "additional code context when needed. Focus on symbol implementations, "
-                    "caller/callee implementations and relationships, and graph expansion."
+                    "You are a kernel retrieval assistant. Prefer MCP tool calls for exact symbol "
+                    "implementations, dependency edges, and impact-aware context."
                 ),
             },
-            {"role": "user", "content": query},
+            {
+                "role": "user",
+                "content": query
+                or ("Analyze kernel symbols: " + ", ".join(normalized_symbols)),
+            },
         ]
         if initial_context:
             messages.append(
@@ -73,12 +100,11 @@ class MCPToolAgent:
                 }
             )
 
-        tool_outputs: list[str] = []
+        tool_outputs: list[dict[str, Any]] = []
         final_text = ""
         max_rounds = 20
         for _ in range(max_rounds):
-            response = self._post_chat(messages, tools=[tool_spec], tool_choice="auto")
-            print(response)
+            response = self._post_chat(messages, tools=tool_specs, tool_choice="auto")
             tool_calls = _extract_tool_calls(response)
             if not tool_calls:
                 final_text = _extract_message_content(response).strip()
@@ -91,14 +117,25 @@ class MCPToolAgent:
                 }
             )
             for call in tool_calls:
-                if call.get("name") != self._config.tool_name:
+                tool_name = str(call.get("name") or "").strip()
+                if tool_name not in self._allowed_tool_names():
                     continue
-                arguments = call.get("arguments", {})
-                query_arg = arguments.get("query", query)
-                top_k = arguments.get("top_k")
-                tool_content = self._call_mcp_tool(query_arg, top_k=top_k)
-                if tool_content:
-                    tool_outputs.append(tool_content)
+                arguments = self._normalize_tool_arguments(
+                    tool_name=tool_name,
+                    raw_arguments=call.get("arguments", {}),
+                    default_query=query,
+                    default_symbols=normalized_symbols,
+                    default_runtime_hints=runtime_hints,
+                    default_scenario=scenario_name,
+                )
+                tool_content = self._call_mcp_tool(tool_name, arguments)
+                tool_outputs.append(
+                    {
+                        "tool": tool_name,
+                        "arguments": arguments,
+                        "content": tool_content,
+                    }
+                )
                 messages.append(
                     {
                         "role": "tool",
@@ -109,22 +146,37 @@ class MCPToolAgent:
 
         parts = []
         if initial_context:
-            parts.append("[MCP initial retrieval]\n" + initial_context.strip())
+            parts.append(
+                "[MCP initial retrieval]\n"
+                f"tool={initial_tool_name}\n"
+                f"{initial_context.strip()}"
+            )
         if tool_outputs:
-            parts.append("[MCP follow-up retrievals]\n" + "\n\n".join(tool_outputs))
+            follow_up_blocks = []
+            for output in tool_outputs:
+                follow_up_blocks.append(
+                    f"tool={output['tool']}\n{str(output.get('content') or '').strip()}"
+                )
+            parts.append("[MCP follow-up retrievals]\n" + "\n\n".join(follow_up_blocks))
         if final_text:
             parts.append("[MCP agent summary]\n" + final_text)
         context = "\n\n".join(parts).strip()
         return MCPToolAgentResult(
             context=context,
             tool_used=True,
-            raw_response={"initial": initial_context, "tool_outputs": tool_outputs},
+            raw_response={
+                "scenario": scenario_name,
+                "initial_tool": initial_tool_name,
+                "initial_arguments": initial_arguments,
+                "initial_context": initial_context,
+                "tool_outputs": tool_outputs,
+            },
         )
 
     def _post_chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
-        headers["Authorization"] = f"Bearer {self._config.api_key}"
-        print(headers)
+        if self._config.api_key:
+            headers["Authorization"] = f"Bearer {self._config.api_key}"
         payload = {
             "model": self._config.model,
             "messages": messages,
@@ -138,14 +190,220 @@ class MCPToolAgent:
         response.raise_for_status()
         return response.json()
 
-    def _call_mcp_tool(self, query: str, *, top_k: int | None = None) -> str:
-        payload = {
-            "tool": self._config.tool_name,
-            "arguments": {
-                "query": query,
-                "top_k": top_k or self._config.top_k,
+    def _build_tool_specs(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": self._config.tool_name,
+                    "description": (
+                        "General kernel retrieval using vector + graph context. "
+                        "Supports scenario-specific retrieval."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "scenario": {
+                                "type": "string",
+                                "enum": sorted(_SUPPORTED_SCENARIOS),
+                            },
+                            "symbols": {"type": "array", "items": {"type": "string"}},
+                            "runtime_hints": {"type": "string"},
+                            "top_k": {"type": "integer"},
+                            "graph_depth": {"type": "integer"},
+                            "max_snippets": {"type": "integer"},
+                            "max_chars": {"type": "integer"},
+                            "response_format": {"type": "string", "enum": ["markdown", "json"]},
+                        },
+                    },
+                },
             },
+            {
+                "type": "function",
+                "function": {
+                    "name": self._config.graph_tool_name,
+                    "description": "Graph-focused retrieval for caller/callee dependencies.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "symbols": {"type": "array", "items": {"type": "string"}},
+                            "query": {"type": "string"},
+                            "top_k": {"type": "integer"},
+                            "graph_depth": {"type": "integer"},
+                            "max_snippets": {"type": "integer"},
+                            "max_chars": {"type": "integer"},
+                            "response_format": {"type": "string", "enum": ["markdown", "json"]},
+                        },
+                        "required": ["symbols"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": self._config.hotspot_tool_name,
+                    "description": "Hotspot-focused retrieval for performance optimization.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "symbols": {"type": "array", "items": {"type": "string"}},
+                            "query": {"type": "string"},
+                            "runtime_hints": {"type": "string"},
+                            "top_k": {"type": "integer"},
+                            "graph_depth": {"type": "integer"},
+                            "response_format": {"type": "string", "enum": ["markdown", "json"]},
+                        },
+                    },
+                },
+            },
+        ]
+
+    def _allowed_tool_names(self) -> set[str]:
+        return {
+            self._config.tool_name,
+            self._config.graph_tool_name,
+            self._config.hotspot_tool_name,
         }
+
+    def _resolve_scenario(
+        self,
+        *,
+        scenario_override: str | None,
+        query: str,
+        runtime_hints: str,
+    ) -> str:
+        if scenario_override:
+            normalized_override = scenario_override.strip().lower()
+            if normalized_override in _SUPPORTED_SCENARIOS:
+                return normalized_override
+        inferred = _infer_scenario(query, runtime_hints)
+        if inferred:
+            return inferred
+        default_scenario = (self._config.default_scenario or "general").strip().lower()
+        if default_scenario not in _SUPPORTED_SCENARIOS:
+            return "general"
+        return default_scenario
+
+    def _build_initial_tool_call(
+        self,
+        *,
+        scenario: str,
+        query: str,
+        symbols: list[str],
+        runtime_hints: str,
+    ) -> tuple[str, dict[str, Any]]:
+        tool_name = _tool_name_for_scenario(
+            scenario=scenario,
+            general_tool=self._config.tool_name,
+            graph_tool=self._config.graph_tool_name,
+            hotspot_tool=self._config.hotspot_tool_name,
+        )
+        arguments = self._normalize_tool_arguments(
+            tool_name=tool_name,
+            raw_arguments={
+                "query": query,
+                "scenario": scenario,
+                "symbols": symbols,
+                "runtime_hints": runtime_hints,
+                "top_k": self._config.top_k,
+                "graph_depth": self._config.graph_depth,
+                "max_snippets": self._config.max_snippets,
+                "max_chars": self._config.max_chars,
+                "response_format": self._config.response_format,
+            },
+            default_query=query,
+            default_symbols=symbols,
+            default_runtime_hints=runtime_hints,
+            default_scenario=scenario,
+        )
+        return tool_name, arguments
+
+    def _normalize_tool_arguments(
+        self,
+        *,
+        tool_name: str,
+        raw_arguments: Mapping[str, Any],
+        default_query: str,
+        default_symbols: list[str],
+        default_runtime_hints: str,
+        default_scenario: str,
+    ) -> dict[str, Any]:
+        base_query = str(raw_arguments.get("query", default_query) or "").strip()
+        symbols = _normalize_symbols(raw_arguments.get("symbols", default_symbols))
+        runtime_hints = str(
+            raw_arguments.get("runtime_hints", default_runtime_hints) or ""
+        ).strip()
+        response_format = str(
+            raw_arguments.get("response_format", self._config.response_format) or "markdown"
+        ).strip()
+        if response_format not in {"markdown", "json"}:
+            response_format = "markdown"
+
+        if tool_name == self._config.graph_tool_name:
+            if not symbols:
+                symbols = _extract_symbol_candidates(base_query)
+            arguments: dict[str, Any] = {
+                "symbols": symbols,
+                "query": base_query,
+                "top_k": _coerce_optional_int(raw_arguments.get("top_k"), fallback=self._config.top_k),
+                "graph_depth": _coerce_optional_int(
+                    raw_arguments.get("graph_depth"),
+                    fallback=self._config.graph_depth,
+                ),
+                "max_snippets": _coerce_optional_int(
+                    raw_arguments.get("max_snippets"),
+                    fallback=self._config.max_snippets,
+                ),
+                "max_chars": _coerce_optional_int(
+                    raw_arguments.get("max_chars"),
+                    fallback=self._config.max_chars,
+                ),
+                "response_format": response_format,
+            }
+            return {k: v for k, v in arguments.items() if v is not None}
+
+        if tool_name == self._config.hotspot_tool_name:
+            arguments = {
+                "symbols": symbols or None,
+                "query": base_query,
+                "runtime_hints": runtime_hints,
+                "top_k": _coerce_optional_int(raw_arguments.get("top_k"), fallback=self._config.top_k),
+                "graph_depth": _coerce_optional_int(
+                    raw_arguments.get("graph_depth"),
+                    fallback=self._config.graph_depth,
+                ),
+                "response_format": response_format,
+            }
+            return {k: v for k, v in arguments.items() if v is not None and v != ""}
+
+        scenario = str(raw_arguments.get("scenario", default_scenario) or "general").strip().lower()
+        if scenario not in _SUPPORTED_SCENARIOS:
+            scenario = default_scenario
+        arguments = {
+            "query": base_query,
+            "scenario": scenario,
+            "symbols": symbols or None,
+            "runtime_hints": runtime_hints,
+            "top_k": _coerce_optional_int(raw_arguments.get("top_k"), fallback=self._config.top_k),
+            "graph_depth": _coerce_optional_int(
+                raw_arguments.get("graph_depth"),
+                fallback=self._config.graph_depth,
+            ),
+            "max_snippets": _coerce_optional_int(
+                raw_arguments.get("max_snippets"),
+                fallback=self._config.max_snippets,
+            ),
+            "max_chars": _coerce_optional_int(
+                raw_arguments.get("max_chars"),
+                fallback=self._config.max_chars,
+            ),
+            "response_format": response_format,
+        }
+        return {k: v for k, v in arguments.items() if v is not None and not (k == "query" and v == "")}
+
+    def _call_mcp_tool(self, tool_name: str, arguments: Mapping[str, Any]) -> str:
+        payload = {"tool": tool_name, "arguments": dict(arguments)}
         headers = {"Content-Type": "application/json"}
         if self._config.mcp_api_key:
             headers["Authorization"] = f"Bearer {self._config.mcp_api_key}"
@@ -156,6 +414,79 @@ class MCPToolAgent:
         )
         response.raise_for_status()
         return _stringify_result(response.json()).strip()
+
+
+def _tool_name_for_scenario(
+    *,
+    scenario: str,
+    general_tool: str,
+    graph_tool: str,
+    hotspot_tool: str,
+) -> str:
+    if scenario in {"call_graph", "impact_analysis"}:
+        return graph_tool
+    if scenario == "hotspot_debug":
+        return hotspot_tool
+    return general_tool
+
+
+def _infer_scenario(query: str, runtime_hints: str = "") -> str | None:
+    text = f"{query} {runtime_hints}".lower()
+    if any(token in text for token in ("hotspot", "perf", "latency", "flamegraph", "cpu")):
+        return "hotspot_debug"
+    if any(token in text for token in ("call graph", "caller", "callee", "dependency chain")):
+        return "call_graph"
+    if any(token in text for token in ("impact", "upstream", "downstream", "blast radius")):
+        return "impact_analysis"
+    if any(token in text for token in ("patch", "refactor", "modify together")):
+        return "patch_planning"
+    if any(token in text for token in ("implementation", "function body", "definition")):
+        return "implementation"
+    return None
+
+
+def _coerce_optional_int(value: Any, *, fallback: int | None = None) -> int | None:
+    if value is None:
+        return fallback
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return parsed if parsed > 0 else fallback
+
+
+def _normalize_symbols(raw: Any) -> list[str]:
+    if raw is None:
+        return []
+    values: list[str]
+    if isinstance(raw, str):
+        values = [item.strip() for item in raw.split(",")]
+    elif isinstance(raw, list):
+        values = [str(item).strip() for item in raw]
+    else:
+        return []
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in values:
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+    return deduped[:20]
+
+
+def _extract_symbol_candidates(text: str, *, limit: int = 6) -> list[str]:
+    tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text or "")
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        if token in seen:
+            continue
+        seen.add(token)
+        candidates.append(token)
+        if len(candidates) >= limit:
+            break
+    return candidates
 
 
 def _stringify_result(data: Any) -> str:
@@ -219,8 +550,6 @@ def _safe_json(raw: Any) -> dict[str, Any]:
     if not isinstance(raw, str):
         return {}
     try:
-        import json
-
         data = json.loads(raw)
         return data if isinstance(data, dict) else {}
     except json.JSONDecodeError:

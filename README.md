@@ -30,7 +30,15 @@ python3 -m hmopt.cli run --config configs/app.yaml
 bash scripts/run_api.sh
 ```
 
+- Launch the MCP server for OpenCode/other MCP clients (`/mcp` + legacy `/tools/call`):
+
+```bash
+bash scripts/run_mcp_server.sh
+```
+
 Outputs (DB + artifacts + reports) are stored under `data/`.
+
+For OpenCode MCP integration details, see `docs/OpenCode_MCP_Integration_Guide.md`.
 
 ## Repository Layout
 

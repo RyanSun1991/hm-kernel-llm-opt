@@ -246,5 +246,27 @@ def query(
 
 
 
+@app.command()
+def serve_mcp(
+    host: str = typer.Option("0.0.0.0", help="Bind host"),
+    port: int = typer.Option(7331, help="Bind port"),
+    reload: bool = typer.Option(False, help="Enable auto-reload"),
+) -> None:
+    # Demo: python -m hmopt.cli serve-mcp --host 0.0.0.0 --port 7331
+    # Purpose: run MCP streamable-http server (+ legacy /tools/call).
+    import uvicorn
+
+    uvicorn.run("hmopt.api.mcp_server:app", host=host, port=port, reload=reload)
+
+
+@app.command("mcp-stdio")
+def mcp_stdio() -> None:
+    # Demo: python -m hmopt.cli mcp-stdio
+    # Purpose: run MCP server over stdio for OpenCode local MCP mode.
+    from hmopt.api.mcp_stdio import main as run_mcp_stdio
+
+    run_mcp_stdio()
+
+
 if __name__ == "__main__":
     app()
