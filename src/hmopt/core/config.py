@@ -137,7 +137,7 @@ class ClangdConfig(BaseModel):
 class MCPConfig(BaseModel):
     enabled: bool = False
     base_url: str = "http://localhost:20010/v1"
-    api_key: Optional[str] = Field(default_factory=lambda: os.getenv("HMOPT_MCP_LLM_API_KEY"))
+    api_key: Optional[str] = Field(default_factory=lambda: os.getenv("HMOPT_LLM_API_KEY"))
     model: str = "gpt-4o-mini"
     timeout_sec: int = 30
     tool_name: str = "kernel_index_code"
