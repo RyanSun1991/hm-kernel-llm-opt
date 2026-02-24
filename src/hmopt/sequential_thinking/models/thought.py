@@ -1,6 +1,6 @@
 from typing import Annotated, Any
 import json
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from .assumption import Assumption
 
 
@@ -119,6 +119,42 @@ class Thought(BaseModel):
             description="What was achieved or expected as result of this thought",
         ),
     ] = None
+    plan: Annotated[
+        str | None,
+        Field(None, description="Optional high-level plan for upcoming thought steps"),
+    ] = None
+    next: Annotated[
+        str | None,
+        Field(None, description="Optional immediate next action for the following thought"),
+    ] = None
+    reflect: Annotated[
+        str | None,
+        Field(None, description="Optional reflection on progress, mistakes, or adjustments"),
+    ] = None
+    steps: Annotated[
+        list[str] | None,
+        Field(None, description="Optional ordered checklist of steps for this reasoning track"),
+    ] = None
+    current_step: Annotated[
+        int | None,
+        Field(None, ge=1, description="Optional current step index (1-based) within `steps`"),
+    ] = None
+    rationale: Annotated[
+        str | None,
+        Field(None, description="Optional explicit rationale for this thought"),
+    ] = None
+    open_question: Annotated[
+        str | None,
+        Field(None, description="Optional unresolved question to carry into later thoughts"),
+    ] = None
+    request_id: Annotated[
+        str | None,
+        Field(None, description="Optional client request identifier for tracing"),
+    ] = None
+    idempotency_key: Annotated[
+        str | None,
+        Field(None, description="Optional key to make repeated requests idempotent"),
+    ] = None
     assumptions: Annotated[
         list[Assumption] | None,
         Field(
@@ -163,6 +199,24 @@ class Thought(BaseModel):
     def validate_invalidates_assumptions(cls, v: Any) -> Any:
         """Parse invalidates_assumptions from JSON string or list"""
         return _parse_json_list(v, "invalidates_assumptions")
+
+    @field_validator("steps", mode="before")
+    @classmethod
+    def validate_steps(cls, v: Any) -> Any:
+        """Parse steps from JSON string or list"""
+        return _parse_json_list(v, "steps")
+
+    @model_validator(mode="after")
+    def validate_current_step_bounds(self) -> "Thought":
+        """Ensure current_step is valid when steps are provided."""
+        if self.current_step is not None:
+            if not self.steps:
+                raise ValueError("current_step requires non-empty `steps`")
+            if self.current_step > len(self.steps):
+                raise ValueError(
+                    f"current_step ({self.current_step}) must be <= number of steps ({len(self.steps)})"
+                )
+        return self
 
     @property
     def is_branch(self) -> bool:
@@ -268,6 +322,21 @@ class Thought(BaseModel):
         if self.outcome:
             outcome_line = f"✓ Outcome: {self.outcome}"
             content_lines.append(outcome_line)
+
+        if self.plan:
+            content_lines.append(f"🧭 Plan: {self.plan}")
+        if self.next:
+            content_lines.append(f"➡️  Next: {self.next}")
+        if self.reflect:
+            content_lines.append(f"🔍 Reflect: {self.reflect}")
+        if self.rationale:
+            content_lines.append(f"🧠 Rationale: {self.rationale}")
+        if self.open_question:
+            content_lines.append(f"❓ Open question: {self.open_question}")
+        if self.steps:
+            for idx, step in enumerate(self.steps, start=1):
+                marker = "👉" if self.current_step == idx else "•"
+                content_lines.append(f"{marker} Step {idx}: {step}")
 
         # Assumptions (if present)
         assumption_lines = []
@@ -420,6 +489,42 @@ class ThoughtRequest(BaseModel):
             description="What was achieved or expected as result of this thought",
         ),
     ] = None
+    plan: Annotated[
+        str | None,
+        Field(None, description="Optional high-level plan for upcoming thought steps"),
+    ] = None
+    next: Annotated[
+        str | None,
+        Field(None, description="Optional immediate next action for the following thought"),
+    ] = None
+    reflect: Annotated[
+        str | None,
+        Field(None, description="Optional reflection on progress, mistakes, or adjustments"),
+    ] = None
+    steps: Annotated[
+        list[str] | None,
+        Field(None, description="Optional ordered checklist of steps for this reasoning track"),
+    ] = None
+    current_step: Annotated[
+        int | None,
+        Field(None, ge=1, description="Optional current step index (1-based) within `steps`"),
+    ] = None
+    rationale: Annotated[
+        str | None,
+        Field(None, description="Optional explicit rationale for this thought"),
+    ] = None
+    open_question: Annotated[
+        str | None,
+        Field(None, description="Optional unresolved question to carry into later thoughts"),
+    ] = None
+    request_id: Annotated[
+        str | None,
+        Field(None, description="Optional client request identifier for tracing"),
+    ] = None
+    idempotency_key: Annotated[
+        str | None,
+        Field(None, description="Optional key to make repeated requests idempotent"),
+    ] = None
     assumptions: Annotated[
         list[Assumption] | None,
         Field(
@@ -464,6 +569,24 @@ class ThoughtRequest(BaseModel):
     def validate_invalidates_assumptions(cls, v: Any) -> Any:
         """Parse invalidates_assumptions from JSON string or list"""
         return _parse_json_list(v, "invalidates_assumptions")
+
+    @field_validator("steps", mode="before")
+    @classmethod
+    def validate_steps(cls, v: Any) -> Any:
+        """Parse steps from JSON string or list"""
+        return _parse_json_list(v, "steps")
+
+    @model_validator(mode="after")
+    def validate_current_step_bounds(self) -> "ThoughtRequest":
+        """Ensure current_step is valid when steps are provided."""
+        if self.current_step is not None:
+            if not self.steps:
+                raise ValueError("current_step requires non-empty `steps`")
+            if self.current_step > len(self.steps):
+                raise ValueError(
+                    f"current_step ({self.current_step}) must be <= number of steps ({len(self.steps)})"
+                )
+        return self
 
 
 class ThoughtResponse(BaseModel):
@@ -513,6 +636,54 @@ class ThoughtResponse(BaseModel):
             description="What was achieved or expected as result of this thought",
         ),
     ] = None
+    plan: Annotated[
+        str | None,
+        Field(None, description="Plan carried with this thought"),
+    ] = None
+    next: Annotated[
+        str | None,
+        Field(None, description="Next action carried with this thought"),
+    ] = None
+    reflect: Annotated[
+        str | None,
+        Field(None, description="Reflection captured with this thought"),
+    ] = None
+    steps: Annotated[
+        list[str] | None,
+        Field(None, description="Step checklist carried with this thought"),
+    ] = None
+    current_step: Annotated[
+        int | None,
+        Field(None, ge=1, description="Current step index in `steps`"),
+    ] = None
+    rationale: Annotated[
+        str | None,
+        Field(None, description="Rationale captured with this thought"),
+    ] = None
+    open_question: Annotated[
+        str | None,
+        Field(None, description="Open question carried to next thoughts"),
+    ] = None
+    request_id: Annotated[
+        str | None,
+        Field(None, description="Client request identifier echoed from input"),
+    ] = None
+    idempotency_key: Annotated[
+        str | None,
+        Field(None, description="Idempotency key echoed from input"),
+    ] = None
+    duplicate_of_thought_number: Annotated[
+        int | None,
+        Field(None, ge=1, description="Original thought number if this response came from idempotency replay"),
+    ] = None
+    progress_ratio: Annotated[
+        float,
+        Field(ge=0.0, le=1.0, description="Progress ratio thought_number / total_thoughts"),
+    ] = 0.0
+    recommended_next_action: Annotated[
+        str,
+        Field(description="Machine-friendly recommendation for client next action"),
+    ] = "continue"
     all_assumptions: Annotated[
         dict[str, Assumption],
         Field(
