@@ -147,6 +147,14 @@ class Thought(BaseModel):
         str | None,
         Field(None, description="Optional unresolved question to carry into later thoughts"),
     ] = None
+    request_id: Annotated[
+        str | None,
+        Field(None, description="Optional client request identifier for tracing"),
+    ] = None
+    idempotency_key: Annotated[
+        str | None,
+        Field(None, description="Optional key to make repeated requests idempotent"),
+    ] = None
     assumptions: Annotated[
         list[Assumption] | None,
         Field(
@@ -509,6 +517,14 @@ class ThoughtRequest(BaseModel):
         str | None,
         Field(None, description="Optional unresolved question to carry into later thoughts"),
     ] = None
+    request_id: Annotated[
+        str | None,
+        Field(None, description="Optional client request identifier for tracing"),
+    ] = None
+    idempotency_key: Annotated[
+        str | None,
+        Field(None, description="Optional key to make repeated requests idempotent"),
+    ] = None
     assumptions: Annotated[
         list[Assumption] | None,
         Field(
@@ -648,6 +664,26 @@ class ThoughtResponse(BaseModel):
         str | None,
         Field(None, description="Open question carried to next thoughts"),
     ] = None
+    request_id: Annotated[
+        str | None,
+        Field(None, description="Client request identifier echoed from input"),
+    ] = None
+    idempotency_key: Annotated[
+        str | None,
+        Field(None, description="Idempotency key echoed from input"),
+    ] = None
+    duplicate_of_thought_number: Annotated[
+        int | None,
+        Field(None, ge=1, description="Original thought number if this response came from idempotency replay"),
+    ] = None
+    progress_ratio: Annotated[
+        float,
+        Field(ge=0.0, le=1.0, description="Progress ratio thought_number / total_thoughts"),
+    ] = 0.0
+    recommended_next_action: Annotated[
+        str,
+        Field(description="Machine-friendly recommendation for client next action"),
+    ] = "continue"
     all_assumptions: Annotated[
         dict[str, Assumption],
         Field(

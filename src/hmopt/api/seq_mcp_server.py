@@ -8,15 +8,14 @@ src/hmopt/api/mcp_server.py
 from __future__ import annotations
 
 import os
+from contextlib import asynccontextmanager
 from typing import Any
 
+import anyio
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
 from hmopt.api.seq_mcp_service import build_seq_fastmcp_server, call_seq_tool
-
-from contextlib import asynccontextmanager
-import anyio
 
 
 def _normalize_mount_path(path: str) -> str:
@@ -33,7 +32,10 @@ def _normalize_mount_path(path: str) -> str:
 
 MCP_MOUNT_PATH = _normalize_mount_path(os.getenv("HMOPT_SEQ_MCP_MOUNT_PATH", "/mcp"))
 MCP_SERVER_API_KEY = os.getenv("HMOPT_SEQ_MCP_SERVER_API_KEY")
-SEQ_TOOL_NAME = os.getenv("HMOPT_SEQ_MCP_TOOL_NAME", "sequential_thinking").strip() or "sequential_thinking"
+SEQ_TOOL_NAME = (
+    os.getenv("HMOPT_SEQ_MCP_TOOL_NAME", "sequential_thinking").strip()
+    or "sequential_thinking"
+)
 
 
 class _BearerPathMiddleware:
@@ -72,7 +74,35 @@ class _BearerPathMiddleware:
         await self._app(scope, receive, send)
 
 
-app = FastAPI(title="HMOPT Sequential Thinking MCP Server", version="0.1.0")
+_fast_mcp = build_seq_fastmcp_server()
+# Mount FastMCP directly at mount root (not /mcp/mcp)
+_fast_mcp.settings.streamable_http_path = "/"
+
+
+def _bind_task_group(mcp_server: Any, tg: anyio.abc.TaskGroup) -> None:
+    mgr = getattr(mcp_server, "session_manager", None)
+    if mgr is None:
+        return
+    if hasattr(mgr, "task_group"):
+        mgr.task_group = tg
+    elif hasattr(mgr, "_task_group"):
+        mgr._task_group = tg
+    elif hasattr(mgr, "set_task_group"):
+        mgr.set_task_group(tg)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    async with anyio.create_task_group() as tg:
+        _bind_task_group(_fast_mcp, tg)
+        yield
+
+
+app = FastAPI(
+    title="HMOPT Sequential Thinking MCP Server",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 
 if MCP_SERVER_API_KEY:
     app.add_middleware(
@@ -95,7 +125,7 @@ def health() -> dict[str, Any]:
 @app.post("/tools/call")
 def tools_call(payload: dict[str, Any]) -> dict[str, Any]:
     """
-    Optional legacy-style endpoint (like your kernel server).
+    Optional legacy-style endpoint (like kernel server).
     Useful for quick curl testing. MCP clients should use /mcp.
     """
     tool = payload.get("tool")
@@ -103,7 +133,10 @@ def tools_call(payload: dict[str, Any]) -> dict[str, Any]:
     if not tool:
         raise HTTPException(status_code=400, detail="tool is required")
     if tool != SEQ_TOOL_NAME:
-        raise HTTPException(status_code=404, detail=f"unknown tool: {tool}. expected: {SEQ_TOOL_NAME}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"unknown tool: {tool}. expected: {SEQ_TOOL_NAME}",
+        )
     if not isinstance(arguments, dict):
         raise HTTPException(status_code=400, detail="arguments must be an object")
 
@@ -111,29 +144,4 @@ def tools_call(payload: dict[str, Any]) -> dict[str, Any]:
     return {"result": {"content": result, "tool": tool}}
 
 
-_fast_mcp = build_seq_fastmcp_server()
-# Mount FastMCP at /mcp (not /mcp/mcp) — same trick as your kernel server
-_fast_mcp.settings.streamable_http_path = "/"
 app.mount(MCP_MOUNT_PATH, _fast_mcp.streamable_http_app())
-
-def _bind_task_group(mcp_server, tg) -> None:
-    mgr = getattr(mcp_server, "session_manager", None)
-    if mgr is None:
-        return
-    if hasattr(mgr, "task_group"):
-        mgr.task_group = tg
-    elif hasattr(mgr, "_task_group"):
-        mgr._task_group = tg
-    elif hasattr(mgr, "set_task_group"):
-        mgr.set_task_group(tg)
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    async with anyio.create_task_group() as tg:
-        _bind_task_group(_fast_mcp, tg)
-        yield
-
-app = FastAPI(lifespan=lifespan)
-# app.router.redirect_slashes = False
-
-app.mount("/mcp", _fast_mcp.streamable_http_app())

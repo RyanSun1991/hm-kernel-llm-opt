@@ -54,6 +54,11 @@ class ThinkingSession:
         return list(self._branches.keys())
 
     @property
+    def thoughts(self) -> list[Thought]:
+        """Get thought history snapshot."""
+        return self._thoughts.copy()
+
+    @property
     def all_assumptions(self) -> dict[str, Assumption]:
         """Get all assumptions in this session"""
         return self._assumptions.copy()

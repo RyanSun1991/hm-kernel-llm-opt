@@ -62,8 +62,7 @@ def call_seq_tool(arguments: dict[str, Any]) -> dict[str, Any]:
 
 def build_seq_fastmcp_server() -> Any:
     """
-    Build a standalone MCP server exposing exactly one tool:
-    - name: HMOPT_SEQ_MCP_TOOL_NAME (default: sequential_thinking)
+    Build a standalone MCP server exposing sequential-thinking tools (write + control-plane).
     """
     from mcp.server.fastmcp import FastMCP  # uses your repo dependency mcp[cli]
 
@@ -113,6 +112,8 @@ def build_seq_fastmcp_server() -> Any:
         ] = None,
         rationale: Annotated[str | None, Field(None, description="Optional rationale")] = None,
         open_question: Annotated[str | None, Field(None, description="Optional unresolved question")] = None,
+        request_id: Annotated[str | None, Field(None, description="Optional client request identifier")] = None,
+        idempotency_key: Annotated[str | None, Field(None, description="Optional idempotency key for replay-safe retries")] = None,
         assumptions: Annotated[
             list[Assumption] | str | None,
             Field(None, description="List[Assumption] or JSON string"),
@@ -147,10 +148,45 @@ def build_seq_fastmcp_server() -> Any:
             "current_step": current_step,
             "rationale": rationale,
             "open_question": open_question,
+            "request_id": request_id,
+            "idempotency_key": idempotency_key,
             "assumptions": assumptions,
             "depends_on_assumptions": depends_on_assumptions,
             "invalidates_assumptions": invalidates_assumptions,
         }
         return call_seq_tool(args)
+
+    @mcp.tool(
+        name=f"{tool_name}_get_session",
+        description="Get sequential-thinking session snapshot for recovery/debug.",
+    )
+    def sequential_thinking_get_session(
+        session_id: Annotated[str, Field(min_length=1, description="Session ID")],
+        include_history: Annotated[bool, Field(description="Include full thought history")] = True,
+    ) -> dict[str, Any]:
+        svc = _get_service()
+        with _SEQ_LOCK:
+            return svc.get_session_snapshot(session_id=session_id, include_history=include_history)
+
+    @mcp.tool(
+        name=f"{tool_name}_list_sessions",
+        description="List active in-memory sequential-thinking sessions.",
+    )
+    def sequential_thinking_list_sessions() -> dict[str, Any]:
+        svc = _get_service()
+        with _SEQ_LOCK:
+            return {"sessions": svc.list_sessions()}
+
+    @mcp.tool(
+        name=f"{tool_name}_reset_session",
+        description="Reset or delete a sequential-thinking session.",
+    )
+    def sequential_thinking_reset_session(
+        session_id: Annotated[str, Field(min_length=1, description="Session ID")],
+        hard: Annotated[bool, Field(description="True=delete session, False=clear content")] = False,
+    ) -> dict[str, Any]:
+        svc = _get_service()
+        with _SEQ_LOCK:
+            return svc.reset_session(session_id=session_id, hard=hard)
 
     return mcp
