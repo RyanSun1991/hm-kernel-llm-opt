@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import logging
 import os
@@ -201,10 +202,13 @@ def _persist_embedding_metadata(
     }
     if index_id:
         metadata["index_id"] = index_id
-    metadata_path.write_text(
-        json.dumps(metadata, indent=2)
-        + "\n"
-    )
+    try:
+        metadata_path.write_text(
+            json.dumps(metadata, indent=2)
+            + "\n"
+        )
+    except PermissionError as exc:
+        logger.warning("Failed to persist embedding metadata at %s: %s", metadata_path, exc)
 
 
 def _load_embedding_metadata(persist_dir: Path) -> Optional[dict]:
@@ -216,6 +220,101 @@ def _load_embedding_metadata(persist_dir: Path) -> Optional[dict]:
     except json.JSONDecodeError:
         logger.warning("Failed to parse embedding metadata at %s", metadata_path)
         return None
+
+def _safe_storage_persist(storage: StorageContext, persist_dir: Path) -> bool:
+    try:
+        persist_dir.mkdir(parents=True, exist_ok=True)
+        storage.persist(persist_dir=str(persist_dir))
+        return True
+    except PermissionError as exc:
+        logger.warning("Skipping local index persistence due to permission error at %s: %s", persist_dir, exc)
+        return False
+    except OSError as exc:
+        logger.warning("Skipping local index persistence due to OS error at %s: %s", persist_dir, exc)
+        return False
+
+
+def _symbol_manifest_path(persist_dir: Path) -> Path:
+    return persist_dir / "symbol_manifest.json"
+
+
+def _load_symbol_manifest(persist_dir: Path) -> dict[str, str]:
+    path = _symbol_manifest_path(persist_dir)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse symbol manifest at %s", path)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(key): str(value) for key, value in data.items()}
+
+
+def _persist_symbol_manifest(persist_dir: Path, manifest: dict[str, str]) -> None:
+    _symbol_manifest_path(persist_dir).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+
+def _node_fingerprint(node: TextNode) -> str:
+    metadata = dict(node.metadata or {})
+    payload = {
+        "text": node.text,
+        "metadata": metadata,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _delete_code_symbol_nodes(vector_store: Neo4jVectorStore, node_label: str, symbol_ids: Iterable[str]) -> None:
+    symbol_ids = [sid for sid in symbol_ids if sid]
+    if not symbol_ids:
+        return
+    vector_store.database_query(
+        f"MATCH (n:`{node_label}`) WHERE n.symbol_id IN $symbol_ids DETACH DELETE n",
+        {"symbol_ids": symbol_ids},
+    )
+    vector_store.database_query(
+        "MATCH (s:symbol) WHERE s.name IN $symbol_ids DETACH DELETE s",
+        {"symbol_ids": symbol_ids},
+    )
+
+
+def _delete_code_summary_nodes(vector_store: Neo4jVectorStore, node_label: str) -> None:
+    vector_store.database_query(
+        f"MATCH (n:`{node_label}`) WHERE n.type IN ['file_summary', 'symbol_relations'] DETACH DELETE n"
+    )
+
+
+def _prepare_incremental_code_nodes(
+    nodes: list[TextNode],
+    previous_manifest: dict[str, str],
+) -> tuple[list[TextNode], list[str], list[str], list[str], list[TextNode], dict[str, str]]:
+    symbol_nodes: list[TextNode] = []
+    summary_nodes: list[TextNode] = []
+    unchanged_symbol_ids: list[str] = []
+    changed_symbol_ids: list[str] = []
+    current_manifest: dict[str, str] = {}
+
+    for node in nodes:
+        node_type = (node.metadata or {}).get("type")
+        if node_type != "code":
+            summary_nodes.append(node)
+            continue
+        symbol_id = str((node.metadata or {}).get("symbol_id") or node.node_id or "")
+        if not symbol_id:
+            symbol_nodes.append(node)
+            continue
+        fingerprint = _node_fingerprint(node)
+        current_manifest[symbol_id] = fingerprint
+        if previous_manifest.get(symbol_id) == fingerprint:
+            unchanged_symbol_ids.append(symbol_id)
+            continue
+        changed_symbol_ids.append(symbol_id)
+        symbol_nodes.append(node)
+
+    removed_symbol_ids = [symbol_id for symbol_id in previous_manifest if symbol_id not in current_manifest]
+    return symbol_nodes, removed_symbol_ids, unchanged_symbol_ids, changed_symbol_ids, summary_nodes, current_manifest
 
 
 def _infer_embedding_dimension(embed: OpenAIEmbeddingLike) -> int:
@@ -288,6 +387,9 @@ def _storage_context(
     if config.indexing.neo4j.enabled and Neo4jPropertyGraphStore and Neo4jVectorStore:
         if embedding_dimension is None:
             raise RuntimeError("Embedding dimension is required for Neo4j vector store usage.")
+        print(config.indexing.neo4j.uri)
+        print(config.indexing.neo4j.user)
+        print(config.indexing.neo4j.password)
         property_graph_store = Neo4jPropertyGraphStore(
             url=config.indexing.neo4j.uri,
             username=config.indexing.neo4j.user,
@@ -355,6 +457,18 @@ def _reset_neo4j_vector_index(
         logger.warning("Failed to delete Neo4j nodes for %s: %s", node_label, exc)
 
 
+def _stable_text_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _normalized_chunk_text(chunk: CodeChunk, *, max_lines: int = 120) -> str:
+    lines = chunk.text.splitlines()
+    if max_lines and len(lines) > max_lines:
+        lines = lines[:max_lines]
+    normalized = "\n".join(line.rstrip() for line in lines).strip()
+    return normalized
+
+
 def _code_header(chunk: CodeChunk) -> str:
     detail = f" {chunk.detail}" if chunk.detail else ""
     return (
@@ -362,14 +476,18 @@ def _code_header(chunk: CodeChunk) -> str:
         f"({chunk.path}:{chunk.start_line}-{chunk.end_line}){detail}"
     )
 
-
 def _index_to_nodes(index: CodeIndex) -> list[TextNode]:
     nodes: list[TextNode] = []
+    print("len(index.chunks) : " + str(len(index.chunks)))
+    print("len(index.file_summaries) : " + str(len(index.file_summaries)))
+    print("len(index.relation_summaries) : " + str(len(index.relation_summaries)))
     for chunk in index.chunks:
+        normalized_text = _normalized_chunk_text(chunk)
+        body = f"{_code_header(chunk)}\n{normalized_text}"
         nodes.append(
             TextNode(
                 id_=chunk.symbol_id,
-                text=f"{_code_header(chunk)}\n{chunk.text}",
+                text=body,
                 metadata={
                     "type": "code",
                     "symbol_name": chunk.symbol_name,
@@ -382,30 +500,91 @@ def _index_to_nodes(index: CodeIndex) -> list[TextNode]:
                     "parser": chunk.parser,
                     "container": chunk.container,
                     "detail": chunk.detail,
+                    "content_hash": _stable_text_hash(body),
                 },
             )
         )
     for summary in index.file_summaries:
+        file_summary_id = f"file_summary::{summary.path}"
+        text = summary.text.strip()
         nodes.append(
             TextNode(
-                text=summary.text,
-                metadata={"type": "file_summary", "path": str(summary.path)},
+                id_=file_summary_id,
+                text=text,
+                metadata={
+                    "type": "file_summary",
+                    "path": str(summary.path),
+                    "symbol_id": file_summary_id,
+                    "symbol_name": str(summary.path),
+                    "symbol_kind": "file_summary",
+                    "content_hash": _stable_text_hash(text),
+                },
             )
         )
     for summary in index.relation_summaries:
+        relation_id = f"symbol_relations::{summary.symbol_id}"
+        text = summary.text.strip()
         nodes.append(
             TextNode(
-                text=summary.text,
+                id_=relation_id,
+                text=text,
                 metadata={
                     "type": "symbol_relations",
                     "symbol_id": summary.symbol_id,
                     "symbol_name": summary.symbol_name,
                     "symbol_kind": summary.symbol_kind,
                     "path": summary.path,
+                    "content_hash": _stable_text_hash(text),
                 },
             )
         )
     return nodes
+
+
+def _filter_unchanged_nodes_by_hash(
+    storage: StorageContext,
+    nodes: list[TextNode],
+    *,
+    node_label: str,
+    batch_size: int = 500,
+) -> tuple[list[TextNode], int]:
+    vector_store = getattr(storage, "vector_store", None)
+    if not vector_store or not nodes:
+        return nodes, 0
+
+    known_hashes: dict[str, str] = {}
+    node_ids = [node.node_id for node in nodes if node.node_id]
+    for offset in range(0, len(node_ids), batch_size):
+        batch = node_ids[offset : offset + batch_size]
+        if not batch:
+            continue
+        rows = vector_store.database_query(
+            (
+                f"MATCH (c:`{node_label}`) "
+                "WHERE c.id IN $ids "
+                "RETURN c.id AS id, c.content_hash AS content_hash"
+            ),
+            params={"ids": batch},
+        )
+        for row in rows or []:
+            row_id = row.get("id")
+            if not row_id:
+                continue
+            known_hashes[str(row_id)] = str(row.get("content_hash") or "")
+
+    upsert_nodes: list[TextNode] = []
+    skipped = 0
+    for node in nodes:
+        node_id = node.node_id
+        node_hash = str((getattr(node, "metadata", {}) or {}).get("content_hash") or "")
+        if not node_hash:
+            upsert_nodes.append(node)
+            continue
+        if known_hashes.get(node_id) == node_hash:
+            skipped += 1
+            continue
+        upsert_nodes.append(node)
+    return upsert_nodes, skipped
 
 def _build_graph_entities(index: CodeIndex) -> tuple[list[EntityNode], list[Relation]]:
     nodes: dict[str, EntityNode] = {}
@@ -502,14 +681,13 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
     paths = _index_paths(config)
     paths.code_dir.mkdir(parents=True, exist_ok=True)
     llm, embed = _build_llama_models(config)
-    embed_dim = _infer_embedding_dimension(embed)
     neo4j_cfg = _neo4j_index_config("code")
-    _reset_neo4j_vector_index(
-        config,
-        embedding_dimension=embed_dim,
-        index_name=neo4j_cfg.index_name,
-        node_label=neo4j_cfg.node_label,
-    )
+    # _reset_neo4j_vector_index(
+    #     config,
+    #     embedding_dimension=embed_dim,
+    #     index_name=neo4j_cfg.index_name,
+    #     node_label=neo4j_cfg.node_label,
+    # )
 
     clangd_cfg = LspClangdConfig(
         binary=config.indexing.clangd.binary,
@@ -543,6 +721,18 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
             summary = llm.complete(f"Summarize the following kernel code:\n\n{node.text}")
             node.text = f"// [LLM SUMMARY]\n{summary.text}\n\n{node.text}"
 
+    previous_manifest = _load_symbol_manifest(paths.code_dir)
+    (
+        symbol_nodes_to_upsert,
+        removed_symbol_ids,
+        unchanged_symbol_ids,
+        changed_symbol_ids,
+        summary_nodes,
+        current_manifest,
+    ) = _prepare_incremental_code_nodes(nodes, previous_manifest)
+
+    embed_dim = _infer_embedding_dimension(embed)
+
     storage = _storage_context(
         config,
         paths.code_dir,
@@ -550,19 +740,81 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
         index_name=neo4j_cfg.index_name,
         node_label=neo4j_cfg.node_label,
     )
-    vector_index = VectorStoreIndex(nodes, storage_context=storage, embed_model=embed)
+    # vector_index = VectorStoreIndex(nodes, storage_context=storage, embed_model=embed)
+    vector_store = storage.vector_store if isinstance(storage.vector_store, Neo4jVectorStore) else None
+    if vector_store:
+        _delete_code_symbol_nodes(
+            vector_store,
+            neo4j_cfg.node_label,
+            [*changed_symbol_ids, *removed_symbol_ids],
+        )
+        _delete_code_summary_nodes(vector_store, neo4j_cfg.node_label)
+
+    nodes_to_insert = [*symbol_nodes_to_upsert, *summary_nodes]
+    vector_index: VectorStoreIndex | None = None
+    if nodes_to_insert:
+        # vector_index = VectorStoreIndex(nodes_to_insert, storage_context=storage, embed_model=embed)
+        nodes_to_upsert, skipped_unchanged = _filter_unchanged_nodes_by_hash(
+            storage,
+            nodes,
+            node_label=neo4j_cfg.node_label,
+        )
+        if skipped_unchanged:
+            logger.info(
+                "Skipping unchanged nodes by content_hash: skipped=%d upsert=%d total=%d",
+                skipped_unchanged,
+                len(nodes_to_upsert),
+                len(nodes),
+            )
+        if nodes_to_upsert:
+            vector_index = VectorStoreIndex(nodes_to_upsert, storage_context=storage, embed_model=embed)
+        else:
+            vector_index = _load_index(
+                config,
+                paths.code_dir,
+                embedding_dimension=embed_dim,
+                index_name=neo4j_cfg.index_name,
+                node_label=neo4j_cfg.node_label,
+                embed_model=embed,
+            )
+
+    affected_symbol_ids = {str((node.metadata or {}).get("symbol_id") or "") for node in symbol_nodes_to_upsert}
+    affected_symbol_ids.discard("")
+
     if config.indexing.neo4j.enabled:
-        _upsert_clangd_graph(storage, code_index, nodes)
-    storage.persist(persist_dir=str(paths.code_dir))
+        # _upsert_clangd_graph(storage, code_index, nodes)
+        graph_index = CodeIndex(
+            chunks=[chunk for chunk in code_index.chunks if chunk.symbol_id in affected_symbol_ids],
+            relations=[
+                rel
+                for rel in code_index.relations
+                if rel.src_id in affected_symbol_ids or rel.dst_id in affected_symbol_ids
+            ],
+            file_summaries=code_index.file_summaries,
+            relation_summaries=code_index.relation_summaries,
+        )
+        _upsert_clangd_graph(storage, graph_index, nodes_to_insert)
+
+    _safe_storage_persist(storage, paths.code_dir)
+    _persist_symbol_manifest(paths.code_dir, current_manifest)
+    previous_embedding_meta = _load_embedding_metadata(paths.code_dir) or {}
     _persist_embedding_metadata(
         paths.code_dir,
         model=config.llm.embedding_model,
         dimension=embed_dim,
         index_name=neo4j_cfg.index_name,
         node_label=neo4j_cfg.node_label,
-        index_id=vector_index.index_id,
+        index_id=(vector_index.index_id if vector_index else previous_embedding_meta.get("index_id")),
     )
-    logger.info("Kernel code index built: nodes=%d", len(nodes))
+    logger.info(
+        "Kernel code index built incrementally: total=%d inserted=%d unchanged=%d changed=%d removed=%d",
+        len(nodes),
+        len(nodes_to_insert),
+        len(unchanged_symbol_ids),
+        len(changed_symbol_ids),
+        len(removed_symbol_ids),
+    )
+    # logger.info("Kernel code index built: nodes=%d", len(nodes))
     return paths
 
 
@@ -572,12 +824,12 @@ def build_runtime_index(config: AppConfig, run_id: str) -> IndexPaths:
     llm, embed = _build_llama_models(config)
     embed_dim = _infer_embedding_dimension(embed)
     neo4j_cfg = _neo4j_index_config("runtime")
-    _reset_neo4j_vector_index(
-        config,
-        embedding_dimension=embed_dim,
-        index_name=neo4j_cfg.index_name,
-        node_label=neo4j_cfg.node_label,
-    )
+    # _reset_neo4j_vector_index(
+    #     config,
+    #     embedding_dimension=embed_dim,
+    #     index_name=neo4j_cfg.index_name,
+    #     node_label=neo4j_cfg.node_label,
+    # )
     engine = init_engine(config.storage.db_url, schema_path=Path("src/hmopt/storage/db/schema.sql"))
     with session_scope(engine) as session:
         nodes = build_runtime_nodes(
@@ -598,7 +850,8 @@ def build_runtime_index(config: AppConfig, run_id: str) -> IndexPaths:
         embed_model=embed,
         store_nodes_override=True,
     )
-    storage.persist(persist_dir=str(paths.runtime_dir))
+    # storage.persist(persist_dir=str(paths.runtime_dir))
+    _safe_storage_persist(storage, paths.runtime_dir)
     _persist_embedding_metadata(
         paths.runtime_dir,
         model=config.llm.embedding_model,
