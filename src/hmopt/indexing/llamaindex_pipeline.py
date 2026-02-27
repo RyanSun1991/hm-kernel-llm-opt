@@ -258,6 +258,7 @@ def _persist_symbol_manifest(persist_dir: Path, manifest: dict[str, str]) -> Non
 
 def _node_fingerprint(node: TextNode) -> str:
     metadata = dict(node.metadata or {})
+    metadata.pop("content_hash", None)
     payload = {
         "text": node.text,
         "metadata": metadata,
@@ -748,7 +749,6 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
             neo4j_cfg.node_label,
             [*changed_symbol_ids, *removed_symbol_ids],
         )
-        _delete_code_summary_nodes(vector_store, neo4j_cfg.node_label)
 
     nodes_to_insert = [*symbol_nodes_to_upsert, *summary_nodes]
     vector_index: VectorStoreIndex | None = None
@@ -756,7 +756,7 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
         # vector_index = VectorStoreIndex(nodes_to_insert, storage_context=storage, embed_model=embed)
         nodes_to_upsert, skipped_unchanged = _filter_unchanged_nodes_by_hash(
             storage,
-            nodes,
+            nodes_to_insert,
             node_label=neo4j_cfg.node_label,
         )
         if skipped_unchanged:
@@ -764,7 +764,7 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
                 "Skipping unchanged nodes by content_hash: skipped=%d upsert=%d total=%d",
                 skipped_unchanged,
                 len(nodes_to_upsert),
-                len(nodes),
+                len(nodes_to_insert),
             )
         if nodes_to_upsert:
             vector_index = VectorStoreIndex(nodes_to_upsert, storage_context=storage, embed_model=embed)
@@ -806,13 +806,19 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
         node_label=neo4j_cfg.node_label,
         index_id=(vector_index.index_id if vector_index else previous_embedding_meta.get("index_id")),
     )
+    summary_total = len(summary_nodes)
+    symbol_total = len(nodes) - summary_total
+    symbol_inserted = len(nodes_to_upsert) - summary_total if nodes_to_insert else 0
+    symbol_inserted = max(symbol_inserted, 0)
     logger.info(
-        "Kernel code index built incrementally: total=%d inserted=%d unchanged=%d changed=%d removed=%d",
+        "Kernel code index built incrementally: total=%d symbols(total=%d inserted=%d unchanged=%d changed=%d removed=%d) summaries(total=%d)",
         len(nodes),
-        len(nodes_to_insert),
+        symbol_total,
+        symbol_inserted,
         len(unchanged_symbol_ids),
         len(changed_symbol_ids),
         len(removed_symbol_ids),
+        summary_total,
     )
     # logger.info("Kernel code index built: nodes=%d", len(nodes))
     return paths

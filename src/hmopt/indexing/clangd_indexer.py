@@ -313,8 +313,10 @@ def _build_file_summaries(
     by_file: dict[Path, list[SymbolRecord]] = defaultdict(list)
     for rec in records:
         by_file[rec.path].append(rec)
-    for path, symbols in by_file.items():
+    for path in sorted(by_file):
+        symbols = by_file[path]
         kinds = Counter(sym.kind for sym in symbols)
+        kinds_dict = {kind: kinds[kind] for kind in sorted(kinds)}
         functions = sorted({sym.name for sym in symbols if sym.kind in KIND_FUNCTIONS})
         types = sorted({sym.name for sym in symbols if sym.kind in KIND_TYPES})
         globals_ = sorted({sym.name for sym in symbols if sym.kind in KIND_VARIABLES})
@@ -322,7 +324,7 @@ def _build_file_summaries(
         fields = sorted({sym.name for sym in symbols if sym.kind in KIND_FIELDS})
         text = (
             f"file summary: {path}\n"
-            f"counts: {dict(kinds)}\n"
+            f"counts: {kinds_dict}\n"
             f"functions: {functions[:max_items]}\n"
             f"types: {types[:max_items]}\n"
             f"globals: {globals_[:max_items]}\n"
@@ -345,7 +347,8 @@ def _build_relation_summaries(
         rel_map[rel.src_id][rel.kind].append(rel.dst_name)
 
     record_map = {rec.symbol_id: rec for rec in records}
-    for sym_id, kinds in rel_map.items():
+    for sym_id in sorted(rel_map):
+        kinds = rel_map[sym_id]
         rec = record_map.get(sym_id)
         if not rec:
             continue
