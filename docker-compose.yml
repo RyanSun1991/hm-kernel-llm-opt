@@ -1,0 +1,42 @@
+services:
+  hmopt:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        BASE_IMAGE: ${HMOPT_BASE_IMAGE:-kernel.dockerhub.rnd.huawei.com/hmci-docker-image:v3-4.2}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.tools.huawei.com/pypi/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.tools.huawei.com}
+        NEO4J_REPO_URL: ${NEO4J_REPO_URL:-https://debian.neo4j.com}
+        NEO4J_VERIFY_PEER: ${NEO4J_VERIFY_PEER:-false}
+        NEO4J_INSTALL_MODE: ${NEO4J_INSTALL_MODE:-offline}
+    image: ${HMOPT_IMAGE:-hmopt:local}
+    container_name: hmopt-app
+    restart: unless-stopped
+    environment:
+      HMOPT_LLM_BASE_URL: ${HMOPT_LLM_BASE_URL:-http://host.docker.internal:20010/v1}
+      HMOPT_LLM_API_KEY: ${HMOPT_LLM_API_KEY:-}
+      HMOPT_MCP_SERVER_API_KEY: ${HMOPT_MCP_SERVER_API_KEY:-}
+      HMOPT_MCP_ALLOWED_HOSTS: ${HMOPT_MCP_ALLOWED_HOSTS:-}
+      HMOPT_MCP_DISABLE_HOST_CHECK: ${HMOPT_MCP_DISABLE_HOST_CHECK:-}
+      HMOPT_MCP_HOST: 0.0.0.0
+      HMOPT_MCP_PORT: 7331
+      HMOPT_START_NEO4J: ${HMOPT_START_NEO4J:-1}
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-@huawei2026}
+      HMOPT_PATH_ALIAS: ${HMOPT_PATH_ALIAS:-}
+    ports:
+      - "7475:7474"
+      - "7688:7687"
+      - "7332:7331"
+      - "8001:8000"
+    volumes:
+      - ./:/app
+      - ${KERNEL_REPO_PATH:-./data/sample-kernel}:/workspace/kernel:rw
+      - ${KERNEL_REPO_PATH}:${KERNEL_REPO_PATH}:rw
+      - ${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:rw
+      - ./data/neo4j/data:/var/lib/neo4j
+      - ./data/neo4j/logs:/var/log/neo4j
+      - ./data/neo4j/plugins:/var/lib/neo4j/plugins
+    working_dir: /app
+    command: ["bash", "-lc", "tail -f /dev/null"]

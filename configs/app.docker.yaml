@@ -1,0 +1,82 @@
+includes:
+  model_server: ./model_server.yaml
+  workloads: ./workloads.yaml
+
+project:
+  name: hm-verif-kernel
+  repo_path: /workspace/kernel
+  build_system: auto
+
+llm:
+  provider: openai_compatible
+  base_url: ${HMOPT_LLM_BASE_URL}
+  api_key_env: HMOPT_LLM_API_KEY
+  model: ${HMOPT_LLM_MODEL}
+  embedding_model: ${HMOPT_EMBEDDING_MODEL}
+
+storage:
+  db:
+    url: sqlite:///data/hmopt.db
+  artifacts:
+    root_dir: data/artifacts
+  vector_store:
+    type: local
+    path: data/vector_store
+
+profiling:
+  enabled: true
+
+pipelines:
+  default: optimize_kernel
+
+indexing:
+  enabled: true
+  persist_dir: data/llamaindex
+  llm_enrich: false
+  llm_enrich_limit: 5000
+  runtime_evidence_max_chars: 20000
+  hotspot_top_k: 20
+  hotspot_min_ratio: 0.001
+  hotspot_min_abs: 10.0
+  query_code_top_k: 10
+  query_runtime_top_k: 10
+  query_graph_top_k: 3
+  query_hotspot_top_k: 10
+  query_code_context_mode: snippets
+  clangd:
+    enabled: true
+    binary: clangd
+    compile_commands_dir: /workspace/kernel
+    extra_args: []
+    timeout_sec: 10
+    max_files: 50000
+    symbol_kinds:
+      - function
+      - method
+      - constructor
+      - class
+      - struct
+      - enum
+      - enum_member
+      - interface
+      - type_parameter
+      - variable
+      - constant
+      - field
+      - property
+    call_hierarchy_enabled: true
+    call_hierarchy_max_functions: 20000
+    call_hierarchy_max_calls: 1000
+    call_hierarchy_max_depth: 1
+    usage_scan_enabled: true
+    usage_scan_max_names: 20000
+    relation_max_per_symbol: 2000
+    file_summary_enabled: true
+    relation_summary_enabled: true
+    relation_summary_max_items: 500
+  neo4j:
+    enabled: true
+    uri: bolt://127.0.0.1:7687
+    user: ${NEO4J_USER}
+    password: ${NEO4J_PASSWORD}
+    database: neo4j

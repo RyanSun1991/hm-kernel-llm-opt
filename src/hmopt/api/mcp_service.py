@@ -466,7 +466,35 @@ def build_fastmcp_server() -> Any | None:
         return None
 
     server_name = os.getenv("HMOPT_MCP_SERVER_NAME", DEFAULT_SERVER_NAME).strip() or DEFAULT_SERVER_NAME
-    mcp = FastMCP(server_name, stateless_http=True, json_response=True)
+
+    disable_host_check = os.getenv("HMOPT_MCP_DISABLE_HOST_CHECK", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    allowed_hosts_raw = os.getenv("HMOPT_MCP_ALLOWED_HOSTS", "").strip()
+    transport_security = None
+    if disable_host_check:
+        from mcp.server.transport_security import TransportSecuritySettings  # type: ignore
+
+        transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
+    elif allowed_hosts_raw:
+        allowed_hosts = [h.strip() for h in allowed_hosts_raw.split(",") if h.strip()]
+        if allowed_hosts:
+            from mcp.server.transport_security import TransportSecuritySettings  # type: ignore
+
+            transport_security = TransportSecuritySettings(
+                enable_dns_rebinding_protection=True,
+                allowed_hosts=allowed_hosts,
+            )
+
+    mcp = FastMCP(
+        server_name,
+        stateless_http=True,
+        json_response=True,
+        transport_security=transport_security,
+    )
     tool_names = get_tool_names()
 
     @mcp.tool(

@@ -40,6 +40,8 @@ Outputs (DB + artifacts + reports) are stored under `data/`.
 
 For OpenCode MCP integration details, see `docs/OpenCode_MCP_Integration_Guide.md`.
 
+For Docker one-click local indexing + OpenCode integration (works with docker compose and docker-only fallback), see `docs/Docker_OneClick_Delivery.md`.
+
 ## Repository Layout
 
 See `docs/architecture.md` for the full framework design.
