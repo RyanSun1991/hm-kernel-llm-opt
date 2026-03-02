@@ -1,0 +1,20 @@
+{
+  "version": "0.0.5",
+  "manifestVersion": 1,
+  "id": "Git-Mcp-Server",
+  "name": "Git-Mcp-Server",
+  "publisher": "Huawei",
+  "description": "A Git MCP Server",
+  "categories": ["开发者工具"],
+  "icons": { "default": "images/Redis_logo.svg" },
+  "tags": ["opensource","git"],
+  "repository": {
+    "type": "git",
+    "uri": "https://github.com/modelcontextprotocol/servers/tree/2025.4.24/src/git"
+  },
+  "content": {
+    "details": {
+      "path": "README.md"
+    }
+  }
+}
