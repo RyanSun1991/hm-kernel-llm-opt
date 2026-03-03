@@ -36,6 +36,12 @@ bash scripts/run_api.sh
 bash scripts/run_mcp_server.sh
 ```
 
+- Launch the Sequential Thinking MCP server (default `0.0.0.0:7333`):
+
+```bash
+bash scripts/run_seq_mcp_server.sh
+```
+
 Outputs (DB + artifacts + reports) are stored under `data/`.
 
 For OpenCode MCP integration details, see `docs/OpenCode_MCP_Integration_Guide.md`.
