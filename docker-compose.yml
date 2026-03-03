@@ -40,3 +40,22 @@ services:
       - ./data/neo4j/plugins:/var/lib/neo4j/plugins
     working_dir: /app
     command: ["bash", "-lc", "tail -f /dev/null"]
+
+  hmopt-git-mcp:
+    image: ${HMOPT_IMAGE:-hmopt:local}
+    container_name: hmopt-git-mcp
+    restart: unless-stopped
+    environment:
+      HMOPT_GIT_MCP_HOST: 0.0.0.0
+      HMOPT_GIT_MCP_PORT: 7334
+      HMOPT_GIT_MCP_MOUNT_PATH: ${HMOPT_GIT_MCP_MOUNT_PATH:-/mcp}
+      HMOPT_GIT_MCP_REPOSITORY: ${HMOPT_GIT_MCP_REPOSITORY:-/workspace/kernel}
+    ports:
+      - "7334:7334"
+    volumes:
+      - ./:/app
+      - ${KERNEL_REPO_PATH:-./data/sample-kernel}:/workspace/kernel:rw
+      - ${KERNEL_REPO_PATH}:${KERNEL_REPO_PATH}:rw
+      - ${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:rw
+    working_dir: /app
+    command: ["bash", "-lc", "bash scripts/run_git_mcp_server.sh"]

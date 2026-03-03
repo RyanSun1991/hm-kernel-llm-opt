@@ -9,6 +9,12 @@
         "Authorization": "Bearer {env:HMOPT_MCP_SERVER_API_KEY}"
       },
       "timeout": 30000
+    },
+    "hmopt_git_remote": {
+      "type": "remote",
+      "enabled": true,
+      "url": "http://127.0.0.1:7334/mcp",
+      "timeout": 30000
     }
   }
 }

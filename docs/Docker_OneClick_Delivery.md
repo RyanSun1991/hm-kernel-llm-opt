@@ -40,15 +40,19 @@ bash scripts/docker_oneclick.sh up
 
 ## 3) 索引与服务 / Index + services
 
-MCP/API 端口映射：宿主 7332 -> 容器 7331；宿主 8001 -> 容器 8000。
+MCP/API 端口映射：宿主 7332 -> 容器 7331；宿主 7334 -> Git MCP 容器 7334；宿主 8001 -> 容器 8000。
 Neo4j 端口映射：宿主 7475/7688 -> 容器 7474/7687。
 默认密码：`@huawei2026`（首次初始化数据目录时生效）。
+Git MCP 默认仓库可由 `HMOPT_GIT_MCP_REPOSITORY` 配置（默认 `/workspace/kernel`）。
 Neo4j 数据默认挂载到 host：`./data/neo4j/{data,logs,plugins}`，`down` + `up-prebuilt` 后数据会保留。
 APOC 优先从 `/app/libs` 安装；若仓库挂载覆盖导致找不到，则回退使用镜像内 `/opt/hmopt-libs`。
 
 ```bash
 bash scripts/docker_oneclick.sh index
 bash scripts/docker_oneclick.sh mcp
+
+# 启动独立 Git MCP（streamable-http）
+bash scripts/docker_oneclick.sh git-mcp
 bash scripts/docker_oneclick.sh api
 ```
 

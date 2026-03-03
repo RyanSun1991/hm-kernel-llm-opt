@@ -23,6 +23,7 @@ Actions / 动作:
   up-prebuilt     Start with preloaded image (no local build) / 使用预置镜像启动（不本地构建）
   index [args]    Build kernel index (supports extra CLI args) / 执行内核索引（支持附加参数）
   mcp             Start MCP server (host port 7332 -> container 7331) / 启动 MCP 服务（宿主7332->容器7331）
+  git-mcp         Start Git MCP server (host port 7334 -> container 7334) / 启动 Git MCP 服务（宿主7334->容器7334）
   api             Start REST API (host port 8001 -> container 8000) / 启动 REST API（宿主8001->容器8000）
   clone           Clone kernel repo to KERNEL_REPO_PATH / 克隆代码到 KERNEL_REPO_PATH
   prepare-neo4j-offline  Download neo4j deb on host for offline build / 在host下载neo4j包供离线构建
@@ -220,6 +221,7 @@ index_docker_native() {
   docker exec "$HMOPT_CONTAINER" python -m hmopt.cli index-kernel "${_index_args[@]}"
 }
 mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'python -m hmopt.cli serve-mcp --host 0.0.0.0 --port 7331'; }
+git_mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'bash scripts/run_git_mcp_server.sh'; }
 api_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'uvicorn hmopt.api.main:app --host 0.0.0.0 --port 8000'; }
 down_docker_native() { docker rm -f "$HMOPT_CONTAINER" >/dev/null 2>&1 || true; }
 logs_docker_native() { docker logs -f "$HMOPT_CONTAINER"; }
@@ -312,6 +314,7 @@ case "$ACTION" in
   up-prebuilt) if has_compose; then compose_run up -d --no-build; else up_prebuilt; fi ;;
   index) load_env; if has_compose; then compose_run up -d hmopt; mapfile -t _index_args < <(build_index_args); compose_run exec hmopt python -m hmopt.cli index-kernel "${_index_args[@]}"; else up_docker_native; index_docker_native; fi ;;
   mcp) if has_compose; then compose_run up -d hmopt; compose_run exec hmopt bash -lc 'python -m hmopt.cli serve-mcp --host 0.0.0.0 --port 7331'; else up_docker_native; mcp_docker_native; fi ;;
+  git-mcp) if has_compose; then compose_run up -d hmopt-git-mcp; else up_docker_native; git_mcp_docker_native; fi ;;
   api) if has_compose; then compose_run up -d hmopt; compose_run exec hmopt bash -lc 'uvicorn hmopt.api.main:app --host 0.0.0.0 --port 8000'; else up_docker_native; api_docker_native; fi ;;
   clone) clone_repo ;;
   prepare-neo4j-offline) prepare_neo4j_offline ;;
