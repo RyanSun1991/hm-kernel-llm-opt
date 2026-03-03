@@ -1,5 +1,3 @@
-# __main__.py
-
-from mcp_server_git import main
+from hmopt.mcp_server_git import main
 
 main()

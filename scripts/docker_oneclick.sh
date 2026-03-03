@@ -23,6 +23,7 @@ Actions / 动作:
   up-prebuilt     Start with preloaded image (no local build) / 使用预置镜像启动（不本地构建）
   index [args]    Build kernel index (supports extra CLI args) / 执行内核索引（支持附加参数）
   mcp             Start MCP server (host port 7332 -> container 7331) / 启动 MCP 服务（宿主7332->容器7331）
+  git-mcp         Start Git MCP server (host port 7334 -> container 7334) / 启动 Git MCP 服务（宿主7334->容器7334）
   seq-mcp         Start sequential thinking MCP server (host 7334 -> container 7333) / 启动顺序思考 MCP 服务（宿主7334->容器7333）
   oneclick        Start both MCP servers in background / 一键后台启动两个 MCP 服务
   api             Start REST API (host port 8001 -> container 8000) / 启动 REST API（宿主8001->容器8000）
@@ -224,6 +225,7 @@ index_docker_native() {
   docker exec "$HMOPT_CONTAINER" python -m hmopt.cli index-kernel "${_index_args[@]}"
 }
 mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'python -m hmopt.cli serve-mcp --host 0.0.0.0 --port 7331'; }
+git_mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'bash scripts/run_git_mcp_server.sh'; }
 seq_mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'bash scripts/run_seq_mcp_server.sh'; }
 oneclick_docker_native() {
   docker exec -d "$HMOPT_CONTAINER" bash -lc 'nohup bash scripts/run_all_mcp_servers.sh >/tmp/all_mcp_servers.log 2>&1 &'
@@ -321,6 +323,7 @@ case "$ACTION" in
   up-prebuilt) if has_compose; then compose_run up -d --no-build; else up_prebuilt; fi ;;
   index) load_env; if has_compose; then compose_run up -d hmopt; mapfile -t _index_args < <(build_index_args); compose_run exec hmopt python -m hmopt.cli index-kernel "${_index_args[@]}"; else up_docker_native; index_docker_native; fi ;;
   mcp) if has_compose; then compose_run up -d hmopt; compose_run exec hmopt bash -lc 'python -m hmopt.cli serve-mcp --host 0.0.0.0 --port 7331'; else up_docker_native; mcp_docker_native; fi ;;
+  git-mcp) if has_compose; then compose_run up -d hmopt-git-mcp; else up_docker_native; git_mcp_docker_native; fi ;;
   seq-mcp) if has_compose; then compose_run up -d hmopt; compose_run exec hmopt bash -lc 'bash scripts/run_seq_mcp_server.sh'; else up_docker_native; seq_mcp_docker_native; fi ;;
   oneclick) if has_compose; then compose_run up -d hmopt; compose_run exec -d hmopt bash -lc 'nohup bash scripts/run_all_mcp_servers.sh >/tmp/all_mcp_servers.log 2>&1 &'; echo 'Started MCP (7331) and sequential thinking MCP (7333) in background.'; else up_docker_native; oneclick_docker_native; fi ;;
   api) if has_compose; then compose_run up -d hmopt; compose_run exec hmopt bash -lc 'uvicorn hmopt.api.main:app --host 0.0.0.0 --port 8000'; else up_docker_native; api_docker_native; fi ;;

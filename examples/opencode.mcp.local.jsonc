@@ -15,6 +15,18 @@
         "HMOPT_MCP_TOOL_NAME": "kernel_index_code"
       },
       "timeout": 30000
+    },
+    "hmopt_git": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "python3",
+        "-m",
+        "hmopt.mcp_server_git",
+        "--repository",
+        "/workspace/kernel"
+      ],
+      "timeout": 30000
     }
   }
 }

@@ -36,6 +36,14 @@ bash scripts/run_api.sh
 bash scripts/run_mcp_server.sh
 ```
 
+- Launch the Git MCP server (standalone streamable-http endpoint):
+
+```bash
+bash scripts/run_git_mcp_server.sh
+```
+
+默认可通过 `HMOPT_GIT_MCP_REPOSITORY` 设置仓库根路径，这样调用 Git MCP 工具时可不显式传 `repo_path`；也可继续在每次 tool 调用中传入 `repo_path` 覆盖。
+
 - Launch the Sequential Thinking MCP server (default `0.0.0.0:7333`):
 
 ```bash
