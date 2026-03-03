@@ -23,6 +23,8 @@ Actions / 动作:
   up-prebuilt     Start with preloaded image (no local build) / 使用预置镜像启动（不本地构建）
   index [args]    Build kernel index (supports extra CLI args) / 执行内核索引（支持附加参数）
   mcp             Start MCP server (host port 7332 -> container 7331) / 启动 MCP 服务（宿主7332->容器7331）
+  seq-mcp         Start sequential thinking MCP server (host 7334 -> container 7333) / 启动顺序思考 MCP 服务（宿主7334->容器7333）
+  oneclick        Start both MCP servers in background / 一键后台启动两个 MCP 服务
   api             Start REST API (host port 8001 -> container 8000) / 启动 REST API（宿主8001->容器8000）
   clone           Clone kernel repo to KERNEL_REPO_PATH / 克隆代码到 KERNEL_REPO_PATH
   prepare-neo4j-offline  Download neo4j deb on host for offline build / 在host下载neo4j包供离线构建
@@ -120,7 +122,7 @@ run_hmopt_container() {
   docker rm -f "$HMOPT_CONTAINER" >/dev/null 2>&1 || true
   docker run -d \
     --name "$HMOPT_CONTAINER" \
-    -p 7475:7474 -p 7688:7687 -p 7332:7331 -p 8001:8000 \
+    -p 7475:7474 -p 7688:7687 -p 7332:7331 -p 7334:7333 -p 8001:8000 \
     -e HMOPT_LLM_BASE_URL="${HMOPT_LLM_BASE_URL:-http://host.docker.internal:20010/v1}" \
     -e HMOPT_LLM_API_KEY="${HMOPT_LLM_API_KEY:-}" \
     -e HMOPT_MCP_SERVER_API_KEY="${HMOPT_MCP_SERVER_API_KEY:-}" \
@@ -128,6 +130,8 @@ run_hmopt_container() {
     -e HMOPT_MCP_DISABLE_HOST_CHECK="${HMOPT_MCP_DISABLE_HOST_CHECK:-}" \
     -e HMOPT_MCP_HOST='0.0.0.0' \
     -e HMOPT_MCP_PORT='7331' \
+    -e HMOPT_SEQ_MCP_HOST='0.0.0.0' \
+    -e HMOPT_SEQ_MCP_PORT='7333' \
     -e HMOPT_START_NEO4J="${HMOPT_START_NEO4J:-1}" \
     -e NEO4J_USER="${NEO4J_USER:-neo4j}" \
     -e NEO4J_PASSWORD="${NEO4J_PASSWORD:-@huawei2026}" \
@@ -220,6 +224,11 @@ index_docker_native() {
   docker exec "$HMOPT_CONTAINER" python -m hmopt.cli index-kernel "${_index_args[@]}"
 }
 mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'python -m hmopt.cli serve-mcp --host 0.0.0.0 --port 7331'; }
+seq_mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'bash scripts/run_seq_mcp_server.sh'; }
+oneclick_docker_native() {
+  docker exec -d "$HMOPT_CONTAINER" bash -lc 'nohup bash scripts/run_all_mcp_servers.sh >/tmp/all_mcp_servers.log 2>&1 &'
+  echo 'Started MCP (7331) and sequential thinking MCP (7333) in background.'
+}
 api_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'uvicorn hmopt.api.main:app --host 0.0.0.0 --port 8000'; }
 down_docker_native() { docker rm -f "$HMOPT_CONTAINER" >/dev/null 2>&1 || true; }
 logs_docker_native() { docker logs -f "$HMOPT_CONTAINER"; }
@@ -312,6 +321,8 @@ case "$ACTION" in
   up-prebuilt) if has_compose; then compose_run up -d --no-build; else up_prebuilt; fi ;;
   index) load_env; if has_compose; then compose_run up -d hmopt; mapfile -t _index_args < <(build_index_args); compose_run exec hmopt python -m hmopt.cli index-kernel "${_index_args[@]}"; else up_docker_native; index_docker_native; fi ;;
   mcp) if has_compose; then compose_run up -d hmopt; compose_run exec hmopt bash -lc 'python -m hmopt.cli serve-mcp --host 0.0.0.0 --port 7331'; else up_docker_native; mcp_docker_native; fi ;;
+  seq-mcp) if has_compose; then compose_run up -d hmopt; compose_run exec hmopt bash -lc 'bash scripts/run_seq_mcp_server.sh'; else up_docker_native; seq_mcp_docker_native; fi ;;
+  oneclick) if has_compose; then compose_run up -d hmopt; compose_run exec -d hmopt bash -lc 'nohup bash scripts/run_all_mcp_servers.sh >/tmp/all_mcp_servers.log 2>&1 &'; echo 'Started MCP (7331) and sequential thinking MCP (7333) in background.'; else up_docker_native; oneclick_docker_native; fi ;;
   api) if has_compose; then compose_run up -d hmopt; compose_run exec hmopt bash -lc 'uvicorn hmopt.api.main:app --host 0.0.0.0 --port 8000'; else up_docker_native; api_docker_native; fi ;;
   clone) clone_repo ;;
   prepare-neo4j-offline) prepare_neo4j_offline ;;
