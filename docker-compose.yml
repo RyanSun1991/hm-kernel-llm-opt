@@ -62,3 +62,28 @@ services:
       - ${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:rw
     working_dir: /app
     command: ["bash", "-lc", "bash scripts/run_git_mcp_server.sh"]
+
+  hmopt-build-mcp:
+    image: ${HMOPT_IMAGE:-hmopt:local}
+    container_name: hmopt-build-mcp
+    restart: unless-stopped
+    environment:
+      HMOPT_BUILD_MCP_HOST: 0.0.0.0
+      HMOPT_BUILD_MCP_PORT: 7335
+      HMOPT_BUILD_MCP_MOUNT_PATH: ${HMOPT_BUILD_MCP_MOUNT_PATH:-/mcp}
+      HMOPT_BUILD_MCP_MODE: ${HMOPT_BUILD_MCP_MODE:-exec}
+      HMOPT_BUILD_MCP_RUNNER_CONTAINER: ${HMOPT_BUILD_MCP_RUNNER_CONTAINER:-}
+      HMOPT_BUILD_MCP_RUNNER_IMAGE: ${HMOPT_BUILD_MCP_RUNNER_IMAGE:-}
+      HMOPT_BUILD_MCP_PROJECT_PATH: ${HMOPT_BUILD_MCP_PROJECT_PATH:-}
+      HMOPT_BUILD_MCP_PROJECT_MOUNT: ${HMOPT_BUILD_MCP_PROJECT_MOUNT:-}
+      HMOPT_BUILD_MCP_SIGN_WORKSPACE: ${HMOPT_BUILD_MCP_SIGN_WORKSPACE:-}
+    ports:
+      - "7335:7335"
+    volumes:
+      - ./:/app
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${KERNEL_REPO_PATH:-./data/sample-kernel}:/workspace/kernel:rw
+      - ${KERNEL_REPO_PATH}:${KERNEL_REPO_PATH}:rw
+      - ${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:rw
+    working_dir: /app
+    command: ["bash", "-lc", "bash scripts/run_build_mcp_server.sh"]

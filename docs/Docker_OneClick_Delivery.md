@@ -55,6 +55,7 @@ bash scripts/docker_oneclick.sh mcp
 # 启动独立 Git MCP（streamable-http）
 bash scripts/docker_oneclick.sh git-mcp
 bash scripts/docker_oneclick.sh seq-mcp
+bash scripts/docker_oneclick.sh build-mcp
 bash scripts/docker_oneclick.sh oneclick
 bash scripts/docker_oneclick.sh api
 ```
@@ -212,3 +213,24 @@ HMOPT_BASE_IMAGE=kernel.dockerhub.rnd.huawei.com/hmci-docker-image:v3-4.2
 HMOPT_BASE_IMAGE_CANDIDATES=镜像A,镜像B,python:3.10-slim
 ```
 
+
+
+### Build MCP（跨容器触发内核构建）
+
+新增 `hmopt-build-mcp` 服务，默认端口 `7335`，用于在 MCP 容器内调用宿主 Docker，再到另一个 build 容器执行命令。
+
+推荐模式：
+- `HMOPT_BUILD_MCP_MODE=exec`（默认）
+- `HMOPT_BUILD_MCP_RUNNER_CONTAINER=<你的构建容器名>`
+- `HMOPT_BUILD_MCP_PROJECT_PATH=<构建容器内项目路径>`
+- `HMOPT_BUILD_MCP_SIGN_WORKSPACE=<构建容器内 hm-CI 路径>`
+
+该服务提供两个 MCP tool：
+- `kernel_build_trigger`：执行 `kernel/hongmeng/build/hm_scripts/build.sh ...`
+- `kernel_sign_trigger`：执行 `do_pack_hione_trunk.sh`
+
+调用样例（逻辑映射）：
+- `device=charlotte,nashville,changsha` -> `bootimage-*`
+- `profile=release|debug` -> 默认 defconfig 自动映射（可手动覆盖）
+
+注意：`hmopt-build-mcp` 通过挂载 `/var/run/docker.sock` 控制宿主 Docker，请仅在受信环境使用。

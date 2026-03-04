@@ -25,7 +25,8 @@ Actions / 动作:
   mcp             Start MCP server (host port 7332 -> container 7331) / 启动 MCP 服务（宿主7332->容器7331）
   git-mcp         Start Git MCP server (host port 7334 -> container 7334) / 启动 Git MCP 服务（宿主7334->容器7334）
   seq-mcp         Start sequential thinking MCP server (host 7334 -> container 7333) / 启动顺序思考 MCP 服务（宿主7334->容器7333）
-  oneclick        Start both MCP servers in background / 一键后台启动两个 MCP 服务
+  build-mcp       Start Build MCP server (host 7335 -> container 7335) / 启动 Build MCP 服务（宿主7335->容器7335）
+  oneclick        Start MCP + sequential MCP servers in background / 一键后台启动 MCP+顺序思考 MCP 服务
   api             Start REST API (host port 8001 -> container 8000) / 启动 REST API（宿主8001->容器8000）
   clone           Clone kernel repo to KERNEL_REPO_PATH / 克隆代码到 KERNEL_REPO_PATH
   prepare-neo4j-offline  Download neo4j deb on host for offline build / 在host下载neo4j包供离线构建
@@ -227,6 +228,7 @@ index_docker_native() {
 mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'python -m hmopt.cli serve-mcp --host 0.0.0.0 --port 7331'; }
 git_mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'bash scripts/run_git_mcp_server.sh'; }
 seq_mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'bash scripts/run_seq_mcp_server.sh'; }
+build_mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'bash scripts/run_build_mcp_server.sh'; }
 oneclick_docker_native() {
   docker exec -d "$HMOPT_CONTAINER" bash -lc 'nohup bash scripts/run_all_mcp_servers.sh >/tmp/all_mcp_servers.log 2>&1 &'
   echo 'Started MCP (7331) and sequential thinking MCP (7333) in background.'
@@ -325,6 +327,7 @@ case "$ACTION" in
   mcp) if has_compose; then compose_run up -d hmopt; compose_run exec hmopt bash -lc 'python -m hmopt.cli serve-mcp --host 0.0.0.0 --port 7331'; else up_docker_native; mcp_docker_native; fi ;;
   git-mcp) if has_compose; then compose_run up -d hmopt-git-mcp; else up_docker_native; git_mcp_docker_native; fi ;;
   seq-mcp) if has_compose; then compose_run up -d hmopt; compose_run exec hmopt bash -lc 'bash scripts/run_seq_mcp_server.sh'; else up_docker_native; seq_mcp_docker_native; fi ;;
+  build-mcp) if has_compose; then compose_run up -d hmopt-build-mcp; else up_docker_native; build_mcp_docker_native; fi ;;
   oneclick) if has_compose; then compose_run up -d hmopt; compose_run exec -d hmopt bash -lc 'nohup bash scripts/run_all_mcp_servers.sh >/tmp/all_mcp_servers.log 2>&1 &'; echo 'Started MCP (7331) and sequential thinking MCP (7333) in background.'; else up_docker_native; oneclick_docker_native; fi ;;
   api) if has_compose; then compose_run up -d hmopt; compose_run exec hmopt bash -lc 'uvicorn hmopt.api.main:app --host 0.0.0.0 --port 8000'; else up_docker_native; api_docker_native; fi ;;
   clone) clone_repo ;;

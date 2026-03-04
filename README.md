@@ -44,6 +44,14 @@ bash scripts/run_git_mcp_server.sh
 
 默认可通过 `HMOPT_GIT_MCP_REPOSITORY` 设置仓库根路径，这样调用 Git MCP 工具时可不显式传 `repo_path`；也可继续在每次 tool 调用中传入 `repo_path` 覆盖。
 
+- Launch the Build MCP server (default `0.0.0.0:7335`):
+
+```bash
+bash scripts/run_build_mcp_server.sh
+```
+
+Build MCP can trigger kernel build/sign commands in another Docker container via `docker exec/run`. Configure with `HMOPT_BUILD_MCP_*` environment variables.
+
 - Launch the Sequential Thinking MCP server (default `0.0.0.0:7333`):
 
 ```bash
@@ -55,6 +63,8 @@ Outputs (DB + artifacts + reports) are stored under `data/`.
 For OpenCode MCP integration details, see `docs/OpenCode_MCP_Integration_Guide.md`.
 
 For Docker one-click local indexing + OpenCode integration (works with docker compose and docker-only fallback), see `docs/Docker_OneClick_Delivery.md`.
+
+For local runnable Build MCP test and parameter examples, see `docs/Build_MCP_Local_Test.md`.
 
 ## Repository Layout
 
