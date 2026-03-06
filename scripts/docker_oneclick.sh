@@ -3,16 +3,16 @@ set -euo pipefail
 
 ACTION="${1:-help}"
 ACTION_ARGS=("${@:2}")
-CONFIG_PATH="${HMOPT_DOCKER_CONFIG:-configs/app.docker.yaml}"
+CONFIG_PATH="${HMOPT_DOCKER_CONFIG:-configs/app.yaml}"
 ENV_FILE=".env.docker"
 HMOPT_CONTAINER="hmopt-app"
 HMOPT_IMAGE="${HMOPT_IMAGE:-hmopt:local}"
-HMOPT_BASE_IMAGE="${HMOPT_BASE_IMAGE:-kernel.dockerhub.rnd.huawei.com/hmci-docker-image:v3-4.2}"
+HMOPT_BASE_IMAGE="${HMOPT_BASE_IMAGE:-kernel.dockerhub.rnd.huawei.com/hmci-docker-image:v3-7.0}"
 HMOPT_BASE_IMAGE_CANDIDATES="${HMOPT_BASE_IMAGE_CANDIDATES:-}"
 PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.tools.huawei.com/pypi/simple}"
 PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:-mirrors.tools.huawei.com}"
 REGISTRY_HOST="${REGISTRY_HOST:-kernel.dockerhub.rnd.huawei.com}"
-IMAGE_BUNDLE_TAR="${IMAGE_BUNDLE_TAR:-dist/hmopt_bundle.tar.gz}"
+IMAGE_BUNDLE_TAR="${IMAGE_BUNDLE_TAR:-hmopt_bundle.tar.gz}"
 
 usage() {
   cat <<USAGE
@@ -21,15 +21,14 @@ Usage / 用法: $0 <action>
 Actions / 动作:
   up              Build image and start hmopt container (with embedded neo4j) / 构建并启动单容器（内置neo4j）
   up-prebuilt     Start with preloaded image (no local build) / 使用预置镜像启动（不本地构建）
-  index [args]    Build kernel index (supports extra CLI args) / 执行内核索引（支持附加参数）
-  mcp             Start MCP server (host port 7332 -> container 7331) / 启动 MCP 服务（宿主7332->容器7331）
-  git-mcp         Start Git MCP server (host port 7334 -> container 7334) / 启动 Git MCP 服务（宿主7334->容器7334）
+  index           Build kernel index / 执行内核索引
+  mcp             Start MCP server (port 7331) / 启动 MCP 服务（7331）
   seq-mcp         Start sequential thinking MCP server (host 7334 -> container 7333) / 启动顺序思考 MCP 服务（宿主7334->容器7333）
+  git-mcp         Start Git MCP server (host port 7334 -> container 7334) / 启动 Git MCP 服务（宿主7334->容器7334）
   build-mcp       Start Build MCP server (host 7335 -> container 7335) / 启动 Build MCP 服务（宿主7335->容器7335）
   oneclick        Start MCP + sequential MCP servers in background / 一键后台启动 MCP+顺序思考 MCP 服务
-  api             Start REST API (host port 8001 -> container 8000) / 启动 REST API（宿主8001->容器8000）
+  api             Start REST API (port 8000) / 启动 REST API（8000）
   clone           Clone kernel repo to KERNEL_REPO_PATH / 克隆代码到 KERNEL_REPO_PATH
-  prepare-neo4j-offline  Download neo4j deb on host for offline build / 在host下载neo4j包供离线构建
   insecure-registry  Enable docker insecure-registry bypass / 配置 docker 跳过证书校验
   package-images  Export deliverable image bundle / 导出可交付镜像包
   load-images     Import image bundle on target machine / 在目标机器导入镜像包
@@ -94,7 +93,7 @@ build_hmopt_image() {
   local tried=""
 
   [[ -n "$HMOPT_BASE_IMAGE_CANDIDATES" ]] && candidates_raw="$candidates_raw,$HMOPT_BASE_IMAGE_CANDIDATES"
-  candidates_raw="$candidates_raw,python:3.10-slim"
+  candidates_raw="$candidates_raw"
 
   IFS=',' read -r -a _candidates <<< "$candidates_raw"
   for candidate in "${_candidates[@]}"; do
@@ -124,12 +123,11 @@ run_hmopt_container() {
   docker rm -f "$HMOPT_CONTAINER" >/dev/null 2>&1 || true
   docker run -d \
     --name "$HMOPT_CONTAINER" \
-    -p 7475:7474 -p 7688:7687 -p 7332:7331 -p 7334:7333 -p 8001:8000 \
+    --env-file .env.docker \
+    -p 7475:7474 -p 7688:7687 -p 7330:7330 -p 7332:7331 -p 7333:7333 -p 7334:7334 -p 7335:7335  -p 8001:8000 \
     -e HMOPT_LLM_BASE_URL="${HMOPT_LLM_BASE_URL:-http://host.docker.internal:20010/v1}" \
     -e HMOPT_LLM_API_KEY="${HMOPT_LLM_API_KEY:-}" \
     -e HMOPT_MCP_SERVER_API_KEY="${HMOPT_MCP_SERVER_API_KEY:-}" \
-    -e HMOPT_MCP_ALLOWED_HOSTS="${HMOPT_MCP_ALLOWED_HOSTS:-}" \
-    -e HMOPT_MCP_DISABLE_HOST_CHECK="${HMOPT_MCP_DISABLE_HOST_CHECK:-}" \
     -e HMOPT_MCP_HOST='0.0.0.0' \
     -e HMOPT_MCP_PORT='7331' \
     -e HMOPT_SEQ_MCP_HOST='0.0.0.0' \
@@ -137,20 +135,21 @@ run_hmopt_container() {
     -e HMOPT_START_NEO4J="${HMOPT_START_NEO4J:-1}" \
     -e NEO4J_USER="${NEO4J_USER:-neo4j}" \
     -e NEO4J_PASSWORD="${NEO4J_PASSWORD:-@huawei2026}" \
-    -e HMOPT_PATH_ALIAS="${HMOPT_PATH_ALIAS:-}" \
     -v "$(pwd):/app" \
     -v "${KERNEL_REPO_PATH:-$(pwd)/data/sample-kernel}:/workspace/kernel:rw" \
     -v "${KERNEL_REPO_PATH:-$(pwd)/data/sample-kernel}:${KERNEL_REPO_PATH:-/workspace/kernel}:rw" \
-    -v "${KERNEL_WORKSPACE_PATH:-$(dirname "${KERNEL_REPO_PATH:-$(pwd)/data/sample-kernel}")}:${KERNEL_WORKSPACE_PATH:-$(dirname "${KERNEL_REPO_PATH:-$(pwd)/data/sample-kernel}")}:rw" \
     -v "$(pwd)/data/neo4j/data:/var/lib/neo4j" \
     -v "$(pwd)/data/neo4j/logs:/var/log/neo4j" \
     -v "$(pwd)/data/neo4j/plugins:/var/lib/neo4j/plugins" \
     -w /app \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v /usr/bin/docker:/usr/bin/docker:ro \
     "$HMOPT_IMAGE" \
     bash -lc "tail -f /dev/null" >/dev/null
 }
 
 up_docker_native() {
+#  prepare_neo4j_offline
   load_env
   if ! build_hmopt_image "$HMOPT_BASE_IMAGE"; then
     echo "[build] failed. Please set HMOPT_BASE_IMAGE / HMOPT_BASE_IMAGE_CANDIDATES in .env.docker"
@@ -166,6 +165,7 @@ up_prebuilt() {
   run_hmopt_container
   echo "Started with prebuilt hmopt image (neo4j embedded)."
 }
+
 
 build_index_args() {
   local args=(--config "$CONFIG_PATH")
@@ -209,7 +209,7 @@ map_host_path_to_container() {
   fi
 
   if [[ -n "${KERNEL_REPO_PATH:-}" && "$raw_path" == "$KERNEL_REPO_PATH"* ]]; then
-    printf "/workspace/kernel%s\n" "${raw_path#${KERNEL_REPO_PATH}}"
+    printf "/workspace/kernel/%s\n" "${raw_path#${KERNEL_REPO_PATH}}"
     return 0
   fi
 
@@ -225,15 +225,17 @@ index_docker_native() {
   mapfile -t _index_args < <(build_index_args)
   docker exec "$HMOPT_CONTAINER" python -m hmopt.cli index-kernel "${_index_args[@]}"
 }
+
+
 mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'python -m hmopt.cli serve-mcp --host 0.0.0.0 --port 7331'; }
-git_mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'bash scripts/run_git_mcp_server.sh'; }
 seq_mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'bash scripts/run_seq_mcp_server.sh'; }
-build_mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'bash scripts/run_build_mcp_server.sh'; }
 oneclick_docker_native() {
   docker exec -d "$HMOPT_CONTAINER" bash -lc 'nohup bash scripts/run_all_mcp_servers.sh >/tmp/all_mcp_servers.log 2>&1 &'
   echo 'Started MCP (7331) and sequential thinking MCP (7333) in background.'
 }
 api_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'uvicorn hmopt.api.main:app --host 0.0.0.0 --port 8000'; }
+git_mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'bash scripts/run_git_mcp_server.sh'; }
+build_mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'bash scripts/run_build_mcp_server.sh'; }
 down_docker_native() { docker rm -f "$HMOPT_CONTAINER" >/dev/null 2>&1 || true; }
 logs_docker_native() { docker logs -f "$HMOPT_CONTAINER"; }
 shell_docker_native() { docker exec -it "$HMOPT_CONTAINER" bash; }
@@ -255,22 +257,10 @@ package_images() {
 load_images() {
   load_env
   [[ -f "$IMAGE_BUNDLE_TAR" ]] || { echo "[load-images] bundle not found: $IMAGE_BUNDLE_TAR"; exit 1; }
-
-  local load_output=""
-  load_output="$(gunzip -c "$IMAGE_BUNDLE_TAR" | docker load)"
-  echo "$load_output"
-
-  if ! docker image inspect "$HMOPT_IMAGE" >/dev/null 2>&1; then
-    local loaded_ref=""
-    loaded_ref="$(printf '%s\n' "$load_output" | sed -n -E 's/^Loaded image\(s\):[[:space:]]*//p' | head -n1 | cut -d',' -f1 | xargs)"
-    if [[ -n "$loaded_ref" ]]; then
-      docker tag "$loaded_ref" "$HMOPT_IMAGE"
-      echo "[load-images] retagged $loaded_ref -> $HMOPT_IMAGE"
-    fi
-  fi
-
+  gunzip -c "$IMAGE_BUNDLE_TAR" | docker load
   echo "[load-images] import complete"
 }
+
 enable_insecure_registry() {
   load_env
   command -v sudo >/dev/null 2>&1 || { echo "sudo is required for insecure-registry action"; exit 1; }
@@ -300,6 +290,7 @@ PY
   echo "[insecure-registry] done. Docker will skip TLS verify for ${REGISTRY_HOST}."
 }
 
+
 prepare_neo4j_offline() {
   bash scripts/prepare_neo4j_offline.sh
 }
@@ -321,19 +312,16 @@ case "$ACTION" in
   package-images) package_images ;;
   load-images) load_images ;;
   doctor) doctor ;;
-  up) if has_compose; then compose_run up -d --build; else up_docker_native; fi ;;
-  up-prebuilt) if has_compose; then compose_run up -d --no-build; else up_prebuilt; fi ;;
-  index) load_env; if has_compose; then compose_run up -d hmopt; mapfile -t _index_args < <(build_index_args); compose_run exec hmopt python -m hmopt.cli index-kernel "${_index_args[@]}"; else up_docker_native; index_docker_native; fi ;;
-  mcp) if has_compose; then compose_run up -d hmopt; compose_run exec hmopt bash -lc 'python -m hmopt.cli serve-mcp --host 0.0.0.0 --port 7331'; else up_docker_native; mcp_docker_native; fi ;;
-  git-mcp) if has_compose; then compose_run up -d hmopt-git-mcp; else up_docker_native; git_mcp_docker_native; fi ;;
-  seq-mcp) if has_compose; then compose_run up -d hmopt; compose_run exec hmopt bash -lc 'bash scripts/run_seq_mcp_server.sh'; else up_docker_native; seq_mcp_docker_native; fi ;;
-  build-mcp) if has_compose; then compose_run up -d hmopt-build-mcp; else up_docker_native; build_mcp_docker_native; fi ;;
-  oneclick) if has_compose; then compose_run up -d hmopt; compose_run exec -d hmopt bash -lc 'nohup bash scripts/run_all_mcp_servers.sh >/tmp/all_mcp_servers.log 2>&1 &'; echo 'Started MCP (7331) and sequential thinking MCP (7333) in background.'; else up_docker_native; oneclick_docker_native; fi ;;
-  api) if has_compose; then compose_run up -d hmopt; compose_run exec hmopt bash -lc 'uvicorn hmopt.api.main:app --host 0.0.0.0 --port 8000'; else up_docker_native; api_docker_native; fi ;;
-  clone) clone_repo ;;
-  prepare-neo4j-offline) prepare_neo4j_offline ;;
-  down) if has_compose; then compose_run down; else down_docker_native; fi ;;
-  logs) if has_compose; then compose_run logs -f; else logs_docker_native; fi ;;
-  shell) if has_compose; then compose_run up -d hmopt; compose_run exec hmopt bash; else up_docker_native; shell_docker_native; fi ;;
+  up) up_docker_native ;;
+  up-prebuilt)  up_prebuilt ;;
+  index) load_env; index_docker_native ;;
+  mcp) mcp_docker_native ;;
+  seq-mcp) up_docker_native; seq_mcp_docker_native ;;
+  git-mcp) up_docker_native; git_mcp_docker_native ;;
+  build-mcp) up_docker_native; build_mcp_docker_native ;;
+  mcp-all) up_docker_native; oneclick_docker_native ;;
+  down) down_docker_native ;;
+  logs) logs_docker_native ;;
+  shell)shell_docker_native ;;
   *) usage; exit 1 ;;
 esac
