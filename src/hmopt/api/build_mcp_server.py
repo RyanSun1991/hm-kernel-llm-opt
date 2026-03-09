@@ -11,7 +11,9 @@ from fastapi import FastAPI, HTTPException
 
 from hmopt.api.build_mcp_service import (
     build_build_fastmcp_server,
+    get_build_task_status,
     trigger_hione_build,
+    trigger_hione_build_async,
     trigger_hione_sign,
 )
 
@@ -42,7 +44,7 @@ def _bind_task_group(mcp_server: Any, tg: anyio.abc.TaskGroup) -> None:
 
 MCP_MOUNT_PATH = _normalize_mount_path(os.getenv("HMOPT_BUILD_MCP_MOUNT_PATH", "/mcp"))
 _fast_mcp = build_build_fastmcp_server()
-_SUPPORTED_TOOLS = {"kernel_build_trigger", "kernel_sign_trigger"}
+_SUPPORTED_TOOLS = {"kernel_build_trigger", "kernel_build_trigger_async", "kernel_build_status", "kernel_sign_trigger"}
 
 
 @asynccontextmanager
@@ -90,6 +92,10 @@ def call_tool(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         if tool_name == "kernel_build_trigger":
             context = trigger_hione_build(**arguments)
+        elif tool_name == "kernel_build_trigger_async":
+            context = trigger_hione_build_async(**arguments)
+        elif tool_name == "kernel_build_status":
+            context = get_build_task_status(**arguments)
         else:
             context = trigger_hione_sign(**arguments)
     except TypeError as exc:

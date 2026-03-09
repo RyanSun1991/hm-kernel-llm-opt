@@ -129,6 +129,89 @@ curl -X POST http://127.0.0.1:7335/tools/call \
 
 ---
 
+## 3.3 OpenCode `McpError -322001 request timeout` 的根因与配置
+
+你传给 tool 的 `timeout_s=1800` 只是 **Build MCP 服务端执行超时**，不是 OpenCode 的 MCP 客户端等待时长。
+
+- 服务端：`subprocess.run(..., timeout=timeout_s)`，默认 build `7200s` / sign `1800s`。
+- 客户端（OpenCode）：看 `opencode.json` 中该 MCP 项的 `timeout`（单位毫秒）。
+
+如果 OpenCode 的 `timeout` 只有 120000（2 分钟）或 30000（30 秒），会先于服务端超时并报：
+`McpError -322001 : request timeout`。
+
+建议：给 build MCP 单独配置更大的 timeout（例如 30 分钟）。
+
+```json
+{
+  "mcp": {
+    "hmopt_build_mcp": {
+      "type": "remote",
+      "enabled": true,
+      "url": "http://127.0.0.1:7335/mcp",
+      "headers": {
+        "Authorization": "Bearer {env:HMOPT_MCP_SERVER_API_KEY}"
+      },
+      "timeout": 1800000
+    }
+  }
+}
+```
+
+并确保 tool 参数也匹配：
+- `kernel_build_trigger.timeout_s >= opencode_timeout_ms/1000`
+- 常见组合：`timeout_s=3600`，`timeout=3700000`
+
+如果 OpenCode 已把该 tool 标成 invalid，通常重启 OpenCode 或重新加载 MCP 配置后可恢复。
+
+## 3.4 Build MCP 异步任务模式（避免 OpenCode 长请求超时）
+
+如果客户端仍存在 2~5 分钟级别的超时限制，建议改为异步调用：
+
+1) 提交任务（立即返回 `task_id`）
+
+```bash
+curl -X POST http://127.0.0.1:7335/tools/call   -H 'Content-Type: application/json'   -d '{
+    "tool": "kernel_build_trigger_async",
+    "arguments": {
+      "device": "charlotte",
+      "profile": "release",
+      "timeout_s": 7200
+    }
+  }'
+```
+
+返回示例：
+
+```json
+{
+  "result": {
+    "tool": "kernel_build_trigger_async",
+    "content": {
+      "task_id": "2a8d...",
+      "status": "pending",
+      "kind": "kernel_build_trigger"
+    }
+  }
+}
+```
+
+2) 轮询任务状态
+
+```bash
+curl -X POST http://127.0.0.1:7335/tools/call   -H 'Content-Type: application/json'   -d '{
+    "tool": "kernel_build_status",
+    "arguments": {"task_id": "2a8d..."}
+  }'
+```
+
+状态字段：
+- `pending`：已提交
+- `running`：执行中
+- `succeeded`：完成，`result` 内含 returncode/stdout/stderr
+- `failed`：失败，`error` 给出原因
+
+这样 OpenCode 侧只需处理短请求（提交+轮询），不需要维持一个超长阻塞调用。
+
 ## 4) 如何传参触发 package/sign
 
 ```bash
