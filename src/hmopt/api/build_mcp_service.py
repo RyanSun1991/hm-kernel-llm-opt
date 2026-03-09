@@ -6,10 +6,13 @@ import logging
 import os
 import shlex
 import subprocess
+import threading
 import time
-from pathlib import Path
+import uuid
+from copy import deepcopy
 from functools import lru_cache
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 DEFAULT_SERVER_NAME = "hmopt-build-mcp"
@@ -24,6 +27,9 @@ _PROFILE_MAP = {
     "release": "release_aarch64le_defconfig",
     "debug": "aarch64le_defconfig",
 }
+
+_BUILD_TASKS: dict[str, dict[str, Any]] = {}
+_BUILD_TASKS_LOCK = threading.Lock()
 
 
 def _env(name: str, default: str = "") -> str:
@@ -98,8 +104,6 @@ def _run_cmd(argv: list[str], timeout_s: int) -> dict[str, Any]:
     }
 
 
-
-
 def _container_is_running(docker_bin: str, container_name: str) -> bool:
     proc = subprocess.run(
         [docker_bin, "inspect", "-f", "{{.State.Running}}", container_name],
@@ -165,6 +169,7 @@ def _resolve_lz4_install_policy(mode: str) -> str:
     if mode == "run":
         return "(command -v lz4 >/dev/null 2>&1) || ((apt-get update && apt-get install -y lz4) || (sudo apt-get update && sudo apt-get install -y lz4))"
     return ""
+
 
 def _run_in_build_docker(inner_cmd: str, *, timeout_s: int, workdir: str | None = None) -> dict[str, Any]:
     docker_bin = _env("HMOPT_BUILD_MCP_DOCKER_BIN", "docker")
@@ -284,6 +289,112 @@ def trigger_hione_sign(device: str, *, timeout_s: int = 1800) -> dict[str, Any]:
     return _run_in_build_docker(sign_cmd, timeout_s=timeout_s, workdir=sign_workspace)
 
 
+def _register_async_task(kind: str, payload: dict[str, Any]) -> str:
+    task_id = str(uuid.uuid4())
+    now = time.time()
+    with _BUILD_TASKS_LOCK:
+        _BUILD_TASKS[task_id] = {
+            "task_id": task_id,
+            "kind": kind,
+            "status": "pending",
+            "created_at": now,
+            "updated_at": now,
+            "payload": payload,
+            "result": None,
+            "error": None,
+        }
+    return task_id
+
+
+def _set_task_running(task_id: str) -> None:
+    with _BUILD_TASKS_LOCK:
+        task = _BUILD_TASKS.get(task_id)
+        if task is None:
+            return
+        task["status"] = "running"
+        task["updated_at"] = time.time()
+
+
+def _set_task_result(task_id: str, *, result: dict[str, Any] | None = None, error: str | None = None) -> None:
+    with _BUILD_TASKS_LOCK:
+        task = _BUILD_TASKS.get(task_id)
+        if task is None:
+            return
+        task["status"] = "failed" if error else "succeeded"
+        task["result"] = result
+        task["error"] = error
+        task["updated_at"] = time.time()
+
+
+def _run_async_task(task_id: str, runner: Callable[[], dict[str, Any]]) -> None:
+    _set_task_running(task_id)
+    try:
+        result = runner()
+        _set_task_result(task_id, result=result)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("build mcp async task failed: task_id=%s", task_id)
+        _set_task_result(task_id, error=str(exc))
+
+
+def _submit_async_task(kind: str, payload: dict[str, Any], runner: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+    task_id = _register_async_task(kind, payload)
+    thread = threading.Thread(target=_run_async_task, args=(task_id, runner), daemon=True)
+    thread.start()
+    return {"task_id": task_id, "status": "pending", "kind": kind}
+
+
+def trigger_hione_build_async(
+    device: str,
+    profile: str = "release",
+    *,
+    project_path: str | None = None,
+    user: str = "delivery",
+    modem: str = "full",
+    target_perf: bool = True,
+    toolchain: str = "",
+    defconfig: str | None = None,
+    timeout_s: int = 7200,
+) -> dict[str, Any]:
+    payload = {
+        "device": device,
+        "profile": profile,
+        "project_path": project_path,
+        "user": user,
+        "modem": modem,
+        "target_perf": target_perf,
+        "toolchain": toolchain,
+        "defconfig": defconfig,
+        "timeout_s": timeout_s,
+    }
+
+    return _submit_async_task(
+        "kernel_build_trigger",
+        payload,
+        lambda: trigger_hione_build(
+            device=device,
+            profile=profile,
+            project_path=project_path,
+            user=user,
+            modem=modem,
+            target_perf=target_perf,
+            toolchain=toolchain,
+            defconfig=defconfig,
+            timeout_s=timeout_s,
+        ),
+    )
+
+
+def get_build_task_status(task_id: str) -> dict[str, Any]:
+    with _BUILD_TASKS_LOCK:
+        task = _BUILD_TASKS.get(task_id)
+        if task is None:
+            raise ValueError(f"task not found: {task_id}")
+        snapshot = deepcopy(task)
+
+    snapshot["duration_s"] = round(snapshot["updated_at"] - snapshot["created_at"], 3)
+    return snapshot
+
+
 @lru_cache(maxsize=1)
 def build_build_fastmcp_server() -> Any | None:
     try:
@@ -324,6 +435,40 @@ def build_build_fastmcp_server() -> Any | None:
             defconfig=defconfig,
             timeout_s=timeout_s,
         )
+
+    @mcp.tool(
+        name="kernel_build_trigger_async",
+        description="Submit kernel build async task and return task_id immediately.",
+    )
+    def mcp_kernel_build_trigger_async(
+        device: str,
+        profile: str = "release",
+        project_path: str | None = None,
+        user: str = "delivery",
+        modem: str = "full",
+        target_perf: bool = True,
+        toolchain: str = "",
+        defconfig: str | None = None,
+        timeout_s: int = 7200,
+    ) -> dict[str, Any]:
+        return trigger_hione_build_async(
+            device=device,
+            profile=profile,
+            project_path=project_path,
+            user=user,
+            modem=modem,
+            target_perf=target_perf,
+            toolchain=toolchain,
+            defconfig=defconfig,
+            timeout_s=timeout_s,
+        )
+
+    @mcp.tool(
+        name="kernel_build_status",
+        description="Query async build task status by task_id.",
+    )
+    def mcp_kernel_build_status(task_id: str) -> dict[str, Any]:
+        return get_build_task_status(task_id=task_id)
 
     @mcp.tool(
         name="kernel_sign_trigger",

@@ -13,6 +13,8 @@ PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.tools.huawei.com/pypi/simple}"
 PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:-mirrors.tools.huawei.com}"
 REGISTRY_HOST="${REGISTRY_HOST:-kernel.dockerhub.rnd.huawei.com}"
 IMAGE_BUNDLE_TAR="${IMAGE_BUNDLE_TAR:-hmopt_bundle.tar.gz}"
+RUNTIME_IDENTITY_ARGS=()
+HOST_EXEC_IDENTITY_ARGS=()
 
 usage() {
   cat <<USAGE
@@ -119,7 +121,138 @@ doctor() {
   echo "[doctor] OK"
 }
 
+
+resolve_runtime_identity_args() {
+  RUNTIME_IDENTITY_ARGS=()
+  local run_as_host_user="${HMOPT_RUN_AS_HOST_USER:-1}"
+  local host_uid="${HMOPT_HOST_UID:-}"
+  local host_gid="${HMOPT_HOST_GID:-}"
+  local start_neo4j="${HMOPT_START_NEO4J:-1}"
+  local force_host_user_with_neo4j="${HMOPT_FORCE_HOST_USER_WITH_NEO4J:-0}"
+
+  if [[ "$run_as_host_user" != "1" ]]; then
+    return 0
+  fi
+
+  if [[ "$start_neo4j" == "1" && "$force_host_user_with_neo4j" != "1" ]]; then
+    echo "[docker] HMOPT_START_NEO4J=1 detected; fallback to root runtime for neo4j compatibility."
+    echo "[docker] Set HMOPT_FORCE_HOST_USER_WITH_NEO4J=1 if you want to force host UID/GID mode."
+    return 0
+  fi
+
+  if [[ -z "$host_uid" ]]; then
+    host_uid="$(id -u)"
+  fi
+  if [[ -z "$host_gid" ]]; then
+    host_gid="$(id -g)"
+  fi
+
+  RUNTIME_IDENTITY_ARGS=(
+    --user "${host_uid}:${host_gid}"
+    -e "HOME=/tmp/hmopt-home"
+    -e "USER=${USER:-hmopt}"
+    -e "LOGNAME=${USER:-hmopt}"
+    -v /etc/passwd:/etc/passwd:ro
+    -v /etc/group:/etc/group:ro
+  )
+}
+
+resolve_host_exec_identity_args() {
+  HOST_EXEC_IDENTITY_ARGS=()
+  local run_as_host_user="${HMOPT_RUN_AS_HOST_USER:-1}"
+  local host_uid="${HMOPT_HOST_UID:-}"
+  local host_gid="${HMOPT_HOST_GID:-}"
+
+  if [[ "$run_as_host_user" != "1" ]]; then
+    return 0
+  fi
+
+  if [[ -z "$host_uid" ]]; then
+    host_uid="$(id -u)"
+  fi
+  if [[ -z "$host_gid" ]]; then
+    host_gid="$(id -g)"
+  fi
+
+  HOST_EXEC_IDENTITY_ARGS=(
+    --user "${host_uid}:${host_gid}"
+    -e "HOME=/tmp/hmopt-home"
+    -e "USER=${USER:-hmopt}"
+    -e "LOGNAME=${USER:-hmopt}"
+  )
+}
+
+configure_git_safe_directories() {
+  local -a safe_dirs=()
+  local raw_extra="${HMOPT_GIT_SAFE_DIRECTORIES:-}"
+  local entry
+
+  resolve_host_exec_identity_args
+
+  [[ -n "${PROJECT_REPO_PATH:-}" ]] && safe_dirs+=("${PROJECT_REPO_PATH}")
+  [[ -n "${KERNEL_REPO_PATH:-}" ]] && safe_dirs+=("${KERNEL_REPO_PATH}")
+  safe_dirs+=("/workspace/project" "/workspace/kernel")
+
+  if [[ -n "$raw_extra" ]]; then
+    IFS=',' read -r -a _extra <<< "$raw_extra"
+    for entry in "${_extra[@]}"; do
+      entry="$(echo "$entry" | xargs)"
+      [[ -n "$entry" ]] && safe_dirs+=("$entry")
+    done
+  fi
+
+  for entry in "${safe_dirs[@]}"; do
+    docker exec "$HMOPT_CONTAINER" bash -lc "if [ -d '$entry' ]; then git config --global --add safe.directory '$entry'; fi" >/dev/null
+    if [[ ${#HOST_EXEC_IDENTITY_ARGS[@]} -gt 0 ]]; then
+      docker exec "${HOST_EXEC_IDENTITY_ARGS[@]}" "$HMOPT_CONTAINER" bash -lc "if [ -d '$entry' ]; then git config --global --add safe.directory '$entry'; fi" >/dev/null || true
+    fi
+  done
+}
+
 run_hmopt_container() {
+  local project_repo_path="${PROJECT_REPO_PATH:-}"
+  local kernel_repo_path="${KERNEL_REPO_PATH:-$(pwd)/data/sample-kernel}"
+  local inherit_host_gitconfig="${HMOPT_INHERIT_HOST_GITCONFIG:-1}"
+  local host_gitconfig_source="${HMOPT_GITCONFIG_SOURCE:-$HOME/.gitconfig}"
+  local -a volume_args
+
+  resolve_runtime_identity_args
+
+  volume_args=(
+    -v "$(pwd):/app"
+    -v "$(pwd)/data/neo4j/data:/var/lib/neo4j"
+    -v "$(pwd)/data/neo4j/logs:/var/log/neo4j"
+    -v "$(pwd)/data/neo4j/plugins:/var/lib/neo4j/plugins"
+    -v /var/run/docker.sock:/var/run/docker.sock
+    -v /usr/bin/docker:/usr/bin/docker:ro
+  )
+
+  if [[ -n "$project_repo_path" ]]; then
+    # Mount project root as-is so all sub paths (including kernel and parent .git metadata) are available.
+    volume_args+=(
+      -v "${project_repo_path}:${project_repo_path}:rw"
+      -v "${project_repo_path}:/workspace/project:rw"
+    )
+  else
+    # Backward-compatible fallback when only kernel repo path is provided.
+    volume_args+=(
+      -v "${kernel_repo_path}:/workspace/kernel:rw"
+      -v "${kernel_repo_path}:${KERNEL_REPO_PATH:-/workspace/kernel}:rw"
+    )
+  fi
+  if [[ "$inherit_host_gitconfig" == "1" ]]; then
+    if [[ -f "$host_gitconfig_source" ]]; then
+      # Reuse host git global config so commit name/email are available in container.
+      volume_args+=(
+        -v "${host_gitconfig_source}:/root/.gitconfig:ro"
+        -v "${host_gitconfig_source}:/tmp/hmopt-home/.gitconfig:ro"
+      )
+    else
+      echo "[docker] HMOPT_INHERIT_HOST_GITCONFIG=1 but gitconfig not found: $host_gitconfig_source"
+      echo "[docker] set HMOPT_GITCONFIG_SOURCE to your host gitconfig path if needed."
+    fi
+  fi
+
   docker rm -f "$HMOPT_CONTAINER" >/dev/null 2>&1 || true
   docker run -d \
     --name "$HMOPT_CONTAINER" \
@@ -135,17 +268,18 @@ run_hmopt_container() {
     -e HMOPT_START_NEO4J="${HMOPT_START_NEO4J:-1}" \
     -e NEO4J_USER="${NEO4J_USER:-neo4j}" \
     -e NEO4J_PASSWORD="${NEO4J_PASSWORD:-@huawei2026}" \
-    -v "$(pwd):/app" \
-    -v "${KERNEL_REPO_PATH:-$(pwd)/data/sample-kernel}:/workspace/kernel:rw" \
-    -v "${KERNEL_REPO_PATH:-$(pwd)/data/sample-kernel}:${KERNEL_REPO_PATH:-/workspace/kernel}:rw" \
-    -v "$(pwd)/data/neo4j/data:/var/lib/neo4j" \
-    -v "$(pwd)/data/neo4j/logs:/var/log/neo4j" \
-    -v "$(pwd)/data/neo4j/plugins:/var/lib/neo4j/plugins" \
     -w /app \
-    -v /var/run/docker.sock:/var/run/docker.sock \
-    -v /usr/bin/docker:/usr/bin/docker:ro \
+    "${RUNTIME_IDENTITY_ARGS[@]}" \
+    "${volume_args[@]}" \
     "$HMOPT_IMAGE" \
     bash -lc "tail -f /dev/null" >/dev/null
+
+  docker exec "$HMOPT_CONTAINER" bash -lc 'mkdir -p "${HOME:-/tmp/hmopt-home}"' >/dev/null
+  resolve_host_exec_identity_args
+  if [[ ${#HOST_EXEC_IDENTITY_ARGS[@]} -gt 0 ]]; then
+    docker exec "${HOST_EXEC_IDENTITY_ARGS[@]}" "$HMOPT_CONTAINER" bash -lc 'mkdir -p "${HOME:-/tmp/hmopt-home}"' >/dev/null || true
+  fi
+  configure_git_safe_directories
 }
 
 up_docker_native() {
@@ -203,13 +337,22 @@ map_host_path_to_container() {
   local pwd_path
   pwd_path="$(pwd)"
 
+  if [[ -n "${PROJECT_REPO_PATH:-}" && "$raw_path" == "$PROJECT_REPO_PATH"* ]]; then
+    printf "%s\n" "$raw_path"
+    return 0
+  fi
+
   if [[ "$raw_path" == /workspace/* || "$raw_path" == /app/* ]]; then
     printf "%s\n" "$raw_path"
     return 0
   fi
 
   if [[ -n "${KERNEL_REPO_PATH:-}" && "$raw_path" == "$KERNEL_REPO_PATH"* ]]; then
-    printf "/workspace/kernel/%s\n" "${raw_path#${KERNEL_REPO_PATH}}"
+    if [[ -n "${PROJECT_REPO_PATH:-}" ]]; then
+      printf "%s\n" "$raw_path"
+    else
+      printf "/workspace/kernel/%s\n" "${raw_path#${KERNEL_REPO_PATH}}"
+    fi
     return 0
   fi
 
@@ -234,7 +377,14 @@ oneclick_docker_native() {
   echo 'Started MCP (7331) and sequential thinking MCP (7333) in background.'
 }
 api_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'uvicorn hmopt.api.main:app --host 0.0.0.0 --port 8000'; }
-git_mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'bash scripts/run_git_mcp_server.sh'; }
+git_mcp_docker_native() {
+  resolve_host_exec_identity_args
+  if [[ ${#HOST_EXEC_IDENTITY_ARGS[@]} -gt 0 ]]; then
+    docker exec "${HOST_EXEC_IDENTITY_ARGS[@]}" "$HMOPT_CONTAINER" bash -lc 'bash scripts/run_git_mcp_server.sh'
+  else
+    docker exec "$HMOPT_CONTAINER" bash -lc 'bash scripts/run_git_mcp_server.sh'
+  fi
+}
 build_mcp_docker_native() { docker exec "$HMOPT_CONTAINER" bash -lc 'bash scripts/run_build_mcp_server.sh'; }
 down_docker_native() { docker rm -f "$HMOPT_CONTAINER" >/dev/null 2>&1 || true; }
 logs_docker_native() { docker logs -f "$HMOPT_CONTAINER"; }
