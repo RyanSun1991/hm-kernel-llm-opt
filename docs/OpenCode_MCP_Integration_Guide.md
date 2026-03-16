@@ -186,10 +186,18 @@ Typical tool arguments:
 - `extra_args`: optional argument list for script
 - `local_result_dir`: optional local output directory
 
+Built-in swipe case (no pre-uploaded script required):
+
+- `test_case=basic_swipe`
+- `remote_script` can be empty (service auto-pushes `scripts/phone_tests/basic_swipe.sh` to device)
+- `remote_result_path` can be empty (defaults to `/data/local/tmp/basic_swipe.result`)
+- `extra_args`: optional `[duration_s, swipe_count]`, defaults to `[60, 1050]`
+- built-in script behavior: swipe loop + `hiperf record/report`, then pull report text via `remote_result_path`
+
 Execution flow:
 
-1. Optional connect step (`connect_before_shell=true`): try `hdc connect <target>`, auto-fallback to `hdc tconn <target>` for legacy hdc.
-2. Run shell: `hdc [-t <target>] shell <remote_script> <test_case> ...`
+1. Default Docker flow: set `HMOPT_AUTO_TEST_TARGET` and run direct `hdc -t <target> ...` (no connect step).
+2. Run shell: `hdc [-t <target>] shell <remote_script> <test_case> ...` (for `basic_swipe`, service first does `hdc file send` + `chmod +x`, then executes the script)
 3. Pull artifact: `hdc [-t <target>] file recv <remote_result_path> <local_result_path>`
 
 ### SSH reverse tunnel + Docker bridge (your 8710 scenario)
