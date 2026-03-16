@@ -64,9 +64,13 @@ bash scripts/run_seq_mcp_server.sh
 bash scripts/run_auto_test_mcp_server.sh
 ```
 
-Auto-Test MCP exposes tool `phone_test_run` by default, supports per-test parameters from MCP client, runs `hdc shell`, and pulls result files via `hdc file recv`. By default it attempts a connect step first (`hdc connect`, with legacy `hdc tconn` fallback).
-For environments that do not need explicit connect, set `connect_before_shell=false` and optionally `use_target_flag=false` to run plain `hdc shell` / `hdc file recv`.
+Auto-Test MCP exposes tool `phone_test_run` by default, supports per-test parameters from MCP client, runs `hdc shell`, and pulls result files via `hdc file recv`. Recommended Docker setup: configure `HMOPT_AUTO_TEST_TARGET` in `.env.docker` and use direct `hdc -t <target> ...` without connect.
+Built-in case: set `test_case=basic_swipe` to auto-push and run `scripts/phone_tests/basic_swipe.sh` on device (`remote_script` may be empty). The script performs swipe workload and aligns with legacy flow by running `hiperf record/report`; optional `extra_args=[duration_s, swipe_count]`; default result path is `/data/local/tmp/basic_swipe.result`.
+Connect is disabled by default (`connect_before_shell=false`, `HMOPT_AUTO_TEST_HDC_CONNECT_MODE=none`). If needed, you can still enable connect/tconn explicitly.
 If the device tunnel endpoint is on host (e.g. `ssh -R 8710:localhost:8710 ...`), pass `target=host.docker.internal:8710` in MCP tool arguments when calling from containerized server.
+
+For direct local debugging without starting MCP service, run:
+`PYTHONPATH=src python -m hmopt.api.auto_test_mcp_service --test-case basic_swipe --remote-script ""` (uses `HMOPT_AUTO_TEST_TARGET` by default).
 
 Outputs (DB + artifacts + reports) are stored under `data/`.
 
