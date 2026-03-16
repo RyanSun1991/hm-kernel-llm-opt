@@ -257,7 +257,8 @@ run_hmopt_container() {
   docker run -d \
     --name "$HMOPT_CONTAINER" \
     --env-file .env.docker \
-    -p 7475:7474 -p 7688:7687 -p 7330:7330 -p 7332:7331 -p 7333:7333 -p 7334:7334 -p 7335:7335  -p 8001:8000 \
+    --add-host host.docker.internal:host-gateway \
+    -p 7475:7474 -p 7688:7687 -p 7330:7330 -p 7332:7331 -p 7333:7333 -p 7334:7334 -p 7335:7335 -p 7336:7336 -p 8001:8000 \
     -e HMOPT_LLM_BASE_URL="${HMOPT_LLM_BASE_URL:-http://host.docker.internal:20010/v1}" \
     -e HMOPT_LLM_API_KEY="${HMOPT_LLM_API_KEY:-}" \
     -e HMOPT_MCP_SERVER_API_KEY="${HMOPT_MCP_SERVER_API_KEY:-}" \
@@ -265,6 +266,8 @@ run_hmopt_container() {
     -e HMOPT_MCP_PORT='7331' \
     -e HMOPT_SEQ_MCP_HOST='0.0.0.0' \
     -e HMOPT_SEQ_MCP_PORT='7333' \
+    -e HMOPT_AUTO_TEST_MCP_HOST='0.0.0.0' \
+    -e HMOPT_AUTO_TEST_MCP_PORT='7336' \
     -e HMOPT_START_NEO4J="${HMOPT_START_NEO4J:-1}" \
     -e NEO4J_USER="${NEO4J_USER:-neo4j}" \
     -e NEO4J_PASSWORD="${NEO4J_PASSWORD:-@huawei2026}" \

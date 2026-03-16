@@ -58,6 +58,16 @@ Build MCP can trigger kernel build/sign commands in another Docker container via
 bash scripts/run_seq_mcp_server.sh
 ```
 
+- Launch the Auto-Test MCP server for running phone test scripts through `hdc` (default `0.0.0.0:7336`):
+
+```bash
+bash scripts/run_auto_test_mcp_server.sh
+```
+
+Auto-Test MCP exposes tool `phone_test_run` by default, supports per-test parameters from MCP client, runs `hdc shell`, and pulls result files via `hdc file recv`. By default it attempts a connect step first (`hdc connect`, with legacy `hdc tconn` fallback).
+For environments that do not need explicit connect, set `connect_before_shell=false` and optionally `use_target_flag=false` to run plain `hdc shell` / `hdc file recv`.
+If the device tunnel endpoint is on host (e.g. `ssh -R 8710:localhost:8710 ...`), pass `target=host.docker.internal:8710` in MCP tool arguments when calling from containerized server.
+
 Outputs (DB + artifacts + reports) are stored under `data/`.
 
 For OpenCode MCP integration details, see `docs/OpenCode_MCP_Integration_Guide.md`.

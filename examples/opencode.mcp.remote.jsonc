@@ -24,6 +24,12 @@
       "enabled": true,
       "url": "http://127.0.0.1:7334/mcp",
       "timeout": 30000
+    },
+    "hmopt_auto_test_remote": {
+      "type": "remote",
+      "enabled": true,
+      "url": "http://127.0.0.1:7336/mcp",
+      "timeout": 1800000
     }
   }
 }

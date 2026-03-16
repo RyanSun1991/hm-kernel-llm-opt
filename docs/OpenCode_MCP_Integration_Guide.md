@@ -164,6 +164,61 @@ bash scripts/run_mcp_server.sh
 - Set server env: `HMOPT_MCP_SERVER_API_KEY=...`
 - Set OpenCode header: `Authorization: Bearer ...`
 
+
+## Auto-Test MCP (Phone via HDC)
+
+If you need OpenCode to trigger test execution on a phone, start the Auto-Test MCP server and configure it as a remote MCP endpoint:
+
+```bash
+bash scripts/run_auto_test_mcp_server.sh
+```
+
+OpenCode MCP sample (`examples/opencode.mcp.remote.jsonc`) includes `hmopt_auto_test_remote` at `http://127.0.0.1:7336/mcp`.
+
+Default tool: `phone_test_run`
+
+Typical tool arguments:
+
+- `target`: optional connect key / endpoint (for `hdc connect`/`tconn` and optional `-t`)
+- `test_case`: test identifier passed to remote script
+- `remote_script`: script path on phone
+- `remote_result_path`: file path on phone to retrieve
+- `extra_args`: optional argument list for script
+- `local_result_dir`: optional local output directory
+
+Execution flow:
+
+1. Optional connect step (`connect_before_shell=true`): try `hdc connect <target>`, auto-fallback to `hdc tconn <target>` for legacy hdc.
+2. Run shell: `hdc [-t <target>] shell <remote_script> <test_case> ...`
+3. Pull artifact: `hdc [-t <target>] file recv <remote_result_path> <local_result_path>`
+
+### SSH reverse tunnel + Docker bridge (your 8710 scenario)
+
+If your phone is reachable on your **build PC** via a reverse tunnel such as:
+
+```bash
+ssh -R 8710:localhost:8710 damon@10.123.104.91
+```
+
+and Auto-Test MCP runs inside Docker on that server, make container networking able to access host tunnel endpoint:
+
+1. Ensure container can resolve host gateway: `host.docker.internal` (this repo now adds it in compose/one-click).
+2. Use MCP tool argument `target=host.docker.internal:8710` (instead of `127.0.0.1:8710` inside container).
+3. Keep tunnel alive before running MCP test call.
+
+Example MCP tool call arguments:
+
+```json
+{
+  "target": "host.docker.internal:8710",
+  "test_case": "boot_smoke",
+  "remote_script": "/data/local/tmp/run_test.sh",
+  "remote_result_path": "/data/local/tmp/results/boot_smoke.xml",
+  "connect_before_shell": false,
+  "use_target_flag": false
+}
+```
+
 ## Legacy Compatibility
 
 `POST /tools/call` still works and now supports all configured tool names.

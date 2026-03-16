@@ -23,6 +23,8 @@ services:
       HMOPT_MCP_PORT: 7331
       HMOPT_SEQ_MCP_HOST: 0.0.0.0
       HMOPT_SEQ_MCP_PORT: 7333
+      HMOPT_AUTO_TEST_MCP_HOST: 0.0.0.0
+      HMOPT_AUTO_TEST_MCP_PORT: 7336
       HMOPT_START_NEO4J: ${HMOPT_START_NEO4J:-1}
       NEO4J_USER: ${NEO4J_USER:-neo4j}
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-@huawei2026}
@@ -32,7 +34,10 @@ services:
       - "7688:7687"
       - "7332:7331"
       - "7334:7333"
+      - "7336:7336"
       - "8001:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./:/app
       - ${KERNEL_REPO_PATH:-./data/sample-kernel}:/workspace/kernel:rw
