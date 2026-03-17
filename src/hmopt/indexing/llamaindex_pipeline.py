@@ -563,7 +563,7 @@ def _filter_unchanged_nodes_by_hash(
             (
                 f"MATCH (c:`{node_label}`) "
                 "WHERE c.id IN $ids "
-                "RETURN c.id AS id, c.content_hash AS content_hash"
+                "RETURN c.id AS id, properties(c) AS props"
             ),
             params={"ids": batch},
         )
@@ -571,7 +571,8 @@ def _filter_unchanged_nodes_by_hash(
             row_id = row.get("id")
             if not row_id:
                 continue
-            known_hashes[str(row_id)] = str(row.get("content_hash") or "")
+            props = row.get("props") or {}
+            known_hashes[str(row_id)] = str(props.get("content_hash") or "")
 
     upsert_nodes: list[TextNode] = []
     skipped = 0
