@@ -1,0 +1,104 @@
+profiles:
+  generic_full:
+    title: Generic Full Pipeline
+    description: domain-agnostic staged pipeline for any kernel directory, subsystem, or file target with automatic routing and long-term memory updates
+    entry_agent: kernel-pipeline-starter
+    manager_agent: os-opt-manager
+    specialist_hint: auto
+    pipeline_card: .opencode/pipelines/generic_full.md
+    objective_template: Analyze and optimize {target} using the full generic pipeline with automatic routing, plan approval, implementation, review, validation, and memory updates.
+    bootstrap_docs:
+      - .opencode/docs/memory_system.md
+    skills:
+      - .opencode/skills/research-discipline.md
+      - .opencode/skills/optimization-funnel.md
+      - .opencode/skills/implementation-guardrails.md
+      - .opencode/skills/validation-flight-check.md
+      - .opencode/skills/memory-accumulation.md
+    validation_mode: build_review_profile
+    research_first: true
+    artifacts_expected:
+      - flamegraph
+      - hitrace
+      - hiperf
+
+  hyperhold_full:
+    title: Hyperhold Full Pipeline
+    description: full research -> ideation -> implementation -> review -> validation pipeline for hyperhold, swap, hpio, and iotab paths
+    entry_agent: kernel-pipeline-starter
+    manager_agent: os-opt-manager
+    specialist_hint: hyperhold-io-opt
+    pipeline_card: .opencode/pipelines/hyperhold_full.md
+    objective_template: Analyze and optimize {target} with full design understanding, ranked ideas, implementation, review, and validation.
+    bootstrap_docs:
+      - .opencode/docs/memmgr-reclaim_bootstrap.md
+    skills:
+      - .opencode/skills/research-discipline.md
+      - .opencode/skills/optimization-funnel.md
+      - .opencode/skills/implementation-guardrails.md
+      - .opencode/skills/validation-flight-check.md
+      - .opencode/skills/memory-accumulation.md
+    validation_mode: build_review_profile
+    research_first: true
+    artifacts_expected:
+      - flamegraph
+      - hitrace
+      - hiperf
+
+  memmgr_reclaim_full:
+    title: Memmgr Reclaim Full Pipeline
+    description: full reclaim and allocator coupling research and optimization pipeline
+    entry_agent: kernel-pipeline-starter
+    manager_agent: os-opt-manager
+    specialist_hint: memmgr-reclaim-research
+    pipeline_card: .opencode/pipelines/memmgr_reclaim_full.md
+    objective_template: Analyze and optimize reclaim behavior around {target} with deep design understanding and review-gated implementation.
+    bootstrap_docs:
+      - .opencode/docs/memmgr-reclaim_bootstrap.md
+    skills:
+      - .opencode/skills/research-discipline.md
+      - .opencode/skills/optimization-funnel.md
+      - .opencode/skills/validation-flight-check.md
+      - .opencode/skills/memory-accumulation.md
+    validation_mode: build_review_profile
+    research_first: true
+    artifacts_expected:
+      - flamegraph
+      - hitrace
+      - hiperf
+
+  sync_review:
+    title: Synchronization Risk Review
+    description: targeted correctness and performance review for locks, waiters, and refcount-sensitive changes
+    entry_agent: kernel-pipeline-starter
+    manager_agent: os-opt-manager
+    specialist_hint: basic-mechanism-sync-opt
+    pipeline_card: .opencode/pipelines/sync_review.md
+    objective_template: Review the synchronization, ownership, and race implications around {target}.
+    skills:
+      - .opencode/skills/research-discipline.md
+      - .opencode/skills/validation-flight-check.md
+      - .opencode/skills/memory-accumulation.md
+    validation_mode: review_only
+    research_first: true
+    artifacts_expected: []
+
+  workqueue_full:
+    title: Workqueue Full Pipeline
+    description: workqueue and thread-pool optimization pipeline with bad-plan memory and review gates
+    entry_agent: kernel-pipeline-starter
+    manager_agent: os-opt-manager
+    specialist_hint: wq-threadpool-opt
+    pipeline_card: .opencode/pipelines/workqueue_full.md
+    objective_template: Analyze and optimize {target} with hotspot-guided workqueue or thread-pool specialization.
+    skills:
+      - .opencode/skills/research-discipline.md
+      - .opencode/skills/optimization-funnel.md
+      - .opencode/skills/implementation-guardrails.md
+      - .opencode/skills/validation-flight-check.md
+      - .opencode/skills/memory-accumulation.md
+    validation_mode: build_review_profile
+    research_first: true
+    artifacts_expected:
+      - flamegraph
+      - hiperf

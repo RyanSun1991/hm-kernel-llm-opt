@@ -10,6 +10,12 @@
       },
       "timeout": 30000
     },
+    "hmopt_seq_remote": {
+      "type": "remote",
+      "enabled": true,
+      "url": "http://127.0.0.1:7333/mcp",
+      "timeout": 30000
+    },
     "hmopt_build_mcp": {
       "type": "remote",
       "enabled": true,

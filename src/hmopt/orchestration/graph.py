@@ -15,6 +15,7 @@ from hmopt.agents import (
     CoderAgent,
     ConductorAgent,
     ProfilerAgent,
+    ReviewerAgent,
     SafetyGuard,
     TraceAnalystAgent,
     VerifierAgent,
@@ -60,6 +61,7 @@ class PipelineServices:
     conductor: ConductorAgent
     coder: CoderAgent
     trace_analyst: TraceAnalystAgent
+    reviewer: ReviewerAgent
     verifier: VerifierAgent
     profiler: ProfilerAgent
     psg: object | None = None
@@ -760,6 +762,7 @@ def make_services(config: AppConfig) -> PipelineServices:
     conductor = ConductorAgent(llm, safety)
     coder = CoderAgent(llm, safety)
     trace_analyst = TraceAnalystAgent(llm, safety)
+    reviewer = ReviewerAgent(llm, safety)
 
     return PipelineServices(
         config=config,
@@ -769,6 +772,7 @@ def make_services(config: AppConfig) -> PipelineServices:
         conductor=conductor,
         coder=coder,
         trace_analyst=trace_analyst,
+        reviewer=reviewer,
         verifier=verifier,
         profiler=profiler,
     )
@@ -1005,6 +1009,29 @@ def _coder_generate_patch(services: PipelineServices, state: RunState) -> RunSta
     return state
 
 
+def _read_artifact_text(
+    services: PipelineServices,
+    artifact_id: str | None,
+    *,
+    max_chars: int = 4000,
+) -> str:
+    if not artifact_id:
+        return ""
+    artifact = (
+        services.ctx.session.query(models.Artifact)
+        .filter(models.Artifact.artifact_id == artifact_id)
+        .one_or_none()
+    )
+    if artifact is None:
+        return ""
+    try:
+        text = Path(artifact.path).read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Failed reading artifact %s: %s", artifact_id, exc)
+        return ""
+    return text[:max_chars]
+
+
 def _apply_patch(services: PipelineServices, state: RunState) -> RunState:
     if not state.get("patch_artifact_id"):
         return state
@@ -1058,6 +1085,8 @@ def _verify(services: PipelineServices, state: RunState) -> RunState:
         result.tests.log, kind="test_log", run_id=state["run_id"], session=services.ctx.session
     )
     services.ctx.session.commit()
+    state["build_success"] = result.build.success
+    state["test_success"] = result.tests.success
     state["verification_success"] = result.success
     state["build_log_artifact_id"] = build_log.artifact_id
     state["test_log_artifact_id"] = test_log.artifact_id
@@ -1065,6 +1094,59 @@ def _verify(services: PipelineServices, state: RunState) -> RunState:
         state["force_stop"] = True
         state["stop_reason"] = "verification_failed"
     logger.info("Verification done: success=%s", result.success)
+    return state
+
+
+def _review_candidate(services: PipelineServices, state: RunState) -> RunState:
+    if not state.get("patch_artifact_id"):
+        state["reviewer_decision"] = "not_applicable"
+        return state
+
+    logger.info("Reviewer evaluating iteration=%s", state.get("iteration"))
+    evidence_summary = _read_artifact_text(
+        services,
+        state.get("evidence_report_artifact_id"),
+        max_chars=5000,
+    )
+    patch_summary = _read_artifact_text(services, state.get("patch_artifact_id"), max_chars=5000)
+    build_log_excerpt = _read_artifact_text(services, state.get("build_log_artifact_id"), max_chars=2000)
+    test_log_excerpt = _read_artifact_text(services, state.get("test_log_artifact_id"), max_chars=2000)
+    decision = services.reviewer.review(
+        evidence_summary=evidence_summary or json.dumps(state.get("candidate_metrics", {}), indent=2),
+        patch_summary=patch_summary or state.get("next_action", ""),
+        build_success=bool(state.get("build_success", state.get("verification_success", True))),
+        test_success=bool(state.get("test_success", state.get("verification_success", True))),
+        build_log_excerpt=build_log_excerpt,
+        test_log_excerpt=test_log_excerpt,
+        iteration=state.get("iteration", 0),
+    )
+    review_text = "\n".join(
+        [
+            f"Decision: {decision['decision'].upper()}",
+            f"Risks: {decision['risk_summary']}",
+            "",
+            decision["rationale"],
+        ]
+    )
+    art = services.ctx.artifact_store.store_text(
+        review_text,
+        kind="review_report",
+        run_id=state["run_id"],
+        extension=".md",
+        session=services.ctx.session,
+    )
+    services.ctx.session.commit()
+    state["review_artifact_id"] = art.artifact_id
+    state["reviewer_decision"] = decision["decision"]
+    state.setdefault("logs", []).append(decision["rationale"])
+    if decision["decision"] != "approve":
+        state["force_stop"] = True
+        state["stop_reason"] = state.get("stop_reason") or "review_rejected"
+    logger.info(
+        "Reviewer finished: decision=%s artifact=%s",
+        state["reviewer_decision"],
+        art.artifact_id,
+    )
     return state
 
 
@@ -1104,6 +1186,7 @@ def _report(services: PipelineServices, state: RunState) -> RunState:
         f"# HMOPT run {state['run_id']}",
         f"Status: {state.get('stop_reason') or 'completed'}",
         f"Iterations: {state.get('iteration', 0)}",
+        f"Reviewer decision: {state.get('reviewer_decision') or 'n/a'}",
         "## Metrics",
     ]
     for k, v in metrics.items():
@@ -1185,6 +1268,7 @@ def build_graph(services: PipelineServices, max_iterations: int) -> StateGraph:
     graph.add_node("coder_generate_patch", lambda s: _coder_generate_patch(services, s))
     graph.add_node("apply_patch", lambda s: _apply_patch(services, s))
     graph.add_node("verify_build_test", lambda s: _verify(services, s))
+    graph.add_node("review_candidate", lambda s: _review_candidate(services, s))
     graph.add_node("profile_candidate", lambda s: _profile_and_analyze(services, s, f"iter_{s.get('iteration', 0)}"))
     graph.add_node("evaluate", lambda s: _evaluate(services, s))
     graph.add_node("stop_or_continue", lambda s: s)
@@ -1198,7 +1282,12 @@ def build_graph(services: PipelineServices, max_iterations: int) -> StateGraph:
     graph.add_conditional_edges("conductor_decide", _conductor_branch, {"continue": "coder_generate_patch", "stop": "generate_report"})
     graph.add_edge("coder_generate_patch", "apply_patch")
     graph.add_edge("apply_patch", "verify_build_test")
-    graph.add_edge("verify_build_test", "profile_candidate")
+    graph.add_edge("verify_build_test", "review_candidate")
+    graph.add_conditional_edges(
+        "review_candidate",
+        lambda s: "stop" if s.get("force_stop") else "continue",
+        {"continue": "profile_candidate", "stop": "generate_report"},
+    )
     graph.add_edge("profile_candidate", "evaluate")
     graph.add_conditional_edges(
         "evaluate",
@@ -1228,6 +1317,7 @@ def run_artifact_analysis(
     run_conductor: bool = True,
     run_coder: bool = True,
     run_verify: bool = False,
+    run_review: bool = True,
     run_profile: bool = False,
 ) -> str:
     """Run a shortened pipeline that ingests existing artifacts and optionally drives LLM suggestions."""
@@ -1401,6 +1491,8 @@ def run_artifact_analysis(
         state = _apply_patch(services, state)
         if run_verify:
             state = _verify(services, state)
+        if run_review:
+            state = _review_candidate(services, state)
         if run_profile and not state.get("force_stop"):
             state = _profile_and_analyze(services, state, f"iter_{state.get('iteration', 0)}")
             state = _evaluate(services, state)

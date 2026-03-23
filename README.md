@@ -76,6 +76,12 @@ Outputs (DB + artifacts + reports) are stored under `data/`.
 
 For OpenCode MCP integration details, see `docs/OpenCode_MCP_Integration_Guide.md`.
 
+For the OpenCode multi-agent workflow and the repo-backed `.opencode/` workspace, see `docs/OpenCode_JKernel_Multi_Agent_Optimization_Workflow.md` and `.opencode/README.md`.
+
+For the one-click OpenCode pipeline entry flow, use `python3 -m hmopt.cli start-pipeline ...`, `python3 -m hmopt.cli list-pipeline-profiles`, or `bash scripts/run_opencode_pipeline.sh ...`.
+
+For the staged one-click workflow guide, see `docs/OpenCode_One_Click_Pipeline_Guide.md`.
+
 For Docker one-click local indexing + OpenCode integration (works with docker compose and docker-only fallback), see `docs/Docker_OneClick_Delivery.md`.
 
 For local runnable Build MCP test and parameter examples, see `docs/Build_MCP_Local_Test.md`.

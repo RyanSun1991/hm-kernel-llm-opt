@@ -3,6 +3,7 @@
 from .coder import CoderAgent
 from .conductor import ConductorAgent
 from .profiler import ProfilerAgent
+from .reviewer import ReviewerAgent
 from .safety import SafetyGuard
 from .trace_analyst import TraceAnalystAgent
 from .verifier import VerifierAgent
@@ -11,6 +12,7 @@ __all__ = [
     "CoderAgent",
     "ConductorAgent",
     "ProfilerAgent",
+    "ReviewerAgent",
     "SafetyGuard",
     "TraceAnalystAgent",
     "VerifierAgent",

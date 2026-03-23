@@ -18,6 +18,8 @@ from hmopt.agents.safety import SafetyGuard
 from hmopt.analysis.runtime.hotspot import HotspotCandidate
 from hmopt.core.llm import ChatMessage, LLMClient
 
+from .prompting import load_prompt_template
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,13 +28,17 @@ class TraceAnalystAgent:
         self.llm = llm
         self.safety = safety
         self.default_system_prompt = "Trace analyst focusing on HM kernel perf."
-        self.default_prompt_template = (
-            "You are the Trace Analyst. Summarize performance symptoms and hotspot classes.\n"
-            "Metrics: {metrics}\n"
-            "Hotspots:\n"
-            "{hotspots}\n"
-            "{code_context_block}"
-            "{insight_block}"
+        self.default_prompt_template = load_prompt_template(
+            "trace_analyst.md",
+            (
+                "# Trace Analyst Prompt\n\n"
+                "You are the Trace Analyst. Summarize performance symptoms and hotspot classes.\n\n"
+                "Metrics: {metrics}\n\n"
+                "Hotspots:\n"
+                "{hotspots}\n\n"
+                "{code_context_block}"
+                "{insight_block}"
+            ),
         )
 
     def analyze(

@@ -5,11 +5,18 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+import shutil
+import subprocess
 from typing import Optional
 
 import typer
 
 from hmopt.core.config import AppConfig
+from hmopt.opencode import (
+    initialize_pipeline_session,
+    load_pipeline_profiles,
+    resume_pipeline_session,
+)
 from hmopt.orchestration import run_artifact_analysis, run_pipeline, run_runtime_ingest
 from hmopt.indexing import build_kernel_index, build_runtime_index, route_query
 from hmopt.storage.artifact_store import ArtifactStore
@@ -257,6 +264,137 @@ def serve_mcp(
     import uvicorn
 
     uvicorn.run("hmopt.api.mcp_server:app", host=host, port=port, reload=reload)
+
+
+@app.command()
+def list_pipeline_profiles(
+    profiles_path: str = typer.Option(
+        "configs/pipeline_profiles.yaml",
+        help="Path to pipeline profiles YAML",
+    ),
+    as_json: bool = typer.Option(False, help="Print JSON instead of plain text"),
+) -> None:
+    profiles = load_pipeline_profiles(profiles_path)
+    if as_json:
+        payload = {
+            name: {
+                "title": profile.title,
+                "description": profile.description,
+                "specialist_hint": profile.specialist_hint,
+                "pipeline_card": profile.pipeline_card,
+                "validation_mode": profile.validation_mode,
+            }
+            for name, profile in profiles.items()
+        }
+        typer.echo(json.dumps(payload, indent=2))
+        return
+
+    for name, profile in profiles.items():
+        typer.echo(f"{name}: {profile.title}")
+        typer.echo(f"  description: {profile.description}")
+        typer.echo(f"  specialist_hint: {profile.specialist_hint or 'auto'}")
+        typer.echo(f"  pipeline_card: {profile.pipeline_card or '-'}")
+        typer.echo(f"  validation_mode: {profile.validation_mode}")
+
+
+@app.command()
+def start_pipeline(
+    profile: str = typer.Option(..., help="Pipeline profile name"),
+    target: str = typer.Option(..., help="Target file, symbol, or subsystem"),
+    objective: Optional[str] = typer.Option(None, help="Override the profile objective"),
+    artifact: list[str] = typer.Option(
+        [],
+        "--artifact",
+        help="Artifact spec kind:path. Repeatable.",
+    ),
+    config: str = typer.Option("configs/app.yaml", help="Path to config YAML"),
+    profiles_path: str = typer.Option(
+        "configs/pipeline_profiles.yaml",
+        help="Path to pipeline profiles YAML",
+    ),
+    launch_opencode: bool = typer.Option(
+        False,
+        help="Launch opencode in the repo root after staging the prompt if the binary exists.",
+    ),
+    open_cmd: Optional[str] = typer.Option(
+        None,
+        help="Custom command to launch OpenCode or a wrapper in the repo root.",
+    ),
+    as_json: bool = typer.Option(False, help="Print JSON instead of prose"),
+) -> None:
+    cfg = _load_config(config)
+    repo_root = Path.cwd()
+    profiles = load_pipeline_profiles(profiles_path)
+    chosen = profiles.get(profile)
+    if chosen is None:
+        typer.echo(f"Unknown pipeline profile: {profile}")
+        raise typer.Exit(code=1)
+
+    session = initialize_pipeline_session(
+        repo_root=repo_root,
+        profile=chosen,
+        target=target,
+        objective=objective,
+        artifact_specs=artifact,
+    )
+    task = session["task"]
+
+    if as_json:
+        typer.echo(
+            json.dumps(
+                {
+                    "config_repo_path": cfg.project.repo_path,
+                    "state_path": session["state_path"],
+                    "prompt_path": session["prompt_path"],
+                    "task": task,
+                    "prompt_text": session["prompt_text"],
+                },
+                indent=2,
+            )
+        )
+    else:
+        typer.echo(f"Pipeline staged: {task['task_id']}")
+        typer.echo(f"Profile: {task['profile']}")
+        typer.echo(f"Target: {task['target']}")
+        typer.echo(f"State file: {session['state_path']}")
+        typer.echo(f"Prompt file: {session['prompt_path']}")
+        typer.echo("")
+        typer.echo("Paste this into OpenCode if you are not auto-launching:")
+        typer.echo("")
+        typer.echo(session["prompt_text"])
+
+    if open_cmd:
+        subprocess.run(open_cmd, shell=True, cwd=repo_root, check=False)
+    elif launch_opencode:
+        if shutil.which("opencode") is None:
+            typer.echo("OpenCode binary not found in PATH; prompt has been staged on disk.")
+            raise typer.Exit(code=1)
+        subprocess.run(["opencode"], cwd=repo_root, check=False)
+
+
+@app.command()
+def resume_pipeline(
+    state_path: str = typer.Option(
+        ".opencode/state/current_task.json",
+        help="Path to staged current task state",
+    ),
+    as_json: bool = typer.Option(False, help="Print JSON instead of prose"),
+) -> None:
+    session = resume_pipeline_session(repo_root=Path.cwd(), state_path=state_path)
+    if as_json:
+        typer.echo(json.dumps(session, indent=2))
+        return
+
+    task = session["task"]
+    typer.echo(f"Current task: {task.get('task_id', '')}")
+    typer.echo(f"Profile: {task.get('profile', '')}")
+    typer.echo(f"Target: {task.get('target', '')}")
+    typer.echo(f"Status: {task.get('status', '')}")
+    typer.echo(f"State file: {session['state_path']}")
+    typer.echo(f"Prompt file: {session['prompt_path']}")
+    if session["prompt_text"]:
+        typer.echo("")
+        typer.echo(session["prompt_text"])
 
 
 @app.command("mcp-stdio")
