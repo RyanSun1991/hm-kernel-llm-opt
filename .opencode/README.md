@@ -19,13 +19,18 @@ This directory is the canonical OpenCode-facing workspace for kernel analysis an
 
 1. For one-shot startup, begin with `agents/kernel-pipeline-starter.md`.
 2. For manual routing, begin with `agents/os-opt-manager.md`.
-3. Research before optimization.
-4. Use Sequential Thinking MCP first.
-5. Use Kernel Index MCP early.
-6. Save durable findings under `docs/`.
-7. Promote stable reusable findings into `memory/`.
-8. Save approved plans under `plans/`.
-9. Save reviewer output under `reviews/`.
+3. Treat instruction-count reduction as the default primary optimization goal unless the staged task explicitly overrides it.
+4. Research before optimization.
+5. Use Sequential Thinking MCP first.
+6. Use Kernel Index MCP early.
+7. Route every optimization plan through `agents/kernel-plan-reviewer.md` before implementation.
+8. Route every implemented patch through `agents/kernel-code-reviewer.md` before test execution.
+9. Route reviewed patches to `agents/kernel-tester-agent.md` for Build MCP and Auto-Test MCP validation.
+10. Save durable findings under `docs/`.
+11. Promote stable reusable findings into `memory/`.
+12. Save approved plans under `plans/`.
+13. Save reviewer output under `reviews/`.
+14. Save validation output under `bench/`.
 
 ## Current Canonical Bootstrap
 

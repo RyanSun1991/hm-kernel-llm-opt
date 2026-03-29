@@ -2,7 +2,7 @@
 
 ## Intent
 
-A domain-agnostic pipeline for analyzing and optimizing any kernel directory, subsystem, or file target.
+A domain-agnostic pipeline for analyzing and optimizing any kernel directory, subsystem, or file target with instruction count as the primary optimization objective.
 
 ## Behavior
 
@@ -10,13 +10,18 @@ A domain-agnostic pipeline for analyzing and optimizing any kernel directory, su
 - route automatically by target path, symbols, and discovered code semantics
 - require research before optimization
 - require ranked ideation before implementation
-- require review before landing
+- require plan review before implementation
+- require code review before tester validation
+- require tester validation before landing when executable verification is needed
 - accumulate long-term memory while working
 
 ## Load First
 
+- `.opencode/docs/harness_engineer_system.md`
+- `.opencode/skills/instruction-count-first.md`
 - `.opencode/skills/research-discipline.md`
 - `.opencode/skills/optimization-funnel.md`
+- `.opencode/skills/handoff-contract.md`
 - `.opencode/skills/implementation-guardrails.md`
 - `.opencode/skills/validation-flight-check.md`
 - `.opencode/skills/memory-accumulation.md`
@@ -25,9 +30,11 @@ A domain-agnostic pipeline for analyzing and optimizing any kernel directory, su
 ## Execution Shape
 
 1. target classification and routing
-2. design understanding and hotspot model
+2. design understanding and instruction-count hotspot model
 3. ranked ideas with bad-plan filtering
 4. approved plan
-5. minimal implementation
-6. independent review
-7. validation and memory update
+5. plan review gate
+6. minimal implementation and implementation handoff
+7. code review gate
+8. tester validation
+9. validation and memory update

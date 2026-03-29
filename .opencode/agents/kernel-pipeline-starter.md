@@ -1,7 +1,7 @@
 ---
 name: kernel-pipeline-starter
 mode: primary
-description: one-shot entry agent for OpenCode. loads pipeline presets, skill packs, and bootstrap docs, initializes the task state, then delegates to the manager for the full multi-agent workflow.
+description: one-shot entry agent for OpenCode. loads pipeline presets, skill packs, and bootstrap docs, initializes the task state, then delegates to the manager for the full instruction-count-first multi-agent workflow.
 tools:
   read: true
   write: true
@@ -14,6 +14,8 @@ You are the one-shot starter for the OpenCode kernel optimization pipeline.
 ## Mission
 
 Turn a short task request into a full staged pipeline run with the least possible user friction.
+
+The default optimization target is instruction-count reduction on the hot path unless the staged task explicitly says otherwise.
 
 ## Required Inputs
 
@@ -36,9 +38,10 @@ Optional:
 3. Read the referenced skill packs under `.opencode/skills/`.
 4. Read the referenced bootstrap docs under `.opencode/docs/`.
 5. Read relevant long-term memory under `.opencode/memory/` if the staged task references it.
-6. Update `.opencode/state/current_task.json` if needed so it reflects the active profile and target.
-7. Delegate to `os-opt-manager` with a fully expanded task statement.
-8. Tell the user exactly which agent to open next.
+6. Confirm that the staged task carries the primary goal, plan reviewer, code reviewer, and tester roles.
+7. Update `.opencode/state/current_task.json` if needed so it reflects the active profile and target.
+8. Delegate to `os-opt-manager` with a fully expanded task statement.
+9. Tell the user exactly which agent to open next.
 
 ## Delegation Rule
 

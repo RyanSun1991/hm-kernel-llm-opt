@@ -26,10 +26,13 @@ and then start a **full staged analysis and optimization workflow** with:
 
 - automatic routing
 - research before optimization
+- instruction-count-first optimization targeting by default
 - ranked ideation
 - approval-gated planning
+- dedicated plan review before coding
 - implementation handoff
-- independent review
+- code review after implementation
+- tester validation using Build MCP and Auto-Test MCP
 - validation planning
 - long-term memory accumulation
 
@@ -96,6 +99,7 @@ No optimization idea is considered valid until the system establishes:
 
 - subsystem boundary
 - likely hot path
+- likely instruction-count-heavy path
 - protected data
 - ownership and lifecycle constraints
 - dependency radius
@@ -160,13 +164,17 @@ Purpose:
 ### 5.4 Implementation and review
 
 - [kernel-code-agent.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/kernel-code-agent.md)
-- [kernel-reviewer.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/kernel-reviewer.md)
+- [kernel-plan-reviewer.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/kernel-plan-reviewer.md)
+- [kernel-code-reviewer.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/kernel-code-reviewer.md)
+- [kernel-tester-agent.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/kernel-tester-agent.md)
 
 Purpose:
 
 - turn approved plans into minimal patches
-- review plan and patch safety
-- enforce validation depth
+- review plan quality before coding
+- review patch safety after coding
+- execute build and auto-test validation
+- enforce instruction-count-first validation depth
 - promote stable lessons into memory
 
 ## 6. Implemented Pipeline Presets
@@ -205,8 +213,10 @@ Skill packs are repo-local reusable instruction sets under [.opencode/skills](/m
 
 Implemented packs:
 
+- [instruction-count-first.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/instruction-count-first.md)
 - [research-discipline.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/research-discipline.md)
 - [optimization-funnel.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/optimization-funnel.md)
+- [handoff-contract.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/handoff-contract.md)
 - [implementation-guardrails.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/implementation-guardrails.md)
 - [validation-flight-check.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/validation-flight-check.md)
 - [memory-accumulation.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/memory-accumulation.md)

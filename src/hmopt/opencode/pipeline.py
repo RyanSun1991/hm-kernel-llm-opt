@@ -26,6 +26,9 @@ class PipelineProfile:
     description: str
     entry_agent: str = "kernel-pipeline-starter"
     manager_agent: str = "os-opt-manager"
+    plan_reviewer_agent: str = "kernel-plan-reviewer"
+    code_reviewer_agent: str = "kernel-code-reviewer"
+    tester_agent: str = "kernel-tester-agent"
     specialist_hint: str = ""
     pipeline_card: str = ""
     objective_template: str = ""
@@ -35,6 +38,8 @@ class PipelineProfile:
     research_first: bool = True
     artifacts_expected: list[str] = field(default_factory=list)
     memory_mode: str = "auto"
+    primary_goal: str = "instruction_count"
+    handoff_contract: str = ".opencode/skills/handoff-contract.md"
 
 
 def _slugify(value: str) -> str:
@@ -87,6 +92,9 @@ def load_pipeline_profiles(path: str | Path = DEFAULT_PROFILES_PATH) -> dict[str
             description=str(data.get("description") or ""),
             entry_agent=str(data.get("entry_agent") or "kernel-pipeline-starter"),
             manager_agent=str(data.get("manager_agent") or "os-opt-manager"),
+            plan_reviewer_agent=str(data.get("plan_reviewer_agent") or "kernel-plan-reviewer"),
+            code_reviewer_agent=str(data.get("code_reviewer_agent") or "kernel-code-reviewer"),
+            tester_agent=str(data.get("tester_agent") or "kernel-tester-agent"),
             specialist_hint=str(data.get("specialist_hint") or ""),
             pipeline_card=str(data.get("pipeline_card") or ""),
             objective_template=str(data.get("objective_template") or ""),
@@ -96,6 +104,10 @@ def load_pipeline_profiles(path: str | Path = DEFAULT_PROFILES_PATH) -> dict[str
             research_first=bool(data.get("research_first", True)),
             artifacts_expected=[str(item) for item in (data.get("artifacts_expected") or [])],
             memory_mode=str(data.get("memory_mode") or "auto"),
+            primary_goal=str(data.get("primary_goal") or "instruction_count"),
+            handoff_contract=str(
+                data.get("handoff_contract") or ".opencode/skills/handoff-contract.md"
+            ),
         )
     return result
 
@@ -125,7 +137,11 @@ def build_pipeline_prompt(
         f"Target: {target}",
         f"Objective: {objective}",
         f"Manager: {profile.manager_agent}",
+        f"Plan reviewer: {profile.plan_reviewer_agent}",
+        f"Code reviewer: {profile.code_reviewer_agent}",
+        f"Tester: {profile.tester_agent}",
         f"Specialist hint: {profile.specialist_hint or 'auto'}",
+        f"Primary metric: {profile.primary_goal}",
         f"Validation mode: {profile.validation_mode}",
         f"Memory mode: {profile.memory_mode}",
         f"Research first: {'yes' if profile.research_first else 'no'}",
@@ -138,17 +154,24 @@ def build_pipeline_prompt(
     if profile.skills:
         lines.append("Skill packs:")
         lines.extend(f"- {item}" for item in profile.skills)
+    if profile.handoff_contract:
+        lines.append(f"Handoff contract: {profile.handoff_contract}")
     if artifacts:
         lines.append("Artifacts:")
         lines.extend(f"- {item['kind']}: {item['path']}" for item in artifacts)
     lines.extend(
         [
             "Requirements:",
+            "- Treat instruction-count reduction as the primary optimization target unless the staged task explicitly overrides it.",
             "- Use the full staged multi-agent workflow.",
+            "- Route research outputs to the plan reviewer before implementation.",
+            "- Route implementation outputs to the code reviewer before test execution.",
+            "- Route reviewed patches to the tester agent for Build MCP and Auto-Test MCP validation.",
+            "- Every handoff must include target files, hot path, instruction-count hypothesis, risks, and required next actions.",
             "- Save all durable artifacts under .opencode/.",
             "- Research first unless the approved preset explicitly skips it.",
             "- Use Sequential Thinking MCP first and Kernel Index MCP early.",
-            "- Produce design doc, plan, implementation handoff, review, and validation outputs as applicable.",
+            "- Produce design doc, plan, plan-review, implementation handoff, code-review, and validation outputs as applicable.",
         ]
     )
     return "\n".join(lines).strip() + "\n"
@@ -195,11 +218,22 @@ def initialize_pipeline_session(
         "status": "staged",
         "manager": profile.manager_agent,
         "active_agent": profile.entry_agent,
+        "plan_reviewer_agent": profile.plan_reviewer_agent,
+        "code_reviewer_agent": profile.code_reviewer_agent,
+        "tester_agent": profile.tester_agent,
+        "primary_metric": profile.primary_goal,
         "approved_plan": "",
         "review_status": "",
+        "plan_review_status": "",
+        "code_review_status": "",
+        "test_status": "",
+        "current_handoff": "",
+        "handoff_log": [],
         "profile": profile.name,
         "target": target,
         "objective": resolved_objective,
+        "primary_goal": profile.primary_goal,
+        "handoff_contract": profile.handoff_contract,
         "pipeline_card": profile.pipeline_card,
         "bootstrap_docs": profile.bootstrap_docs,
         "skills": profile.skills,

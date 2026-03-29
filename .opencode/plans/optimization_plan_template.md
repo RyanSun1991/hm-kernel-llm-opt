@@ -2,11 +2,19 @@
 
 ## Objective
 
+## Primary Metric
+
+Instruction count on the hot path unless explicitly overridden.
+
 ## Target Files
 
 ## Target Functions And Structs
 
 ## Hot Path Being Changed
+
+## Baseline Evidence
+
+## Instruction-Count Hypothesis
 
 ## Proposed Change
 
@@ -17,5 +25,11 @@
 ## Regression Risks
 
 ## Validation Plan
+
+## Required Handoff To Plan Reviewer
+
+## Required Handoff To Coder
+
+## Required Handoff To Tester
 
 ## Rollback Or Abort Conditions

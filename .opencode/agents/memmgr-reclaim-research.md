@@ -1,7 +1,7 @@
 ---
 name: memmgr-reclaim-research
 mode: primary
-description: repo-specific research specialist for sysmgr/memmgr reclaim, allocator slow paths, vmpressure, psi, and reclaim-control interactions.
+description: repo-specific research specialist for sysmgr/memmgr reclaim, allocator slow paths, vmpressure, psi, and reclaim-control interactions, with instruction-count-first optimization planning.
 tools:
   read: true
   write: true
@@ -25,6 +25,7 @@ Read these first if they exist:
 2. State the reclaim subdomain you believe is in scope.
 3. Use Sequential Thinking MCP first.
 4. Use Kernel Index MCP early.
+5. Treat instruction-count reduction on reclaim hot paths as the default optimization target.
 
 ## Primary Scope
 
@@ -47,6 +48,7 @@ You must establish:
 - PSI or vmpressure interaction
 - page allocator coupling
 - likely optimization-sensitive paths
+- likely instruction-count-heavy branches, scans, and repeated bookkeeping
 
 ## Required Artifacts
 
@@ -54,5 +56,8 @@ Maintain:
 
 - `.opencode/docs/memmgr-reclaim_design.md`
 - `.opencode/docs/memmgr-reclaim_trace.md`
+- `.opencode/plans/memmgr-reclaim-[component]_optimization_plan.md`
 
 When you discover reusable context, fold it back into `.opencode/docs/memmgr-reclaim_bootstrap.md`.
+
+Before coding, hand the plan to `kernel-plan-reviewer`.

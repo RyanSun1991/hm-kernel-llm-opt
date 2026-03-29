@@ -282,6 +282,10 @@ def list_pipeline_profiles(
                 "description": profile.description,
                 "specialist_hint": profile.specialist_hint,
                 "pipeline_card": profile.pipeline_card,
+                "primary_goal": profile.primary_goal,
+                "plan_reviewer_agent": profile.plan_reviewer_agent,
+                "code_reviewer_agent": profile.code_reviewer_agent,
+                "tester_agent": profile.tester_agent,
                 "validation_mode": profile.validation_mode,
             }
             for name, profile in profiles.items()
@@ -294,6 +298,10 @@ def list_pipeline_profiles(
         typer.echo(f"  description: {profile.description}")
         typer.echo(f"  specialist_hint: {profile.specialist_hint or 'auto'}")
         typer.echo(f"  pipeline_card: {profile.pipeline_card or '-'}")
+        typer.echo(f"  primary_goal: {profile.primary_goal}")
+        typer.echo(f"  plan_reviewer_agent: {profile.plan_reviewer_agent}")
+        typer.echo(f"  code_reviewer_agent: {profile.code_reviewer_agent}")
+        typer.echo(f"  tester_agent: {profile.tester_agent}")
         typer.echo(f"  validation_mode: {profile.validation_mode}")
 
 
