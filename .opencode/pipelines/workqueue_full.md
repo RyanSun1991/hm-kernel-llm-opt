@@ -16,6 +16,8 @@ Full workqueue and thread-pool optimization pipeline with instruction count as t
 
 ## Load First
 
+- `.opencode/config.yaml`
+- `.opencode/skills/language-config.md`
 - `.opencode/docs/harness_engineer_system.md`
 - `.opencode/skills/instruction-count-first.md`
 - `.opencode/skills/research-discipline.md`

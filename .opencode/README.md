@@ -15,8 +15,15 @@ This directory is the canonical OpenCode-facing workspace for kernel analysis an
 - `bench/`: validation plans and before/after evidence
 - `patches/`: exported patches when needed
 
+## Configuration
+
+- `config.yaml`: workspace-level settings (session language, etc.)
+  - `language: zh-CN` for Chinese, `language: en` for English (default)
+  - Applied automatically via `skills/language-config.md`
+
 ## Working Rules
 
+0. Read `config.yaml` and load `skills/language-config.md` at the start of every session to apply the configured language.
 1. For one-shot startup, begin with `agents/kernel-pipeline-starter.md`.
 2. For manual routing, begin with `agents/os-opt-manager.md`.
 3. Treat instruction-count reduction as the default primary optimization goal unless the staged task explicitly overrides it.
