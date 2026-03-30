@@ -13,8 +13,8 @@ The default optimization objective is to reduce instruction count on the hot pat
 3. research specialist
 4. `kernel-plan-reviewer`
 5. `kernel-code-agent`
-6. `kernel-tester-agent`
-7. `kernel-code-reviewer`
+6. `kernel-code-reviewer`
+7. `kernel-tester-agent` (conditional)
 
 ## Stage Order
 
@@ -23,8 +23,8 @@ The default optimization objective is to reduce instruction count on the hot pat
 3. research and instruction-count hypothesis
 4. plan review
 5. implementation
-6. build and auto-test validation
-7. code review
+6. code review
+7. conditional build and auto-test validation
 8. decision, memory update, and next-step routing
 
 ## Role Summary
@@ -46,13 +46,13 @@ The default optimization objective is to reduce instruction count on the hot pat
 
 - implement only approved plans
 - keep changes minimal and measurable
-- prepare review and tester handoff notes
+- prepare review handoff notes and optional tester context
 
 ### Code Reviewer
 
 - review code quality and risk only
 - examine instruction-count tradeoffs, deadlocks, memory leaks, logical completeness, and other regressions
-- do not replace the tester role
+- decide whether tester validation is required based on risk, environment, and validation preconditions
 
 ### Tester
 
@@ -60,7 +60,7 @@ The default optimization objective is to reduce instruction count on the hot pat
 - collect validation artifacts
 - compare instruction-count outcome directly or through approved proxies
 - decide whether the patch is validated, inconclusive, or failed
-- hand the result to the code reviewer
+- provide post-review validation evidence when code review requests tester execution
 
 ## Communication Contract
 
@@ -93,20 +93,28 @@ The plan reviewer must state:
 - whether the plan is approved
 - whether the instruction-count thesis is credible
 - which risks must be preserved against
-- what implementation and tester must later confirm
+- what implementation must satisfy before code review
 
-### Implementation -> Tester
+### Implementation -> Code Review
 
 The code agent must state:
 
 - exact changed files
 - exact changed symbols
 - expected hot-path win
-- expected build path
-- expected auto-test path
 - open correctness or concurrency risks
+- suggested validation path if tester execution becomes necessary
 
-### Tester -> Code Review
+### Code Review -> Tester (Conditional)
+
+The code reviewer must state:
+
+- whether tester is required, recommended, or skipped
+- trigger conditions and scope for tester execution
+- required build/auto-test/benchmark evidence
+- risk hypotheses the tester should validate
+
+### Tester -> Manager / Human
 
 The tester must state:
 
@@ -116,14 +124,14 @@ The tester must state:
 - whether the instruction-count thesis still looks plausible
 - missing validation
 
-### Code Review -> Manager / Human
+### Code Review -> Manager / Human (When Tester Is Skipped)
 
 The code reviewer must state:
 
 - final code review decision
 - instruction-count review result
 - residual correctness and performance risks
-- readiness for final decision
+- readiness for final decision and whether tester was skipped with reason
 
 ## Standard Outputs
 

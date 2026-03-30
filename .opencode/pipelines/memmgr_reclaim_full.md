@@ -31,4 +31,4 @@ Deep reclaim and allocator-coupling analysis with instruction-count-first optimi
 5. plan review gate
 6. implementation handoff
 7. code review gate
-8. tester validation and trace comparison
+8. conditional tester validation and trace comparison

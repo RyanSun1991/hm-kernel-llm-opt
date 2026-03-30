@@ -31,4 +31,4 @@ Full-spectrum instruction-count-first analysis and optimization pipeline for Hyp
 4. plan review gate
 5. minimal implementation and handoff
 6. code review gate
-7. tester validation via Build MCP and Auto-Test MCP as needed
+7. conditional tester validation via Build MCP and Auto-Test MCP as needed

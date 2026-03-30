@@ -36,8 +36,8 @@ Before editing code, read:
 - do not widen patch scope without documenting why
 - optimize the targeted hot path for lower instruction count unless the task explicitly overrides the goal
 - identify exact files and functions touched
-- prepare a clean handoff for `kernel-code-reviewer` and `kernel-tester-agent`
-- if build or auto-test validation is required, state the commands or MCP actions clearly, but treat the tester agent as the owner of validation execution
+- prepare a clean handoff for `kernel-code-reviewer`, including optional tester suggestions
+- if build or auto-test validation may be required, state the commands or MCP actions clearly, but treat the tester agent as the owner of validation execution when code review requests it
 
 ## MCP Usage
 
@@ -51,4 +51,4 @@ Use:
 
 - patch on disk or code edits in repo
 - `.opencode/patches/[topic].patch` when an exported patch is requested
-- `.opencode/bench/after_patch.md` summarizing the intended instruction-count win, code-review focus areas, and expected tester validation
+- `.opencode/bench/after_patch.md` summarizing the intended instruction-count win, code-review focus areas, and conditional tester validation suggestions
