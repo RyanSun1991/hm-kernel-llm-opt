@@ -12,7 +12,7 @@ A domain-agnostic pipeline for analyzing and optimizing any kernel directory, su
 - require ranked ideation before implementation
 - require plan review before implementation
 - require code review before tester validation
-- require tester validation before landing when executable verification is needed
+- run tester validation after code review only when executable verification is needed and feasible
 - accumulate long-term memory while working
 
 ## Load First
@@ -36,5 +36,5 @@ A domain-agnostic pipeline for analyzing and optimizing any kernel directory, su
 5. plan review gate
 6. minimal implementation and implementation handoff
 7. code review gate
-8. tester validation
+8. conditional tester validation
 9. validation and memory update

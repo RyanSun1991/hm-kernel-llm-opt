@@ -8,5 +8,5 @@ Use them when you want a short task request to expand into a full staged workflo
 - the right bootstrap docs
 - the right skill packs
 - the right validation mode
-- the right plan-review, code-review, and tester gates
+- the right plan-review, code-review, and conditional tester gates
 - the right instruction-count optimization bias

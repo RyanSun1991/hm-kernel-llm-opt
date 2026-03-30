@@ -32,4 +32,4 @@ Full workqueue and thread-pool optimization pipeline with instruction count as t
 4. plan review gate
 5. minimal patch and implementation handoff
 6. code review gate
-7. tester validation
+7. conditional tester validation

@@ -24,8 +24,8 @@ This directory is the canonical OpenCode-facing workspace for kernel analysis an
 5. Use Sequential Thinking MCP first.
 6. Use Kernel Index MCP early.
 7. Route every optimization plan through `agents/kernel-plan-reviewer.md` before implementation.
-8. Route every implemented patch through `agents/kernel-code-reviewer.md` before test execution.
-9. Route reviewed patches to `agents/kernel-tester-agent.md` for Build MCP and Auto-Test MCP validation.
+8. Route every implemented patch through `agents/kernel-code-reviewer.md` immediately after implementation.
+9. Route reviewed patches to `agents/kernel-tester-agent.md` only when code review requires Build MCP and Auto-Test MCP validation and preconditions are available.
 10. Save durable findings under `docs/`.
 11. Promote stable reusable findings into `memory/`.
 12. Save approved plans under `plans/`.

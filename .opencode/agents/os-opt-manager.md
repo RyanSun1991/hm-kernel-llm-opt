@@ -20,10 +20,11 @@ If the request already references a pipeline preset, staged task file, or `.open
 4. Require specialists to acknowledge the task, state inferred scope, and then follow the MCP startup protocol.
 5. Route every completed research plan to `kernel-plan-reviewer` before implementation.
 6. Route only approved plans to `kernel-code-agent`.
-7. Route every implementation handoff to `kernel-tester-agent`.
-8. Route tester outputs to `kernel-code-reviewer`.
-9. If the tester fails or returns inconclusive instruction-count evidence, route back to the right upstream owner with a clear reason.
-10. Stop after delegation and tell the user which agent to open next.
+7. Route every implementation handoff to `kernel-code-reviewer`.
+8. Route to `kernel-tester-agent` only when code review requires executable validation and preconditions are available.
+9. If tester preconditions are missing, allow code review to mark tester as skipped-with-reason instead of blocking progress.
+10. If the tester fails or returns inconclusive instruction-count evidence, route back to the right upstream owner with a clear reason.
+11. Stop after delegation and tell the user which agent to open next.
 
 ## Specialist Startup Protocol
 
@@ -109,7 +110,7 @@ Route to `kernel-tester-agent` when the task is:
 - Auto-Test MCP validation
 - runtime evidence collection
 - instruction-count or proxy-metric comparison
-- final validation handoff
+- post-code-review validation handoff with explicit scope
 
 Route to `kernel-source-research` when the task is broad, ambiguous, or design-first.
 
