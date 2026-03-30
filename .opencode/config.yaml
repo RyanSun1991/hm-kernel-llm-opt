@@ -1,0 +1,17 @@
+# OpenCode Workspace Configuration
+#
+# language: controls the language used for all agent responses,
+#   handoff packets, review outputs, plans, and user-facing text.
+#
+#   Supported values:
+#     zh-CN  - Chinese (Simplified)
+#     en     - English
+#
+#   Default: en
+#
+#   Note: code comments, variable names, and commit messages remain
+#   in English regardless of this setting. Only agent dialogue,
+#   analysis text, review prose, and documentation prose follow
+#   this language setting.
+
+language: zh-CN

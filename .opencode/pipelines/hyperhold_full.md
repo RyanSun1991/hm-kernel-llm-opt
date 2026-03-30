@@ -14,6 +14,8 @@ Full-spectrum instruction-count-first analysis and optimization pipeline for Hyp
 
 ## Load First
 
+- `.opencode/config.yaml`
+- `.opencode/skills/language-config.md`
 - `.opencode/docs/harness_engineer_system.md`
 - `.opencode/docs/memmgr-reclaim_bootstrap.md`
 - `.opencode/skills/instruction-count-first.md`

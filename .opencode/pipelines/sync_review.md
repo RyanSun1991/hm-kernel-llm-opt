@@ -12,6 +12,8 @@ Focused instruction-count-aware review pipeline for lock scope, waiter ordering,
 
 ## Load First
 
+- `.opencode/config.yaml`
+- `.opencode/skills/language-config.md`
 - `.opencode/docs/harness_engineer_system.md`
 - `.opencode/skills/instruction-count-first.md`
 - `.opencode/skills/research-discipline.md`

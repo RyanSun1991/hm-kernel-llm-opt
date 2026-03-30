@@ -2,6 +2,10 @@
 
 This document defines the upgraded `.opencode` harness engineer system for this repository.
 
+## Language Configuration
+
+The workspace supports configurable session language. Read `.opencode/config.yaml` for the `language` field and load `.opencode/skills/language-config.md` at session start. All agent dialogue, analysis prose, review verdicts, and documentation prose must follow the configured language. Code, commit messages, and technical identifiers remain in English. See the language-config skill for full rules.
+
 ## Primary Objective
 
 The default optimization objective is to reduce instruction count on the hot path while preserving correctness, locking guarantees, memory safety, lifecycle safety, and logical completeness.

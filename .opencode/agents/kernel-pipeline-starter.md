@@ -34,14 +34,15 @@ Optional:
 ## Workflow
 
 1. Acknowledge the task.
-2. Read the referenced pipeline preset under `.opencode/pipelines/` if provided.
-3. Read the referenced skill packs under `.opencode/skills/`.
-4. Read the referenced bootstrap docs under `.opencode/docs/`.
-5. Read relevant long-term memory under `.opencode/memory/` if the staged task references it.
-6. Confirm that the staged task carries the primary goal, plan reviewer, code reviewer, and a conditional tester role.
-7. Update `.opencode/state/current_task.json` if needed so it reflects the active profile and target.
-8. Delegate to `os-opt-manager` with a fully expanded task statement.
-9. Tell the user exactly which agent to open next.
+2. Read `.opencode/config.yaml` and `.opencode/skills/language-config.md` to determine and apply the session language.
+3. Read the referenced pipeline preset under `.opencode/pipelines/` if provided.
+4. Read the referenced skill packs under `.opencode/skills/`.
+5. Read the referenced bootstrap docs under `.opencode/docs/`.
+6. Read relevant long-term memory under `.opencode/memory/` if the staged task references it.
+7. Confirm that the staged task carries the primary goal, plan reviewer, code reviewer, and a conditional tester role.
+8. Update `.opencode/state/current_task.json` if needed so it reflects the active profile and target.
+9. Delegate to `os-opt-manager` with a fully expanded task statement. Include the configured language in the delegation so downstream agents inherit it.
+10. Tell the user exactly which agent to open next.
 
 ## Delegation Rule
 
