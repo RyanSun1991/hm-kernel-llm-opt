@@ -294,41 +294,113 @@ opencode
 
 ### 4.4 Start a multi-agent analysis session
 
-**Option A — Interactive (paste the prompt):**
+The `.opencode/commands/` directory contains pre-configured slash-command files. Each file is a complete prompt that references all necessary agents, pipelines, skills, memory, and config via `@<path>` annotations. OpenCode expands these references inline so the agent receives full context in one shot.
 
-Stage a pipeline session first:
+#### 4.4.1 Using a built-in command
+
+1. Launch OpenCode in the kernel directory:
+
+   ```bash
+   cd /path/to/your/kernel/source
+   opencode
+   ```
+
+2. Type `/` in the OpenCode session to see all available commands.
+
+3. Select a command (e.g., `optimize_generic`) — the full prompt is injected automatically.
+
+4. The `kernel-pipeline-starter` agent loads the pipeline, skill packs, bootstrap docs, and memory, then delegates to the `os-opt-manager` for the staged workflow.
+
+#### 4.4.2 Available commands
+
+| Command | Pipeline | Description |
+|---------|----------|-------------|
+| `/optimize_generic` | `generic_full` | Full pipeline for any kernel target with automatic specialist routing |
+| `/optimize_memmgr_reclaim` | `memmgr_reclaim_full` | Memory reclaim and allocator-coupling deep analysis |
+| `/optimize_hyperhold` | `hyperhold_full` | Swap I/O, compression, hpio, iotab, eid optimization |
+| `/optimize_workqueue` | `workqueue_full` | Workqueue and thread-pool dispatch optimization |
+| `/review_sync` | `sync_review` | Lock scope, race, and synchronization safety review (no implementation) |
+| `/research_only` | `generic_full` | Research and analysis only (stops before implementation) |
+
+#### 4.4.3 Customizing a command before use
+
+Before triggering, open the command file and set your target:
 
 ```bash
-# From the hm-kernel-llm-opt project directory
-python3 -m hmopt.cli start-pipeline \
-  --profile generic_full \
-  --target <target_path_or_subsystem>
+vim .opencode/commands/optimize_generic.md
 ```
 
-This generates a staged prompt at `.opencode/state/current_prompt.md`. Copy and paste it into the OpenCode session.
+Change the `Target:` line:
 
-**Option B — Use the wrapper script:**
+```
+Target: sysmgr/memmgr/mem/swap/hyperhold/hp_iotab.c
+```
+
+Optionally refine the `Objective:` to narrow the analysis scope. Save, then trigger via `/optimize_generic` in OpenCode.
+
+#### 4.4.4 Creating your own command
+
+Copy any existing command as a starting point:
 
 ```bash
-bash /path/to/hm-kernel-llm-opt/scripts/run_opencode_pipeline.sh \
-  --profile hyperhold_full \
-  --target sysmgr/memmgr/mem/swap/hyperhold/hp_iotab.c \
-  --start-mcp \
-  --launch-opencode
+cp .opencode/commands/optimize_generic.md .opencode/commands/my_custom_task.md
 ```
 
-**Option C — Manual prompt:**
+Edit the file to adjust:
 
-In the OpenCode session, directly provide the task to the starter agent:
+- **Profile / Pipeline** — pick from `.opencode/pipelines/` or keep `generic_full` for auto-routing
+- **Target** — the kernel file or subsystem path to analyze
+- **Objective** — what the pipeline should achieve (research-only, optimization, review, etc.)
+- **Skill packs** — add or remove `@.opencode/skills/*.md` references as needed
+- **Bootstrap docs** — add subsystem-specific docs from `.opencode/docs/` if available
+- **Memory packs** — add target-specific memory files from `.opencode/memory/` for context reuse
 
+Then trigger in OpenCode by typing `/my_custom_task`.
+
+#### 4.4.5 Command file anatomy
+
+Here is the structure of a typical command file:
+
+```markdown
+@kernel-pipeline-starter @.opencode/agents/kernel-pipeline-starter.md
+
+Profile: generic_full @.opencode/pipelines/generic_full.md
+Target: sysmgr/pwrmgr
+Objective: Analyze and optimize this target using the full generic pipeline
+  with automatic routing, research, implementation, review, validation,
+  and memory updates.
+
+Skill packs:
+- @.opencode/skills/instruction-count-first.md
+- @.opencode/skills/research-discipline.md
+- @.opencode/skills/optimization-funnel.md
+- @.opencode/skills/handoff-contract.md
+- @.opencode/skills/implementation-guardrails.md
+- @.opencode/skills/validation-flight-check.md
+- @.opencode/skills/memory-accumulation.md
+- @.opencode/skills/language-config.md
+
+Memory packs:
+- @.opencode/memory/global_lessons.md
+
+Bootstrap docs:
+- @.opencode/docs/harness_engineer_system.md
+
+Config:
+- @.opencode/config.yaml
 ```
-Profile: generic
-Target: <your target file or subsystem>
-Objective: reduce instruction count on hot path
-Pipeline preset: generic_full
-```
 
-The `kernel-pipeline-starter` agent will load the pipeline, skill packs, and bootstrap docs, then hand off to the `os-opt-manager` for the full staged workflow.
+Key elements:
+
+| Element | Purpose |
+|---------|---------|
+| `@kernel-pipeline-starter` | Tells OpenCode which agent to invoke |
+| `@.opencode/agents/kernel-pipeline-starter.md` | Agent prompt (expanded inline) |
+| `@.opencode/pipelines/generic_full.md` | Pipeline preset (stage order, load-first list) |
+| `@.opencode/skills/*.md` | Skill packs (rules every agent must follow) |
+| `@.opencode/memory/*.md` | Long-term memory (reused across runs) |
+| `@.opencode/docs/*.md` | Bootstrap context and design notes |
+| `@.opencode/config.yaml` | Workspace config (language, etc.) |
 
 ### 4.5 Multi-agent workflow overview
 
