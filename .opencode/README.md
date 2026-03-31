@@ -4,6 +4,7 @@ This directory is the canonical OpenCode-facing workspace for kernel analysis an
 
 ## Layout
 
+- `commands/`: slash-command files for one-click pipeline triggering in OpenCode
 - `agents/`: primary OpenCode agent prompt files
 - `pipelines/`: one-click pipeline preset cards
 - `skills/`: reusable capability packs for agent loading
