@@ -14,14 +14,13 @@ Every agent session MUST begin by reading these files in order:
 ## Pipeline Stage Order (NEVER Skip)
 
 ```
-1. intake → kernel-pipeline-starter
-2. routing → os-opt-manager
-3. research → specialist researcher
-4. plan review → kernel-plan-reviewer        ← MANDATORY GATE
-5. implementation → kernel-code-agent         ← ONLY after plan approval
-6. code review → kernel-code-reviewer         ← MANDATORY GATE
-7. tester validation → kernel-tester-agent    ← CONDITIONAL (code reviewer decides)
-8. decision & memory → os-opt-manager
+1. intake + routing → os-opt-manager (entry agent, central hub)
+2. research → specialist researcher            ← delegated by manager, returns to manager
+3. plan review → kernel-plan-reviewer          ← MANDATORY GATE, returns to manager
+4. implementation → kernel-code-agent          ← ONLY after plan approval, returns to manager
+5. code review → kernel-code-reviewer          ← MANDATORY GATE, returns to manager
+6. tester A/B validation → kernel-tester-agent  ← CONDITIONAL: flash stock, test, flash feature, test, compare, returns to manager
+7. decision & memory → os-opt-manager
 ```
 
 ## Hard Rules
@@ -30,13 +29,15 @@ Every agent session MUST begin by reading these files in order:
 
 - **NO implementation without plan review approval.** `kernel-code-agent` MUST NOT write code unless `kernel-plan-reviewer` has approved the plan in `.opencode/reviews/*_plan_review.md`.
 - **NO final decision without code review.** Every patch MUST go through `kernel-code-reviewer` before it can be accepted.
+- **NO test verdict without A/B comparison.** The tester MUST flash and test BOTH stock and feature images. Single-image test results are FORBIDDEN as the basis for a verdict.
 - **NO agent may perform work belonging to another stage.** Research agents do not implement. Coders do not review. Reviewers do not test.
 
-### Mandatory Delegation — NEVER Forget
+### Hub-and-Spoke Delegation — NEVER Bypass
 
-- Every agent MUST delegate to the next stage agent when its work is complete.
-- The delegation message MUST include the full handoff packet as defined in `.opencode/skills/handoff-contract.md`.
-- After delegating, the agent MUST stop and tell the user which agent to open next.
+- **Only `kernel-pipeline-starter` and `os-opt-manager` use the delegate tool.** They are the only agents with `delegate: true`.
+- **All sub-agents (specialists, reviewers, coder, tester) return results to the manager.** They complete their work, write artifacts, output the handoff packet, and finish. The manager then reads the results and delegates to the next stage.
+- The manager MUST NOT stop and ask the user to manually continue between stages. When a sub-agent returns, the manager immediately proceeds.
+- Sub-agents MUST NOT attempt to delegate to other agents. They return to whoever called them (the manager).
 - If you are unsure which agent comes next, re-read `.opencode/docs/harness_engineer_system.md` Section "Stage Order" and `.opencode/skills/stage-gate-enforcement.md`.
 
 ### Handoff Packet — NEVER Omit
@@ -59,6 +60,8 @@ Pipeline presets list required skills. Every listed skill MUST be read and follo
 - `stage-gate-enforcement.md`
 - `research-discipline.md`
 - `implementation-guardrails.md`
+- `flash-device-operations.md` (when tester validation is active)
+- `ab-test-comparison.md` (when tester validation is active)
 
 ## Self-Check Before Every Action
 

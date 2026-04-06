@@ -52,3 +52,7 @@ Use:
 - patch on disk or code edits in repo
 - `.opencode/patches/[topic].patch` when an exported patch is requested
 - `.opencode/bench/after_patch.md` summarizing the intended instruction-count win, code-review focus areas, and conditional tester validation suggestions
+
+## Return to Manager
+
+After writing all required outputs, **return your results** with the full handoff packet (files changed, hot path changed, instruction-count rationale, risks). The manager will route to `kernel-code-reviewer` next. Do NOT attempt to delegate to other agents yourself — you return to the manager.

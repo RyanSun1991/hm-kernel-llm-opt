@@ -12,7 +12,7 @@ def test_load_pipeline_profiles_reads_expected_profile():
     profiles = load_pipeline_profiles("configs/pipeline_profiles.yaml")
     assert "generic_full" in profiles
     assert "hyperhold_full" in profiles
-    assert profiles["hyperhold_full"].entry_agent == "kernel-pipeline-starter"
+    assert profiles["hyperhold_full"].entry_agent == "os-opt-manager"
     assert profiles["generic_full"].primary_goal == "instruction_count"
     assert profiles["generic_full"].plan_reviewer_agent == "kernel-plan-reviewer"
     assert profiles["generic_full"].code_reviewer_agent == "kernel-code-reviewer"
@@ -34,7 +34,7 @@ def test_initialize_pipeline_session_writes_state_and_prompt(tmp_path: Path):
     assert state["plan_reviewer_agent"] == "kernel-plan-reviewer"
     assert state["code_reviewer_agent"] == "kernel-code-reviewer"
     assert state["tester_agent"] == "kernel-tester-agent"
-    assert prompt.startswith("@kernel-pipeline-starter")
+    assert prompt.startswith("@os-opt-manager")
     assert state["primary_metric"] == "instruction_count"
     assert state["plan_review_status"] == ""
     assert state["code_review_status"] == ""

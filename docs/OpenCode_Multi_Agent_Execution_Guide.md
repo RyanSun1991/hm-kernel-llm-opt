@@ -64,7 +64,7 @@ This can also:
 If you do not want staging first, enter OpenCode and start with:
 
 ```text
-@kernel-pipeline-starter
+@os-opt-manager
 Profile: generic_full
 Target: sysmgr/memmgr/mem/swap/hyperhold/hp_iotab.c
 Objective: Analyze and optimize this target using the full generic pipeline with automatic routing, implementation, review, validation, and memory updates.
@@ -287,7 +287,7 @@ Use when:
 - you do not want to decide the specialist manually
 
 ```text
-@kernel-pipeline-starter
+@os-opt-manager
 Profile: generic_full
 Target: path/to/file.c
 Objective: Full analysis and optimization pipeline for this file with automatic routing, implementation, review, validation, and memory updates.
@@ -300,7 +300,7 @@ Use when:
 - you want the manager to classify a whole directory or subsystem
 
 ```text
-@kernel-pipeline-starter
+@os-opt-manager
 Profile: generic_full
 Target: path/to/directory
 Objective: Full analysis and optimization pipeline for this directory with automatic routing, implementation, review, validation, and memory updates.
@@ -314,7 +314,7 @@ Use when:
 - you do not want implementation yet
 
 ```text
-@kernel-pipeline-starter
+@os-opt-manager
 Profile: generic_full
 Target: path/to/target
 Objective: Research this target deeply, build design understanding, generate ranked optimization ideas, and stop at the reviewed plan stage before implementation.
@@ -327,7 +327,7 @@ Use when:
 - the target clearly belongs to Hyperhold, swap I/O, hpio, iotab, or eid paths
 
 ```text
-@kernel-pipeline-starter
+@os-opt-manager
 Profile: hyperhold_full
 Target: sysmgr/memmgr/mem/swap/hyperhold/hp_iotab.c
 Objective: Full analysis and optimization pipeline for the Hyperhold path, including design understanding, ranked ideas, implementation, review, validation, and memory updates.
@@ -340,7 +340,7 @@ Use when:
 - the target is reclaim, allocator slow path, vmpressure, or PSI related
 
 ```text
-@kernel-pipeline-starter
+@os-opt-manager
 Profile: memmgr_reclaim_full
 Target: sysmgr/memmgr/mem/reclaim
 Objective: Full reclaim analysis and optimization pipeline, including trigger mapping, pressure analysis, ranked ideas, implementation, review, validation, and memory updates.
@@ -353,7 +353,7 @@ Use when:
 - the target clearly belongs to workqueue, dispatch, or worker-loop paths
 
 ```text
-@kernel-pipeline-starter
+@os-opt-manager
 Profile: workqueue_full
 Target: kernel/workqueue.c
 Objective: Full workqueue and thread-pool optimization pipeline with hotspot-guided research, ranked ideas, implementation, review, validation, and bad-plan filtering.
@@ -366,7 +366,7 @@ Use when:
 - you want correctness-first review around locking, waiters, refcount, or race windows
 
 ```text
-@kernel-pipeline-starter
+@os-opt-manager
 Profile: sync_review
 Target: path/to/target
 Objective: Review synchronization semantics, lock scope, waiter behavior, refcount lifetime, race windows, and regression risks for this target.
@@ -379,7 +379,7 @@ Use when:
 - you already have flamegraph, hitrace, or hiperf data
 
 ```text
-@kernel-pipeline-starter
+@os-opt-manager
 Profile: generic_full
 Target: path/to/target
 Objective: Full analysis and optimization pipeline for this target using runtime evidence, automatic routing, implementation, review, validation, and memory updates.
@@ -397,7 +397,7 @@ Use when:
 - you do not want code edits in this run
 
 ```text
-@kernel-pipeline-starter
+@os-opt-manager
 Profile: generic_full
 Target: path/to/target
 Objective: Analyze this target, build the design model, review existing code or plan quality, identify optimization directions, and stop before implementation.
@@ -410,7 +410,7 @@ Use when:
 - you want the run to explicitly emphasize memory reuse and memory promotion
 
 ```text
-@kernel-pipeline-starter
+@os-opt-manager
 Profile: generic_full
 Target: path/to/target
 Objective: Full analysis and optimization pipeline for this target with automatic routing, implementation, review, validation, and explicit long-term memory promotion into target memory, subsystem memory, and global lessons.

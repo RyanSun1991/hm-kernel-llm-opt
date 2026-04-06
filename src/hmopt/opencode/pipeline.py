@@ -24,7 +24,7 @@ class PipelineProfile:
     name: str
     title: str
     description: str
-    entry_agent: str = "kernel-pipeline-starter"
+    entry_agent: str = "os-opt-manager"
     manager_agent: str = "os-opt-manager"
     plan_reviewer_agent: str = "kernel-plan-reviewer"
     code_reviewer_agent: str = "kernel-code-reviewer"
@@ -40,6 +40,8 @@ class PipelineProfile:
     memory_mode: str = "auto"
     primary_goal: str = "instruction_count"
     handoff_contract: str = ".opencode/skills/handoff-contract.md"
+    flash_relay_url: str = ""
+    stock_image_dir: str = ""
 
 
 def _slugify(value: str) -> str:
@@ -90,7 +92,7 @@ def load_pipeline_profiles(path: str | Path = DEFAULT_PROFILES_PATH) -> dict[str
             name=name,
             title=str(data.get("title") or name),
             description=str(data.get("description") or ""),
-            entry_agent=str(data.get("entry_agent") or "kernel-pipeline-starter"),
+            entry_agent=str(data.get("entry_agent") or "os-opt-manager"),
             manager_agent=str(data.get("manager_agent") or "os-opt-manager"),
             plan_reviewer_agent=str(data.get("plan_reviewer_agent") or "kernel-plan-reviewer"),
             code_reviewer_agent=str(data.get("code_reviewer_agent") or "kernel-code-reviewer"),
@@ -108,6 +110,8 @@ def load_pipeline_profiles(path: str | Path = DEFAULT_PROFILES_PATH) -> dict[str
             handoff_contract=str(
                 data.get("handoff_contract") or ".opencode/skills/handoff-contract.md"
             ),
+            flash_relay_url=str(data.get("flash_relay_url") or ""),
+            stock_image_dir=str(data.get("stock_image_dir") or ""),
         )
     return result
 
@@ -156,6 +160,10 @@ def build_pipeline_prompt(
         lines.extend(f"- {item}" for item in profile.skills)
     if profile.handoff_contract:
         lines.append(f"Handoff contract: {profile.handoff_contract}")
+    if profile.flash_relay_url:
+        lines.append(f"Flash relay URL: {profile.flash_relay_url}")
+    if profile.stock_image_dir:
+        lines.append(f"Stock image dir: {profile.stock_image_dir}")
     if artifacts:
         lines.append("Artifacts:")
         lines.extend(f"- {item['kind']}: {item['path']}" for item in artifacts)
@@ -237,6 +245,8 @@ def initialize_pipeline_session(
         "pipeline_card": profile.pipeline_card,
         "bootstrap_docs": profile.bootstrap_docs,
         "skills": profile.skills,
+        "flash_relay_url": profile.flash_relay_url,
+        "stock_image_dir": profile.stock_image_dir,
         "artifacts": _parse_artifact_specs(artifact_specs or []),
         "memory_files": memory_paths,
         "prompt_file": str(resolved_prompt_path.relative_to(root)),

@@ -362,7 +362,7 @@ Then trigger in OpenCode by typing `/my_custom_task`.
 Here is the structure of a typical command file:
 
 ```markdown
-@kernel-pipeline-starter @.opencode/agents/kernel-pipeline-starter.md
+@os-opt-manager @.opencode/agents/os-opt-manager.md
 
 Profile: generic_full @.opencode/pipelines/generic_full.md
 Target: sysmgr/pwrmgr
@@ -394,8 +394,8 @@ Key elements:
 
 | Element | Purpose |
 |---------|---------|
-| `@kernel-pipeline-starter` | Tells OpenCode which agent to invoke |
-| `@.opencode/agents/kernel-pipeline-starter.md` | Agent prompt (expanded inline) |
+| `@os-opt-manager` | Tells OpenCode which agent to invoke |
+| `@.opencode/agents/os-opt-manager.md` | Agent prompt (expanded inline) |
 | `@.opencode/pipelines/generic_full.md` | Pipeline preset (stage order, load-first list) |
 | `@.opencode/skills/*.md` | Skill packs (rules every agent must follow) |
 | `@.opencode/memory/*.md` | Long-term memory (reused across runs) |

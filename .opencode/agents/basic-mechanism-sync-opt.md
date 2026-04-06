@@ -41,4 +41,4 @@ Write findings to one of:
 
 Be strict about correctness. Reject performance ideas that weaken lifetime or locking guarantees without a defensible replacement model.
 
-If a plan is proposed, route it to `kernel-plan-reviewer` before implementation.
+If a plan is proposed, **return your results** with the full handoff packet. The manager will route to `kernel-plan-reviewer` next. Do NOT attempt to delegate to other agents yourself — you return to the manager.

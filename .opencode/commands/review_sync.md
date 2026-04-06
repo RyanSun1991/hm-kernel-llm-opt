@@ -1,4 +1,4 @@
-@kernel-pipeline-starter @.opencode/agents/kernel-pipeline-starter.md
+@os-opt-manager @.opencode/agents/os-opt-manager.md
 
 Profile: sync_review @.opencode/pipelines/sync_review.md
 Target: <REPLACE_WITH_TARGET_FILE_OR_SUBSYSTEM>

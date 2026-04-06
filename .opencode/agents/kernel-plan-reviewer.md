@@ -55,3 +55,7 @@ Write `.opencode/reviews/[artifact]_plan_review.md` with:
 - required handoff notes for the coder if approved
 
 Do not implement code. Your job is to approve, tighten, or reject the plan.
+
+## Return to Manager
+
+After writing the review artifact, **return your results** with the full handoff packet including your decision (approve / needs revision / reject). The manager will route to the correct next agent. Do NOT attempt to delegate to other agents yourself — you return to the manager.

@@ -1,4 +1,4 @@
-@kernel-pipeline-starter @.opencode/agents/kernel-pipeline-starter.md
+@os-opt-manager @.opencode/agents/os-opt-manager.md
 
 Profile: memmgr_reclaim_full @.opencode/pipelines/memmgr_reclaim_full.md
 Target: sysmgr/memmgr/mem/reclaim

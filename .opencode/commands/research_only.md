@@ -1,4 +1,4 @@
-@kernel-pipeline-starter @.opencode/agents/kernel-pipeline-starter.md
+@os-opt-manager @.opencode/agents/os-opt-manager.md
 
 Profile: generic_full @.opencode/pipelines/generic_full.md
 Target: <REPLACE_WITH_TARGET_FILE_OR_SUBSYSTEM>

@@ -60,4 +60,4 @@ Maintain:
 
 When you discover reusable context, fold it back into `.opencode/docs/memmgr-reclaim_bootstrap.md`.
 
-Before coding, hand the plan to `kernel-plan-reviewer`.
+Before coding, **return your results** with the full handoff packet. The manager will route to `kernel-plan-reviewer` next. Do NOT attempt to delegate to other agents yourself — you return to the manager.

@@ -12,24 +12,23 @@ The default optimization objective is to reduce instruction count on the hot pat
 
 ## Agent Topology
 
-1. `kernel-pipeline-starter`
-2. `os-opt-manager`
-3. research specialist
-4. `kernel-plan-reviewer`
-5. `kernel-code-agent`
-6. `kernel-code-reviewer`
-7. `kernel-tester-agent` (conditional)
+1. `os-opt-manager` — **entry agent and central hub** (handles intake, routing, and stage chaining)
+2. research specialist (domain-specific sub-agent)
+3. `kernel-plan-reviewer` (sub-agent)
+4. `kernel-code-agent` (sub-agent)
+5. `kernel-code-reviewer` (sub-agent)
+6. `kernel-tester-agent` (conditional sub-agent)
+7. `kernel-pipeline-starter` — legacy alias, redirects to `os-opt-manager`
 
 ## Stage Order
 
-1. intake and staging
-2. routing and scope confirmation
-3. research and instruction-count hypothesis
-4. plan review
-5. implementation
-6. code review
-7. conditional build and auto-test validation
-8. decision, memory update, and next-step routing
+1. intake, config loading, and routing (`os-opt-manager`)
+2. research and instruction-count hypothesis (specialist, returns to manager)
+3. plan review (returns to manager)
+4. implementation (returns to manager)
+5. code review (returns to manager)
+6. conditional flash + A/B test validation: flash stock, test stock, flash feature, test feature, compare (returns to manager)
+7. decision, memory update, and next-step routing (`os-opt-manager`)
 
 ## Role Summary
 
@@ -60,11 +59,14 @@ The default optimization objective is to reduce instruction count on the hot pat
 
 ### Tester
 
-- trigger Build MCP and Auto-Test MCP
-- collect validation artifacts
-- compare instruction-count outcome directly or through approved proxies
+- verify relay connectivity and device visibility via Flash MCP
+- trigger Build MCP to verify stock and feature images exist
+- execute A/B comparison: flash stock image, run test, flash feature image, run test
+- use Flash MCP for device flashing and Auto-Test MCP for test execution
+- compare instruction-count outcome (stock vs feature delta) directly or through approved proxies
+- if flamegraph/hitrace/hiperf artifacts are available, perform differential analysis
 - decide whether the patch is validated, inconclusive, or failed
-- provide post-review validation evidence when code review requests tester execution
+- provide post-review A/B validation evidence when code review requests tester execution
 
 ## Communication Contract
 
@@ -76,6 +78,19 @@ Every stage must produce a handoff packet that includes:
 - files and functions in scope
 - risks and open questions
 - exact next action for the receiving agent
+
+## Hub-and-Spoke Delegation Model
+
+`os-opt-manager` is the **central hub**. Only the starter and manager use the delegate tool.
+
+**Sub-agents (specialists, reviewers, coder, tester) do NOT delegate.** They complete their work, write their artifacts, and return their handoff packet to the manager. The manager then reads the artifacts, checks stage-gate conditions, and delegates to the next stage.
+
+Flow:
+```
+starter → manager → specialist → [returns to manager] → plan-reviewer → [returns to manager] → coder → [returns to manager] → code-reviewer → [returns to manager] → tester → [returns to manager] → decision
+```
+
+The manager MUST NOT stop and ask the user to continue between stages. When a sub-agent returns, the manager immediately proceeds to the next stage.
 
 ## Canonical Handoffs
 
@@ -117,16 +132,24 @@ The code reviewer must state:
 - trigger conditions and scope for tester execution
 - required build/auto-test/benchmark evidence
 - risk hypotheses the tester should validate
+- stock image path (baseline kernel without patches)
+- feature image path (kernel with the optimization patch)
+- device target for flash
+- test case name and parameters
 
 ### Tester -> Manager / Human
 
 The tester must state:
 
-- build result
-- auto-test result
-- runtime evidence, if any
+- stock flash result and stock test result
+- feature flash result and feature test result
+- instruction-count delta (stock vs feature)
+- hot path changes and new hotspots (if any)
+- flamegraph diff path (if available)
 - whether the instruction-count thesis still looks plausible
 - missing validation
+- verdict: pass, fail, or inconclusive
+- recommended next route: accept, iterate, or reject
 
 ### Code Review -> Manager / Human (When Tester Is Skipped)
 

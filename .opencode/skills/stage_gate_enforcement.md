@@ -6,14 +6,13 @@ This skill defines hard gates that no agent may bypass. Load this skill at every
 
 | Stage | Owner Agent | Entry Condition | Exit Condition |
 |-------|-------------|-----------------|----------------|
-| 1. Intake | `kernel-pipeline-starter` | User request | Delegated to manager with expanded task |
-| 2. Routing | `os-opt-manager` | Starter delegation | Delegated to correct specialist |
-| 3. Research | Specialist researcher | Manager delegation | Design doc + plan written, delegated to plan reviewer |
-| 4. Plan Review | `kernel-plan-reviewer` | Research handoff with plan | Review written, delegated to coder (if approved) or back to researcher (if rejected) |
-| 5. Implementation | `kernel-code-agent` | Approved plan review | Code changes + handoff, delegated to code reviewer |
-| 6. Code Review | `kernel-code-reviewer` | Coder handoff | Review written, delegated to tester (if required) or manager/user (if skipped) |
-| 7. Tester Validation | `kernel-tester-agent` | Code review requires validation | Validation report written, delegated to manager/user |
-| 8. Decision | `os-opt-manager` or User | Review/validation complete | Memory updated, next cycle or done |
+| 1. Intake + Routing | `os-opt-manager` | User request | Config loaded, delegated to correct specialist |
+| 2. Research | Specialist researcher | Manager delegation | Design doc + plan written, **returns to manager** |
+| 3. Plan Review | `kernel-plan-reviewer` | Manager delegation with plan | Review written, **returns to manager** |
+| 4. Implementation | `kernel-code-agent` | Manager delegation (plan approved) | Code changes + handoff, **returns to manager** |
+| 5. Code Review | `kernel-code-reviewer` | Manager delegation with coder handoff | Review written, **returns to manager** |
+| 6. Tester Validation | `kernel-tester-agent` | Manager delegation (code review requires it) | Validation report written, **returns to manager** |
+| 7. Decision | `os-opt-manager` | All sub-agent results received | Memory updated, next cycle or done |
 
 ## Hard Gates — Violations Are Forbidden
 
@@ -37,16 +36,28 @@ This skill defines hard gates that no agent may bypass. Load this skill at every
 
 - `kernel-tester-agent` MUST only be invoked when `kernel-code-reviewer` explicitly sets tester decision to `required` or `recommended`.
 - If tester is `skipped`, the flow goes directly to the manager/user.
+- When tester IS invoked, the delegation MUST include: stock image path, feature image path, device target, and test case name.
 
-## Mandatory Delegation Checklist
+### Gate 5: A/B Comparison Before Decision
+
+- The tester MUST flash and test BOTH the stock image AND the feature image.
+- It is FORBIDDEN to report a test result based on only the feature image without a stock baseline.
+- The tester MUST produce a comparison artifact showing metric deltas (stock vs feature).
+- If either flash fails, the tester MUST report the failure explicitly and MUST NOT fabricate comparison data.
+- If the stock flash fails, report as infrastructure failure — not a patch failure.
+- Both test runs MUST use identical parameters (same test case, same duration, same device).
+
+## Mandatory Completion Checklist
 
 Every agent MUST complete this checklist before finishing:
 
 1. [ ] I have written my required output artifact to the correct `.opencode/` subdirectory
 2. [ ] I have prepared the handoff packet per `handoff-contract.md`
 3. [ ] I know which agent is next according to the stage table above
-4. [ ] I am delegating to that agent NOW with the full handoff packet
-5. [ ] I am telling the user which agent to open next
+
+**If I am `os-opt-manager`**: I use the delegate tool NOW to hand off to the next sub-agent with the full handoff packet. I do NOT stop to ask the user to manually continue.
+
+**If I am a sub-agent** (specialist, reviewer, coder, tester): I return my results with the handoff packet to the manager. I do NOT attempt to delegate to other agents myself.
 
 ## Anti-Drift Rules
 
@@ -70,7 +81,7 @@ If your conversation has exceeded 10 exchanges or you feel uncertain about the c
 
 ## Delegation Message Template
 
-When delegating, use this structure:
+When the manager delegates, or when a sub-agent returns results, use this structure:
 
 ```
 ## Delegation to [next-agent-name]

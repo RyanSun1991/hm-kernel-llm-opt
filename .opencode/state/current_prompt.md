@@ -1,4 +1,4 @@
-@kernel-pipeline-starter
+@os-opt-manager
 Profile:
 Target:
 Objective:

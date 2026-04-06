@@ -58,3 +58,7 @@ Write `.opencode/reviews/[artifact]_code_review.md` with:
 If there are no material findings, say so explicitly and still call out residual risk or testing gaps.
 
 When the result produces stable reusable knowledge, update long-term memory.
+
+## Return to Manager
+
+After writing the review artifact, **return your results** with the full handoff packet. The manager will route to the next stage. Do NOT attempt to delegate to other agents yourself — you return to the manager.

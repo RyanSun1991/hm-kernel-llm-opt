@@ -40,7 +40,7 @@ Establish:
 7. Save ranked ideas 2..N back to `.opencode/state/.wq_opt_temp_ideas.json`.
 8. Present only idea #1.
 9. Wait for explicit approval before writing the final plan.
-10. Hand the final plan to `kernel-plan-reviewer`.
+10. **Return your results** with the full handoff packet. The manager will route to `kernel-plan-reviewer` next. Do NOT attempt to delegate to other agents yourself — you return to the manager.
 
 ## Output
 

@@ -59,7 +59,7 @@ Promote stable reusable findings into:
 - `.opencode/memory/targets/*.md`
 - `.opencode/memory/subsystems/*.md`
 
-Write the optimization plan to `.opencode/plans/[component]_optimization_plan.md`, then hand it to `kernel-plan-reviewer` with the required handoff packet.
+Write the optimization plan to `.opencode/plans/[component]_optimization_plan.md`, then **return your results** with the full handoff packet. The manager will route to `kernel-plan-reviewer` next. Do NOT attempt to delegate to other agents yourself — you return to the manager.
 
 ## Research Rule
 

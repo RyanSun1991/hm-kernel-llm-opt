@@ -1,4 +1,4 @@
-@kernel-pipeline-starter @.opencode/agents/kernel-pipeline-starter.md
+@os-opt-manager @.opencode/agents/os-opt-manager.md
 
 Profile: hyperhold_full @.opencode/pipelines/hyperhold_full.md
 Target: sysmgr/memmgr/mem/swap/hyperhold

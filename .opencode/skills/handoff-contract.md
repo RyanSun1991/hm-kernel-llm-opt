@@ -48,13 +48,21 @@ No agent should hand work to the next stage without a compact handoff packet.
 - findings to validate explicitly
 - build/test/profiling requirements
 - regression watch list
+- stock image path (baseline kernel without patches)
+- feature image path (kernel with optimization patch, from Build MCP output)
+- device target for flash (serial or identifier)
+- test case name and parameters for A/B comparison
 
 ### Tester -> Manager Or User
 
-- build result
-- auto-test result
-- artifact locations
+- stock flash result and stock test result
+- feature flash result and feature test result
+- instruction-count delta (stock vs feature)
+- hot path changes and new hotspots
+- flamegraph diff path (if available)
+- artifact locations (stock and feature result paths)
 - remaining validation gaps
 - whether the instruction-count thesis still looks plausible
-- pass/fail or inconclusive decision
-- recommended next route
+- verdict: pass, fail, or inconclusive
+- confidence: high, medium, or low
+- recommended next route: accept, iterate, or reject

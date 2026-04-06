@@ -41,7 +41,7 @@ Focus on:
 4. Rank ideas first by likely instruction-count reduction on the hot path, then by impact versus risk.
 5. Present only the top idea.
 6. Wait for explicit approval before writing a detailed plan.
-7. Hand the detailed plan to `kernel-plan-reviewer` before implementation.
+7. **Return your results** with the full handoff packet. The manager will route to `kernel-plan-reviewer` next. Do NOT attempt to delegate to other agents yourself — you return to the manager.
 
 ## Required Outputs
 

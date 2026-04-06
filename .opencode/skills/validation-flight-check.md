@@ -5,10 +5,12 @@
 1. static sanity and dependency radius
 2. plan review
 3. code review
-4. build validation
-5. auto-test or functional test validation
-6. instruction-count or trace comparison
-7. independent summary and memory update
+4. build validation (stock + feature images)
+5. relay health check and device visibility
+6. flash stock image to device and auto-test validation on stock
+7. flash feature image to device and auto-test validation on feature
+8. instruction-count or trace comparison (stock vs feature A/B delta)
+9. independent summary and memory update
 
 ## Required Outputs
 
@@ -16,4 +18,4 @@
 - plan review note
 - code review note
 - after-patch summary
-- tester validation summary
+- tester A/B validation summary (stock baseline + feature candidate + delta analysis + verdict)

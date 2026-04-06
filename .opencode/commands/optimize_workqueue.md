@@ -1,4 +1,4 @@
-@kernel-pipeline-starter @.opencode/agents/kernel-pipeline-starter.md
+@os-opt-manager @.opencode/agents/os-opt-manager.md
 
 Profile: workqueue_full @.opencode/pipelines/workqueue_full.md
 Target: kernel/workqueue
