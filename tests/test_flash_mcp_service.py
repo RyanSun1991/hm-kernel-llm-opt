@@ -60,8 +60,19 @@ class FakeRelayHandler(BaseHTTPRequestHandler):
         args = body.get("args", [])
 
         # Canned responses for the full flash workflow
-        if command == "pscp":
-            result = {"returncode": 0, "stdout": "boot.img | 1024 kB | 1024.0 kB/s | ETA: 00:00:00 | 100%", "stderr": "", "duration_s": 1.0, "command": f"pscp {' '.join(args)}"}
+        if command == "python" and args and "flash_pipeline" in args[0]:
+            # Simulate the integrated flash pipeline script
+            pipeline_output = json.dumps({"success": True, "phase": "complete", "steps": {
+                "transfer": [{"file": "boot_plr.img", "ok": True}],
+                "enter_bootloader": {"ok": True},
+                "wait_fastboot": {"ok": True, "elapsed_s": 2.0},
+                "flash": [{"partition": "boot", "file": "boot_plr.img", "ok": True}],
+                "reboot": {"ok": True},
+                "boot_wait": {"ok": True, "elapsed_s": 10.0},
+            }})
+            result = {"returncode": 0, "stdout": pipeline_output, "stderr": "[flash] logs...", "duration_s": 30.0, "command": f"python {' '.join(args)}"}
+        elif command == "pscp":
+            result = {"returncode": 0, "stdout": "boot.img | 1024 kB | 100%", "stderr": "", "duration_s": 1.0, "command": f"pscp {' '.join(args)}"}
         elif command == "hdc" and "reboot" in args and "bootloader" in args:
             result = {"returncode": 0, "stdout": "", "stderr": "", "duration_s": 0.5, "command": "hdc shell reboot bootloader"}
         elif command == "hdc" and "list" in args:
@@ -217,49 +228,35 @@ def test_wait_for_device_boot(fake_relay):
     assert result["success"] is True
 
 
-def test_flash_and_boot_full_pipeline(fake_relay):
-    """Test the full production flash pipeline: transfer + bootloader + flash + reboot + wait."""
+def test_flash_and_boot_via_pipeline(fake_relay):
+    """Test flash_and_boot calls the integrated flash_pipeline.py via relay."""
     result = flash_and_boot(
         server_images=[
             {"server_path": "/home/damon/signing/boot.img", "local_filename": "boot_plr.img"},
         ],
         partitions=[
             {"partition": "boot", "image_path": "boot_plr.img"},
-            {"partition": "modem_driver", "image_path": "modem_driver_plr.img"},
         ],
         device_serial="ABC123",
-        bootloader_wait_s=0,  # no wait in tests
-        fastboot_wait_s=5,
-        flash_timeout_s=10,
-        boot_wait_timeout_s=5,
-        poll_interval_s=0.1,
+        pipeline_script="flash_pipeline.py",
     )
     assert result["success"] is True
     assert result["phase"] == "complete"
-    assert "transfer" in result["steps"]
-    assert "enter_bootloader" in result["steps"]
-    assert "wait_fastboot" in result["steps"]
-    assert "flash" in result["steps"]
-    assert "reboot" in result["steps"]
-    assert "boot_wait" in result["steps"]
+    assert "steps" in result
+    assert "relay_result" in result
 
 
-def test_flash_and_boot_no_transfer(fake_relay):
-    """Test flash pipeline without image transfer (images already on Windows)."""
+def test_flash_and_boot_no_transfer_via_pipeline(fake_relay):
+    """Test flash_and_boot without image transfer."""
     result = flash_and_boot(
         partitions=[
             {"partition": "boot", "image_path": "boot_plr.img"},
         ],
         device_serial="ABC123",
-        bootloader_wait_s=0,
-        fastboot_wait_s=5,
-        flash_timeout_s=10,
-        boot_wait_timeout_s=5,
-        poll_interval_s=0.1,
+        pipeline_script="flash_pipeline.py",
     )
     assert result["success"] is True
-    assert "transfer" not in result["steps"]
-    assert "enter_bootloader" in result["steps"]
+    assert result["phase"] == "complete"
 
 
 def test_flash_and_boot_async(fake_relay):
@@ -268,11 +265,7 @@ def test_flash_and_boot_async(fake_relay):
             {"partition": "boot", "image_path": "boot_plr.img"},
         ],
         device_serial="ABC123",
-        bootloader_wait_s=0,
-        fastboot_wait_s=5,
-        flash_timeout_s=10,
-        boot_wait_timeout_s=5,
-        poll_interval_s=0.1,
+        pipeline_script="flash_pipeline.py",
     )
     assert "task_id" in task_info
     assert task_info["status"] == "pending"

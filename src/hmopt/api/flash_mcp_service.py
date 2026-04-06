@@ -423,99 +423,106 @@ def flash_and_boot(
     scp_user: str | None = None,
     scp_password: str | None = None,
     windows_image_dir: str | None = None,
-    bootloader_wait_s: int = 15,
+    pipeline_script: str | None = None,
+    bootloader_wait_s: int = 10,
     fastboot_wait_s: int = 30,
     flash_timeout_s: int = 600,
     boot_wait_timeout_s: int = 300,
     poll_interval_s: int = 5,
 ) -> dict[str, Any]:
-    """Full flash pipeline matching production workflow.
+    """Full flash pipeline via a single integrated script call on the Windows relay.
 
-    Steps:
-      1. Transfer images from build server to Windows PC (if server_images provided)
-      2. Enter bootloader via hdc shell reboot bootloader
-      3. Wait for device to appear in fastboot devices
-      4. Flash all partitions sequentially
-      5. fastboot reboot
-      6. Wait for device to appear in hdc list targets
+    Instead of making multiple relay HTTP calls (one per step), this sends
+    a SINGLE command to the relay that runs flash_pipeline.py on the Windows
+    PC.  The script handles the entire sequence locally with maximum
+    determinism:
+      pscp → hdc reboot bootloader → wait fastboot → flash all → reboot → wait hdc
 
     Args:
-        partitions: List of {"partition": "boot", "image_path": "boot_plr.img"} to flash.
-        server_images: Optional list of {"server_path": "...", "local_filename": "..."} to transfer first.
-        device_serial: Target device serial number.
+        partitions: [{"partition": "boot", "image_path": "boot_plr.img"}, ...]
+        server_images: [{"server_path": "...", "local_filename": "..."}, ...] (optional)
+        device_serial: Target device serial.
         scp_host/scp_user/scp_password: SCP credentials (falls back to env vars).
-        windows_image_dir: Local dir on Windows for images (falls back to HMOPT_FLASH_WINDOWS_IMAGE_DIR).
-        bootloader_wait_s: Seconds to wait after entering bootloader before polling.
-        fastboot_wait_s: Max seconds to wait for device in fastboot mode.
+        windows_image_dir: Local dir on Windows for images.
+        pipeline_script: Path to flash_pipeline.py on Windows (falls back to env var).
+        bootloader_wait_s: Seconds to wait after entering bootloader.
+        fastboot_wait_s: Max seconds to wait for fastboot device.
         flash_timeout_s: Timeout per partition flash.
-        boot_wait_timeout_s: Max seconds to wait for device boot after reboot.
-        poll_interval_s: Interval between polls.
+        boot_wait_timeout_s: Max seconds to wait for hdc after reboot.
+        poll_interval_s: Poll interval for boot wait.
     """
-    steps: dict[str, Any] = {}
+    script = pipeline_script or _env("HMOPT_FLASH_PIPELINE_SCRIPT", "flash_pipeline.py")
+    host = scp_host or _scp_host()
+    user = scp_user or _scp_user()
+    password = scp_password or _scp_password()
     img_dir = windows_image_dir or _windows_image_dir()
+    serial = (device_serial or _env("HMOPT_FLASH_DEVICE_SERIAL")).strip()
 
-    # Step 1: Transfer images (optional)
-    if server_images:
-        transfer_result = transfer_images(
-            images=server_images,
-            scp_host=scp_host,
-            scp_user=scp_user,
-            scp_password=scp_password,
-            windows_image_dir=img_dir,
-        )
-        steps["transfer"] = transfer_result
-        if not transfer_result.get("success"):
-            return {"success": False, "phase": "transfer", "steps": steps}
+    # Build --image specs: server_path:partition:local_filename
+    image_args: list[str] = []
+    for p in partitions:
+        # Find matching server_image for this partition's local file
+        server_path = ""
+        if server_images:
+            for si in server_images:
+                if si.get("local_filename") == p.get("image_path"):
+                    server_path = si.get("server_path", "")
+                    break
+        spec = f"{server_path}:{p['partition']}:{p['image_path']}"
+        image_args.extend(["--image", spec])
 
-    # Step 2: Enter bootloader
-    bootloader_result = enter_bootloader(device_serial=device_serial)
-    steps["enter_bootloader"] = bootloader_result
-    if not bootloader_result.get("success"):
-        return {"success": False, "phase": "enter_bootloader", "steps": steps}
+    args: list[str] = [script] + image_args + [
+        "--image-dir", img_dir,
+        "--bootloader-wait", str(bootloader_wait_s),
+        "--fastboot-wait", str(fastboot_wait_s),
+        "--flash-timeout", str(flash_timeout_s),
+        "--boot-wait-timeout", str(boot_wait_timeout_s),
+        "--boot-poll-interval", str(poll_interval_s),
+    ]
 
-    # Step 3: Wait for device to appear in fastboot
-    time.sleep(bootloader_wait_s)
-    fb_wait_result = wait_for_fastboot_device(
-        device_serial=device_serial,
-        timeout_s=fastboot_wait_s,
-        poll_interval_s=poll_interval_s,
-    )
-    steps["wait_fastboot"] = fb_wait_result
-    if not fb_wait_result.get("success"):
-        return {"success": False, "phase": "wait_fastboot", "steps": steps}
+    if host:
+        args.extend(["--scp-host", host])
+    if user:
+        args.extend(["--scp-user", user])
+    if password:
+        args.extend(["--scp-pw", password])
+    scp_tool = _env("HMOPT_FLASH_SCP_TOOL", "pscp")
+    if scp_tool:
+        args.extend(["--scp-tool", scp_tool])
+    if serial:
+        args.extend(["--serial", serial])
 
-    # Step 4: Flash all partitions
-    flash_result = flash_partitions(
-        partitions=partitions,
-        device_serial=device_serial,
-        timeout_s=flash_timeout_s,
-        cwd=img_dir,
-    )
-    steps["flash"] = flash_result
-    if not flash_result.get("success"):
-        return {"success": False, "phase": "flash", "steps": steps}
+    # Estimate total timeout: transfer + bootloader_wait + fastboot_wait + flash + boot_wait + margin
+    total_timeout = 300 + bootloader_wait_s + fastboot_wait_s + (flash_timeout_s * len(partitions)) + boot_wait_timeout_s + 60
 
-    # Step 5: Reboot
-    time.sleep(2)  # brief settle like the production script
-    reboot_result = reboot_device(device_serial=device_serial)
-    steps["reboot"] = reboot_result
-    if not reboot_result.get("success"):
-        return {"success": False, "phase": "reboot", "steps": steps}
+    result = _relay_exec("python", args, timeout_s=total_timeout, cwd=img_dir)
 
-    # Step 6: Wait for hdc
-    boot_result = wait_for_device_boot(
-        device_serial=device_serial,
-        timeout_s=boot_wait_timeout_s,
-        poll_interval_s=poll_interval_s,
-    )
-    steps["boot_wait"] = boot_result
+    # Parse the JSON output from the pipeline script
+    pipeline_result: dict[str, Any] = {}
+    stdout = result.get("stdout", "").strip()
+    if stdout:
+        try:
+            pipeline_result = json.loads(stdout)
+        except json.JSONDecodeError:
+            pipeline_result = {"success": False, "error": "failed to parse pipeline output", "raw_stdout": stdout}
 
-    return {
-        "success": boot_result.get("success", False),
-        "phase": "complete" if boot_result.get("success") else "boot_wait",
-        "device_serial": boot_result.get("device_serial", device_serial),
-        "steps": steps,
+    # If the relay call itself failed (e.g., python not found)
+    if result.get("returncode") not in (0, 2):
+        return {
+            "success": False,
+            "phase": "relay_exec",
+            "error": result.get("stderr", ""),
+            "relay_result": result,
+            "pipeline_result": pipeline_result,
+        }
+
+    # Return the pipeline result, augmented with relay info
+    pipeline_result["relay_result"] = {
+        "returncode": result.get("returncode"),
+        "duration_s": result.get("duration_s"),
+        "stderr": result.get("stderr", ""),
     }
+    return pipeline_result
 
 
 # ---------------------------------------------------------------------------
@@ -585,7 +592,8 @@ def flash_and_boot_async(
     scp_user: str | None = None,
     scp_password: str | None = None,
     windows_image_dir: str | None = None,
-    bootloader_wait_s: int = 15,
+    pipeline_script: str | None = None,
+    bootloader_wait_s: int = 10,
     fastboot_wait_s: int = 30,
     flash_timeout_s: int = 600,
     boot_wait_timeout_s: int = 300,
@@ -612,6 +620,7 @@ def flash_and_boot_async(
             scp_user=scp_user,
             scp_password=scp_password,
             windows_image_dir=windows_image_dir,
+            pipeline_script=pipeline_script,
             bootloader_wait_s=bootloader_wait_s,
             fastboot_wait_s=fastboot_wait_s,
             flash_timeout_s=flash_timeout_s,

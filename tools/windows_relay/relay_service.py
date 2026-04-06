@@ -27,6 +27,9 @@ ALLOWED_COMMANDS: set[str] = {
     # SCP tools for pulling images from the build server
     "pscp", "pscp.exe",
     "scp", "scp.exe",
+    # Python for running integrated pipeline scripts
+    "python", "python.exe",
+    "python3", "python3.exe",
 }
 
 DEFAULT_PORT = 9100

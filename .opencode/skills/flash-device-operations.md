@@ -25,21 +25,29 @@ Before any flash operation, the tester agent MUST:
 
 If any prerequisite fails, report the failure immediately. Do NOT proceed with flash.
 
-## Full Flash Sequence (Production Workflow)
+## Full Flash Sequence (Integrated Pipeline)
 
-The `flash_and_boot` tool executes the complete pipeline:
+The `flash_and_boot` tool sends a **single command** to the relay that runs `flash_pipeline.py` on the Windows PC. The entire sequence executes locally on Windows with maximum determinism — no multi-step HTTP round-trips:
 
 ```
-1. pscp images from build server → Windows PC        (transfer_images)
-2. hdc shell reboot bootloader                        (enter_bootloader)
-3. wait ~15s for device to enter bootloader
-4. poll fastboot devices until device appears          (wait_for_fastboot)
-5. fastboot flash boot boot_plr.img                    (flash_partitions)
-   fastboot flash modem_driver modem_driver_plr.img
-6. wait 2s
-7. fastboot reboot                                     (device_reboot)
-8. poll hdc list targets until device appears           (device_wait_boot)
+flash_pipeline.py on Windows:
+  1. pscp images from build server → local dir
+  2. hdc shell reboot bootloader
+  3. wait for device in fastboot (poll)
+  4. fastboot flash boot boot_plr.img
+     fastboot flash modem_driver modem_driver_plr.img
+  5. fastboot reboot
+  6. wait for device in hdc list targets (poll)
 ```
+
+The script outputs a single JSON result to stdout with success/failure and step details.
+
+### Why Integrated Script?
+
+- **Determinism**: Full sequence runs as one local process on Windows, no HTTP round-trips between steps
+- **Reliability**: No relay connection drops between steps
+- **Speed**: No LLM decision overhead between steps
+- **Atomicity**: Single success/failure result for the entire pipeline
 
 ### Example: Flash with Image Transfer
 
