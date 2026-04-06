@@ -14,14 +14,19 @@ import pytest
 from hmopt.api.flash_mcp_service import (
     _translate_image_path,
     build_flash_fastmcp_server,
+    enter_bootloader,
     flash_and_boot,
     flash_and_boot_async,
     flash_device,
+    flash_partitions,
     get_flash_task_status,
     list_fastboot_devices,
+    list_hdc_targets,
     reboot_device,
     relay_health_check,
+    transfer_images,
     wait_for_device_boot,
+    wait_for_fastboot_device,
 )
 
 
@@ -30,9 +35,7 @@ from hmopt.api.flash_mcp_service import (
 # ---------------------------------------------------------------------------
 
 class FakeRelayHandler(BaseHTTPRequestHandler):
-    """Minimal relay that returns canned responses."""
-
-    responses: dict[str, Any] = {}
+    """Minimal relay that returns canned responses for the full flash workflow."""
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         pass
@@ -56,15 +59,20 @@ class FakeRelayHandler(BaseHTTPRequestHandler):
         command = body.get("command", "")
         args = body.get("args", [])
 
-        # Build a canned response based on command
-        if command == "fastboot" and "devices" in args:
-            result = {"returncode": 0, "stdout": "ABC123\tfastboot\n", "stderr": "", "duration_s": 0.1, "command": "fastboot devices"}
-        elif command == "fastboot" and "flash" in args:
-            result = {"returncode": 0, "stdout": "Sending 'boot' ...\nOKAY", "stderr": "", "duration_s": 2.0, "command": " ".join(["fastboot"] + args)}
-        elif command == "fastboot" and "reboot" in args:
-            result = {"returncode": 0, "stdout": "Rebooting...", "stderr": "", "duration_s": 0.5, "command": "fastboot reboot"}
+        # Canned responses for the full flash workflow
+        if command == "pscp":
+            result = {"returncode": 0, "stdout": "boot.img | 1024 kB | 1024.0 kB/s | ETA: 00:00:00 | 100%", "stderr": "", "duration_s": 1.0, "command": f"pscp {' '.join(args)}"}
+        elif command == "hdc" and "reboot" in args and "bootloader" in args:
+            result = {"returncode": 0, "stdout": "", "stderr": "", "duration_s": 0.5, "command": "hdc shell reboot bootloader"}
         elif command == "hdc" and "list" in args:
             result = {"returncode": 0, "stdout": "ABC123\n", "stderr": "", "duration_s": 0.1, "command": "hdc list targets"}
+        elif command == "fastboot" and "devices" in args:
+            result = {"returncode": 0, "stdout": "ABC123\tfastboot\n", "stderr": "", "duration_s": 0.1, "command": "fastboot devices"}
+        elif command == "fastboot" and "flash" in args:
+            partition = args[args.index("flash") + 1] if "flash" in args else "unknown"
+            result = {"returncode": 0, "stdout": f"Sending '{partition}' ...\nOKAY", "stderr": "", "duration_s": 2.0, "command": " ".join(["fastboot"] + args)}
+        elif command == "fastboot" and "reboot" in args:
+            result = {"returncode": 0, "stdout": "Rebooting...", "stderr": "", "duration_s": 0.5, "command": "fastboot reboot"}
         else:
             result = {"returncode": 1, "stdout": "", "stderr": f"unknown: {command} {args}", "duration_s": 0.01, "command": f"{command} {' '.join(args)}"}
 
@@ -91,6 +99,10 @@ def fake_relay():
         "HMOPT_FLASH_SERVER_IMAGE_PREFIX": "",
         "HMOPT_FLASH_WINDOWS_IMAGE_PREFIX": "",
         "HMOPT_FLASH_DEVICE_SERIAL": "",
+        "HMOPT_FLASH_SCP_HOST": "10.0.0.1",
+        "HMOPT_FLASH_SCP_USER": "testuser",
+        "HMOPT_FLASH_SCP_PASSWORD": "testpass",
+        "HMOPT_FLASH_WINDOWS_IMAGE_DIR": "C:\\images",
     }):
         yield relay_url
 
@@ -150,10 +162,49 @@ def test_list_fastboot_devices(fake_relay):
     assert result["devices"][0]["serial"] == "ABC123"
 
 
+def test_list_hdc_targets(fake_relay):
+    result = list_hdc_targets()
+    assert "ABC123" in result["targets"]
+
+
+def test_transfer_images(fake_relay):
+    result = transfer_images(
+        images=[
+            {"server_path": "/home/damon/signing/boot.img", "local_filename": "boot_plr.img"},
+            {"server_path": "/home/damon/signing/modem_driver.img", "local_filename": "modem_driver_plr.img"},
+        ],
+    )
+    assert result["success"] is True
+    assert len(result["transfers"]) == 2
+    assert all(t["success"] for t in result["transfers"])
+
+
+def test_enter_bootloader(fake_relay):
+    result = enter_bootloader(device_serial="ABC123")
+    assert result["success"] is True
+
+
+def test_wait_for_fastboot_device(fake_relay):
+    result = wait_for_fastboot_device(device_serial="ABC123", timeout_s=5, poll_interval_s=0.1)
+    assert result["success"] is True
+
+
 def test_flash_device(fake_relay):
-    result = flash_device(partition="boot", image_path="/tmp/boot.img", device_serial="ABC123")
+    result = flash_device(partition="boot", image_path="boot_plr.img", device_serial="ABC123")
     assert result["success"] is True
     assert result["partition"] == "boot"
+
+
+def test_flash_partitions(fake_relay):
+    result = flash_partitions(
+        partitions=[
+            {"partition": "boot", "image_path": "boot_plr.img"},
+            {"partition": "modem_driver", "image_path": "modem_driver_plr.img"},
+        ],
+        device_serial="ABC123",
+    )
+    assert result["success"] is True
+    assert len(result["partitions_flashed"]) == 2
 
 
 def test_reboot_device(fake_relay):
@@ -166,27 +217,59 @@ def test_wait_for_device_boot(fake_relay):
     assert result["success"] is True
 
 
-def test_flash_and_boot(fake_relay):
+def test_flash_and_boot_full_pipeline(fake_relay):
+    """Test the full production flash pipeline: transfer + bootloader + flash + reboot + wait."""
     result = flash_and_boot(
-        partition="boot",
-        image_path="/tmp/boot.img",
+        server_images=[
+            {"server_path": "/home/damon/signing/boot.img", "local_filename": "boot_plr.img"},
+        ],
+        partitions=[
+            {"partition": "boot", "image_path": "boot_plr.img"},
+            {"partition": "modem_driver", "image_path": "modem_driver_plr.img"},
+        ],
         device_serial="ABC123",
+        bootloader_wait_s=0,  # no wait in tests
+        fastboot_wait_s=5,
         flash_timeout_s=10,
         boot_wait_timeout_s=5,
         poll_interval_s=0.1,
     )
     assert result["success"] is True
     assert result["phase"] == "complete"
+    assert "transfer" in result["steps"]
+    assert "enter_bootloader" in result["steps"]
+    assert "wait_fastboot" in result["steps"]
     assert "flash" in result["steps"]
     assert "reboot" in result["steps"]
     assert "boot_wait" in result["steps"]
 
 
+def test_flash_and_boot_no_transfer(fake_relay):
+    """Test flash pipeline without image transfer (images already on Windows)."""
+    result = flash_and_boot(
+        partitions=[
+            {"partition": "boot", "image_path": "boot_plr.img"},
+        ],
+        device_serial="ABC123",
+        bootloader_wait_s=0,
+        fastboot_wait_s=5,
+        flash_timeout_s=10,
+        boot_wait_timeout_s=5,
+        poll_interval_s=0.1,
+    )
+    assert result["success"] is True
+    assert "transfer" not in result["steps"]
+    assert "enter_bootloader" in result["steps"]
+
+
 def test_flash_and_boot_async(fake_relay):
     task_info = flash_and_boot_async(
-        partition="boot",
-        image_path="/tmp/boot.img",
+        partitions=[
+            {"partition": "boot", "image_path": "boot_plr.img"},
+        ],
         device_serial="ABC123",
+        bootloader_wait_s=0,
+        fastboot_wait_s=5,
         flash_timeout_s=10,
         boot_wait_timeout_s=5,
         poll_interval_s=0.1,
@@ -194,7 +277,6 @@ def test_flash_and_boot_async(fake_relay):
     assert "task_id" in task_info
     assert task_info["status"] == "pending"
 
-    # Poll until done
     import time
     for _ in range(50):
         status = get_flash_task_status(task_info["task_id"])

@@ -125,6 +125,8 @@ def test_allowed_commands_set():
     assert "hdc" in ALLOWED_COMMANDS
     assert "adb" in ALLOWED_COMMANDS
     assert "ping" in ALLOWED_COMMANDS
+    assert "pscp" in ALLOWED_COMMANDS
+    assert "scp" in ALLOWED_COMMANDS
     # Dangerous commands should NOT be allowed
     assert "rm" not in ALLOWED_COMMANDS
     assert "bash" not in ALLOWED_COMMANDS

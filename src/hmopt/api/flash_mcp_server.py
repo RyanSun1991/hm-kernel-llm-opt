@@ -11,14 +11,19 @@ from fastapi import FastAPI, HTTPException
 
 from hmopt.api.flash_mcp_service import (
     build_flash_fastmcp_server,
+    enter_bootloader,
     flash_and_boot,
     flash_and_boot_async,
     flash_device,
+    flash_partitions,
     get_flash_task_status,
     list_fastboot_devices,
+    list_hdc_targets,
     reboot_device,
     relay_health_check,
+    transfer_images,
     wait_for_device_boot,
+    wait_for_fastboot_device,
 )
 
 
@@ -49,7 +54,11 @@ def _bind_task_group(mcp_server: Any, tg: anyio.abc.TaskGroup) -> None:
 MCP_MOUNT_PATH = _normalize_mount_path(os.getenv("HMOPT_FLASH_MCP_MOUNT_PATH", "/mcp"))
 _fast_mcp = build_flash_fastmcp_server()
 _SUPPORTED_TOOLS = {
+    "transfer_images",
+    "enter_bootloader",
+    "wait_for_fastboot",
     "flash_device",
+    "flash_partitions",
     "flash_and_boot",
     "flash_and_boot_async",
     "flash_status",
@@ -57,10 +66,15 @@ _SUPPORTED_TOOLS = {
     "device_wait_boot",
     "relay_health",
     "list_devices",
+    "list_hdc_targets",
 }
 
 _TOOL_DISPATCH = {
+    "transfer_images": lambda args: transfer_images(**args),
+    "enter_bootloader": lambda args: enter_bootloader(**args),
+    "wait_for_fastboot": lambda args: wait_for_fastboot_device(**args),
     "flash_device": lambda args: flash_device(**args),
+    "flash_partitions": lambda args: flash_partitions(**args),
     "flash_and_boot": lambda args: flash_and_boot(**args),
     "flash_and_boot_async": lambda args: flash_and_boot_async(**args),
     "flash_status": lambda args: get_flash_task_status(**args),
@@ -68,6 +82,7 @@ _TOOL_DISPATCH = {
     "device_wait_boot": lambda args: wait_for_device_boot(**args),
     "relay_health": lambda _args: relay_health_check(),
     "list_devices": lambda _args: list_fastboot_devices(),
+    "list_hdc_targets": lambda _args: list_hdc_targets(),
 }
 
 

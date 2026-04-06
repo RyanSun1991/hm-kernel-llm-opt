@@ -24,6 +24,9 @@ ALLOWED_COMMANDS: set[str] = {
     "hdc", "hdc.exe",
     "adb", "adb.exe",
     "ping", "ping.exe",
+    # SCP tools for pulling images from the build server
+    "pscp", "pscp.exe",
+    "scp", "scp.exe",
 }
 
 DEFAULT_PORT = 9100
