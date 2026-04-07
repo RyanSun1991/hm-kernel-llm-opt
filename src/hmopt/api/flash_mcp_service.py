@@ -139,6 +139,53 @@ def _windows_image_dir() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Stock / Feature image directory helpers
+# ---------------------------------------------------------------------------
+
+def _stock_image_dir() -> str:
+    return _env("HMOPT_FLASH_STOCK_IMAGE_DIR")
+
+
+def _feature_image_dir() -> str:
+    return _env("HMOPT_FLASH_FEATURE_IMAGE_DIR")
+
+
+def _default_partitions() -> list[dict[str, str]]:
+    """Parse HMOPT_FLASH_DEFAULT_PARTITIONS into partition/image_path dicts.
+
+    Format: "boot:boot.img,modem_driver:modem_driver.img"
+    """
+    raw = _env("HMOPT_FLASH_DEFAULT_PARTITIONS", "boot:boot.img,modem_driver:modem_driver.img")
+    result: list[dict[str, str]] = []
+    for entry in raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        if ":" in entry:
+            partition, filename = entry.split(":", 1)
+            result.append({"partition": partition.strip(), "image_path": filename.strip()})
+        else:
+            # assume partition name equals filename without extension
+            result.append({"partition": entry, "image_path": f"{entry}.img"})
+    return result
+
+
+def _build_server_images(image_dir: str, partitions: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Build server_images list from an image directory and partition definitions.
+
+    For each partition, creates {"server_path": "<image_dir>/<filename>", "local_filename": "<filename>"}.
+    """
+    normalized_dir = image_dir.rstrip("/")
+    return [
+        {
+            "server_path": f"{normalized_dir}/{p['image_path']}",
+            "local_filename": p["image_path"],
+        }
+        for p in partitions
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Public tool functions
 # ---------------------------------------------------------------------------
 
@@ -642,6 +689,134 @@ def get_flash_task_status(task_id: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# High-level stock / feature flash helpers
+# ---------------------------------------------------------------------------
+
+def flash_stock(
+    *,
+    partitions: list[dict[str, str]] | None = None,
+    stock_image_dir: str | None = None,
+    device_serial: str | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Flash the stock (baseline) image set to the device.
+
+    Resolves image paths from HMOPT_FLASH_STOCK_IMAGE_DIR and default partitions
+    so the caller doesn't need to construct full server_images manually.
+
+    Args:
+        partitions: Override partition list. Defaults to HMOPT_FLASH_DEFAULT_PARTITIONS.
+        stock_image_dir: Override stock image dir. Defaults to HMOPT_FLASH_STOCK_IMAGE_DIR.
+        device_serial: Target device serial.
+        **kwargs: Passed through to flash_and_boot (scp_host, timeouts, etc.).
+    """
+    parts = partitions or _default_partitions()
+    img_dir = stock_image_dir or _stock_image_dir()
+    if not img_dir:
+        raise ValueError(
+            "Stock image directory is required. Set stock_image_dir argument "
+            "or HMOPT_FLASH_STOCK_IMAGE_DIR environment variable."
+        )
+    server_images = _build_server_images(img_dir, parts)
+    return flash_and_boot(
+        partitions=parts,
+        server_images=server_images,
+        device_serial=device_serial,
+        **kwargs,
+    )
+
+
+def flash_feature(
+    *,
+    partitions: list[dict[str, str]] | None = None,
+    feature_image_dir: str | None = None,
+    device_serial: str | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Flash the feature (patched/optimized) image set to the device.
+
+    Resolves image paths from HMOPT_FLASH_FEATURE_IMAGE_DIR and default partitions
+    so the caller doesn't need to construct full server_images manually.
+
+    Args:
+        partitions: Override partition list. Defaults to HMOPT_FLASH_DEFAULT_PARTITIONS.
+        feature_image_dir: Override feature image dir. Defaults to HMOPT_FLASH_FEATURE_IMAGE_DIR.
+        device_serial: Target device serial.
+        **kwargs: Passed through to flash_and_boot (scp_host, timeouts, etc.).
+    """
+    parts = partitions or _default_partitions()
+    img_dir = feature_image_dir or _feature_image_dir()
+    if not img_dir:
+        raise ValueError(
+            "Feature image directory is required. Set feature_image_dir argument "
+            "or HMOPT_FLASH_FEATURE_IMAGE_DIR environment variable."
+        )
+    server_images = _build_server_images(img_dir, parts)
+    return flash_and_boot(
+        partitions=parts,
+        server_images=server_images,
+        device_serial=device_serial,
+        **kwargs,
+    )
+
+
+def flash_stock_async(
+    *,
+    partitions: list[dict[str, str]] | None = None,
+    stock_image_dir: str | None = None,
+    device_serial: str | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Submit stock flash as an async task, returns task_id immediately."""
+    parts = partitions or _default_partitions()
+    img_dir = stock_image_dir or _stock_image_dir()
+    payload = {
+        "kind": "flash_stock",
+        "partitions": parts,
+        "stock_image_dir": img_dir,
+        "device_serial": device_serial,
+    }
+    return _submit_async_task(
+        "flash_stock",
+        payload,
+        lambda: flash_stock(
+            partitions=parts,
+            stock_image_dir=img_dir,
+            device_serial=device_serial,
+            **kwargs,
+        ),
+    )
+
+
+def flash_feature_async(
+    *,
+    partitions: list[dict[str, str]] | None = None,
+    feature_image_dir: str | None = None,
+    device_serial: str | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Submit feature flash as an async task, returns task_id immediately."""
+    parts = partitions or _default_partitions()
+    img_dir = feature_image_dir or _feature_image_dir()
+    payload = {
+        "kind": "flash_feature",
+        "partitions": parts,
+        "feature_image_dir": img_dir,
+        "device_serial": device_serial,
+    }
+    return _submit_async_task(
+        "flash_feature",
+        payload,
+        lambda: flash_feature(
+            partitions=parts,
+            feature_image_dir=img_dir,
+            device_serial=device_serial,
+            **kwargs,
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # FastMCP server builder
 # ---------------------------------------------------------------------------
 
@@ -832,6 +1007,116 @@ def build_flash_fastmcp_server() -> Any | None:
         return wait_for_device_boot(
             device_serial=device_serial,
             timeout_s=timeout_s,
+            poll_interval_s=poll_interval_s,
+        )
+
+    @mcp.tool(
+        name="flash_stock",
+        description=(
+            "Flash the STOCK (baseline) image to the device. "
+            "Uses HMOPT_FLASH_STOCK_IMAGE_DIR to resolve image paths automatically. "
+            "Runs the full pipeline: pscp transfer → bootloader → flash → reboot → wait hdc. "
+            "For A/B testing, call this first to establish the baseline."
+        ),
+    )
+    def mcp_flash_stock(
+        partitions: list[dict[str, str]] | None = None,
+        stock_image_dir: str | None = None,
+        device_serial: str | None = None,
+        bootloader_wait_s: int = 15,
+        fastboot_wait_s: int = 30,
+        flash_timeout_s: int = 600,
+        boot_wait_timeout_s: int = 300,
+        poll_interval_s: int = 5,
+    ) -> dict[str, Any]:
+        return flash_stock(
+            partitions=partitions,
+            stock_image_dir=stock_image_dir,
+            device_serial=device_serial,
+            bootloader_wait_s=bootloader_wait_s,
+            fastboot_wait_s=fastboot_wait_s,
+            flash_timeout_s=flash_timeout_s,
+            boot_wait_timeout_s=boot_wait_timeout_s,
+            poll_interval_s=poll_interval_s,
+        )
+
+    @mcp.tool(
+        name="flash_feature",
+        description=(
+            "Flash the FEATURE (patched/optimized) image to the device. "
+            "Uses HMOPT_FLASH_FEATURE_IMAGE_DIR to resolve image paths automatically. "
+            "Runs the full pipeline: pscp transfer → bootloader → flash → reboot → wait hdc. "
+            "For A/B testing, call this after stock baseline to flash the candidate."
+        ),
+    )
+    def mcp_flash_feature(
+        partitions: list[dict[str, str]] | None = None,
+        feature_image_dir: str | None = None,
+        device_serial: str | None = None,
+        bootloader_wait_s: int = 15,
+        fastboot_wait_s: int = 30,
+        flash_timeout_s: int = 600,
+        boot_wait_timeout_s: int = 300,
+        poll_interval_s: int = 5,
+    ) -> dict[str, Any]:
+        return flash_feature(
+            partitions=partitions,
+            feature_image_dir=feature_image_dir,
+            device_serial=device_serial,
+            bootloader_wait_s=bootloader_wait_s,
+            fastboot_wait_s=fastboot_wait_s,
+            flash_timeout_s=flash_timeout_s,
+            boot_wait_timeout_s=boot_wait_timeout_s,
+            poll_interval_s=poll_interval_s,
+        )
+
+    @mcp.tool(
+        name="flash_stock_async",
+        description="Submit stock flash pipeline as async task, returns task_id immediately.",
+    )
+    def mcp_flash_stock_async(
+        partitions: list[dict[str, str]] | None = None,
+        stock_image_dir: str | None = None,
+        device_serial: str | None = None,
+        bootloader_wait_s: int = 15,
+        fastboot_wait_s: int = 30,
+        flash_timeout_s: int = 600,
+        boot_wait_timeout_s: int = 300,
+        poll_interval_s: int = 5,
+    ) -> dict[str, Any]:
+        return flash_stock_async(
+            partitions=partitions,
+            stock_image_dir=stock_image_dir,
+            device_serial=device_serial,
+            bootloader_wait_s=bootloader_wait_s,
+            fastboot_wait_s=fastboot_wait_s,
+            flash_timeout_s=flash_timeout_s,
+            boot_wait_timeout_s=boot_wait_timeout_s,
+            poll_interval_s=poll_interval_s,
+        )
+
+    @mcp.tool(
+        name="flash_feature_async",
+        description="Submit feature flash pipeline as async task, returns task_id immediately.",
+    )
+    def mcp_flash_feature_async(
+        partitions: list[dict[str, str]] | None = None,
+        feature_image_dir: str | None = None,
+        device_serial: str | None = None,
+        bootloader_wait_s: int = 15,
+        fastboot_wait_s: int = 30,
+        flash_timeout_s: int = 600,
+        boot_wait_timeout_s: int = 300,
+        poll_interval_s: int = 5,
+    ) -> dict[str, Any]:
+        return flash_feature_async(
+            partitions=partitions,
+            feature_image_dir=feature_image_dir,
+            device_serial=device_serial,
+            bootloader_wait_s=bootloader_wait_s,
+            fastboot_wait_s=fastboot_wait_s,
+            flash_timeout_s=flash_timeout_s,
+            boot_wait_timeout_s=boot_wait_timeout_s,
             poll_interval_s=poll_interval_s,
         )
 

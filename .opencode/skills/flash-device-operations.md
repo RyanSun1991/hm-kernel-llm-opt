@@ -49,7 +49,25 @@ The script outputs a single JSON result to stdout with success/failure and step 
 - **Speed**: No LLM decision overhead between steps
 - **Atomicity**: Single success/failure result for the entire pipeline
 
-### Example: Flash with Image Transfer
+### Example: Flash Stock Image (A/B Baseline)
+
+The simplest way — uses `HMOPT_FLASH_STOCK_IMAGE_DIR` and `HMOPT_FLASH_DEFAULT_PARTITIONS` from env:
+
+```
+flash_stock(device_serial="<serial>")
+```
+
+### Example: Flash Feature Image (A/B Candidate)
+
+Uses `HMOPT_FLASH_FEATURE_IMAGE_DIR` and `HMOPT_FLASH_DEFAULT_PARTITIONS` from env:
+
+```
+flash_feature(device_serial="<serial>")
+```
+
+### Example: Flash with Explicit Image Transfer
+
+For custom paths not matching the env defaults:
 
 ```
 flash_and_boot(
@@ -82,6 +100,10 @@ flash_and_boot(
 
 | Tool | Purpose |
 |---|---|
+| **`flash_stock`** | **Flash stock (baseline) image — auto-resolves paths from `HMOPT_FLASH_STOCK_IMAGE_DIR`** |
+| **`flash_feature`** | **Flash feature (patched) image — auto-resolves paths from `HMOPT_FLASH_FEATURE_IMAGE_DIR`** |
+| `flash_stock_async` | Async version of `flash_stock`, returns task_id |
+| `flash_feature_async` | Async version of `flash_feature`, returns task_id |
 | `transfer_images` | Pull images from build server to Windows via pscp |
 | `enter_bootloader` | `hdc shell reboot bootloader` to enter fastboot mode |
 | `wait_for_fastboot` | Poll `fastboot devices` until device appears |
@@ -124,10 +146,25 @@ Configure via environment variables:
 
 In A/B testing workflows:
 
-- **Stock image**: Baseline kernel without patches. Built from the clean branch, signed images at the stock signing path.
-- **Feature image**: Kernel with the optimization patch. Built and signed via Build MCP.
+- **Stock image**: Baseline kernel without patches. Path configured via `HMOPT_FLASH_STOCK_IMAGE_DIR`.
+- **Feature image**: Kernel with the optimization patch. Path configured via `HMOPT_FLASH_FEATURE_IMAGE_DIR`.
+- **Default partitions**: Configured via `HMOPT_FLASH_DEFAULT_PARTITIONS` (default: `boot:boot.img,modem_driver:modem_driver.img`).
 
-The tester agent must flash and test both in sequence. See `ab-test-comparison.md` for the full A/B protocol.
+The tester agent uses the simplified `flash_stock` / `flash_feature` tools:
+
+```
+# Phase A: Stock baseline
+flash_stock(device_serial="<serial>")
+# ... run stock test ...
+
+# Phase B: Feature candidate
+flash_feature(device_serial="<serial>")
+# ... run feature test ...
+```
+
+Both tools auto-resolve `server_images` from the configured image directory and default partitions. Override via arguments when needed (e.g., when Build MCP outputs images to a non-default path).
+
+See `ab-test-comparison.md` for the full A/B protocol.
 
 ## Security
 
