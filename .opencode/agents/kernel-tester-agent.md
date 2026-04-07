@@ -55,18 +55,21 @@ The handoff from the manager or code reviewer MUST include:
 
 ### Phase 2A — Stock Baseline Test
 
-7. **Flash stock image**: Use Flash MCP `flash_and_boot` with the stock image configuration.
-   - `server_images` points to the stock signing path on the build server.
-   - `partitions` lists boot + modem_driver (or relevant partitions).
+7. **Flash stock image**: Use Flash MCP `flash_stock` tool.
+   - This automatically resolves image paths from `HMOPT_FLASH_STOCK_IMAGE_DIR` and `HMOPT_FLASH_DEFAULT_PARTITIONS`.
+   - No need to manually construct `server_images` or `partitions` — the tool reads them from env config.
+   - Optionally pass `device_serial` if not set in env, or override `stock_image_dir` / `partitions` if needed.
    - The integrated flash_pipeline.py handles: pscp → hdc reboot bootloader → wait fastboot → flash → reboot → wait hdc — all as one atomic operation.
+   - Example: `flash_stock(device_serial="<serial>")` — that's it.
 8. **Run stock test**: Use Auto-Test MCP `phone_test_run` to execute the test case.
 9. Retrieve and label results as `baseline_*` artifacts.
 
 ### Phase 2B — Feature Candidate Test
 
-10. **Flash feature image**: Use Flash MCP `flash_and_boot` with the feature image configuration.
-    - `server_images` points to the feature signing path (from the build+sign output).
-    - Same partitions and device as stock.
+10. **Flash feature image**: Use Flash MCP `flash_feature` tool.
+    - This automatically resolves image paths from `HMOPT_FLASH_FEATURE_IMAGE_DIR` and `HMOPT_FLASH_DEFAULT_PARTITIONS`.
+    - Same simplified interface as `flash_stock` — just call `flash_feature(device_serial="<serial>")`.
+    - Override `feature_image_dir` if the build+sign output is at a different path than the env default.
 11. **Run feature test**: Use Auto-Test MCP `phone_test_run` with IDENTICAL test parameters.
 12. Retrieve and label results as `candidate_*` artifacts.
 
