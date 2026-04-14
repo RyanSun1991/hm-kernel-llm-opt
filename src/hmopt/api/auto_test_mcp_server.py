@@ -11,7 +11,12 @@ from fastapi import FastAPI, HTTPException
 
 from hmopt.api.auto_test_mcp_service import (
     DEFAULT_TOOL_NAME,
+    auto_test_relay_health_check,
     build_auto_test_fastmcp_server,
+    compare_reports,
+    get_instruction_task_status,
+    run_instruction_test,
+    run_instruction_test_async,
     run_phone_test,
 )
 
@@ -67,9 +72,21 @@ def health() -> dict[str, Any]:
         "mcp_mount_path": MCP_MOUNT_PATH,
         "mcp_protocol_enabled": _fast_mcp is not None,
         "tool_name": _TOOL_NAME,
+        "instruction_test_tools": sorted(_TOOL_DISPATCH.keys()),
         "hdc_bin": os.getenv("HMOPT_AUTO_TEST_HDC_BIN", "hdc"),
         "default_result_dir": os.getenv("HMOPT_AUTO_TEST_RESULT_DIR", "outputs/phone_test_results"),
+        "windows_relay_url": os.getenv("HMOPT_AUTO_TEST_RELAY_URL") or os.getenv("HMOPT_FLASH_RELAY_URL") or "",
+        "windows_test_dir": os.getenv("HMOPT_AUTO_TEST_WINDOWS_TEST_DIR", r"D:\modelCase_OH_single"),
     }
+
+
+_TOOL_DISPATCH: dict[str, Any] = {
+    "run_instruction_test": run_instruction_test,
+    "run_instruction_test_async": run_instruction_test_async,
+    "instruction_test_status": get_instruction_task_status,
+    "compare_reports": compare_reports,
+    "auto_test_relay_health": auto_test_relay_health_check,
+}
 
 
 @app.post("/tools/call")
@@ -78,13 +95,22 @@ def call_tool(payload: dict[str, Any]) -> dict[str, Any]:
     arguments = payload.get("arguments") or {}
     if not tool_name:
         raise HTTPException(status_code=400, detail="tool is required")
-    if tool_name != _TOOL_NAME:
-        raise HTTPException(status_code=400, detail=f"unknown tool: {tool_name}. available tools: [{_TOOL_NAME}]")
     if not isinstance(arguments, dict):
         raise HTTPException(status_code=400, detail="arguments must be an object")
 
+    if tool_name == _TOOL_NAME:
+        handler: Any = run_phone_test
+    elif tool_name in _TOOL_DISPATCH:
+        handler = _TOOL_DISPATCH[tool_name]
+    else:
+        available = sorted({_TOOL_NAME, *_TOOL_DISPATCH.keys()})
+        raise HTTPException(
+            status_code=400,
+            detail=f"unknown tool: {tool_name}. available tools: {available}",
+        )
+
     try:
-        context = run_phone_test(**arguments)
+        context = handler(**arguments)
     except TypeError as exc:
         raise HTTPException(status_code=400, detail=f"invalid arguments: {exc}") from exc
     except ValueError as exc:
