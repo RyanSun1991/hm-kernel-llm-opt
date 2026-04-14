@@ -221,6 +221,30 @@ def test_run_instruction_test_async_completes(fake_relay):
     assert status["result"]["success"] is True
 
 
+def test_run_instruction_test_forwards_venv_flags(fake_relay):
+    server, _ = fake_relay
+    server.response["stdout"] = json.dumps({"success": True, "phase": "complete", "report_path": "x", "report_name": "x"})
+
+    # Default (use_venv=True, no explicit venv_dir): no venv flags present.
+    svc.run_instruction_test()
+    argv = server.last_request["args"]
+    assert "--no-venv" not in argv
+    assert "--venv-dir" not in argv
+
+    # use_venv=False: pipeline gets --no-venv.
+    svc.run_instruction_test(use_venv=False)
+    argv = server.last_request["args"]
+    assert "--no-venv" in argv
+    assert "--venv-dir" not in argv
+
+    # use_venv=True with custom venv_dir: pipeline gets --venv-dir.
+    svc.run_instruction_test(venv_dir="myenv")
+    argv = server.last_request["args"]
+    assert "--no-venv" not in argv
+    assert "--venv-dir" in argv
+    assert "myenv" in argv
+
+
 def test_relay_url_missing_raises(monkeypatch):
     # Ensure neither variant is set.
     monkeypatch.delenv("HMOPT_AUTO_TEST_RELAY_URL", raising=False)

@@ -445,6 +445,8 @@ def run_instruction_test(
     metric_key: str | None = None,
     metric_pattern: str | None = None,
     python_exe: str | None = None,
+    use_venv: bool = True,
+    venv_dir: str | None = None,
 ) -> dict[str, Any]:
     """Trigger modelCase's ``main.py`` on the Windows host via the relay.
 
@@ -473,7 +475,15 @@ def run_instruction_test(
         run_timeout_s: Ceiling on the ``main.py`` execution time.
         metric_file / metric_key / metric_pattern: Forwarded to
             ``report_compare.py`` when *compare* is True.
-        python_exe: Override the python interpreter on Windows.
+        python_exe: Override the python interpreter on Windows. Takes
+            precedence over venv auto-detection.
+        use_venv: When True (default) the pipeline probes
+            ``<test_dir>\\.venv\\Scripts\\python.exe`` (and ``venv/``
+            plus POSIX equivalents) and uses it if present, which is
+            equivalent to running ``activate.bat`` first.  Set False to
+            force the system interpreter.
+        venv_dir: Override the venv directory name (absolute or
+            relative to ``test_dir``).
     """
     if compare and not baseline_report:
         raise ValueError("baseline_report is required when compare=True")
@@ -491,6 +501,10 @@ def run_instruction_test(
     ]
     if python_exe:
         argv.extend(["--python-exe", python_exe])
+    if not use_venv:
+        argv.append("--no-venv")
+    elif venv_dir:
+        argv.extend(["--venv-dir", venv_dir])
     if compare:
         argv.append("--compare")
         argv.extend(["--baseline-report", baseline_report or ""])
@@ -758,6 +772,8 @@ def build_auto_test_fastmcp_server() -> Any | None:
         metric_key: str | None = None,
         metric_pattern: str | None = None,
         python_exe: str | None = None,
+        use_venv: bool = True,
+        venv_dir: str | None = None,
     ) -> dict[str, Any]:
         return run_instruction_test(
             compare=compare,
@@ -772,6 +788,8 @@ def build_auto_test_fastmcp_server() -> Any | None:
             metric_key=metric_key,
             metric_pattern=metric_pattern,
             python_exe=python_exe,
+            use_venv=use_venv,
+            venv_dir=venv_dir,
         )
 
     @mcp.tool(
@@ -795,6 +813,8 @@ def build_auto_test_fastmcp_server() -> Any | None:
         metric_key: str | None = None,
         metric_pattern: str | None = None,
         python_exe: str | None = None,
+        use_venv: bool = True,
+        venv_dir: str | None = None,
     ) -> dict[str, Any]:
         return run_instruction_test_async(
             compare=compare,
@@ -809,6 +829,8 @@ def build_auto_test_fastmcp_server() -> Any | None:
             metric_key=metric_key,
             metric_pattern=metric_pattern,
             python_exe=python_exe,
+            use_venv=use_venv,
+            venv_dir=venv_dir,
         )
 
     @mcp.tool(

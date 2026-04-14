@@ -45,6 +45,23 @@ DEFAULT_MAIN_SCRIPT = "main.py"
 DEFAULT_RUN_TIMEOUT_S = 3600 * 2  # 2 hours to allow long instruction runs
 DEFAULT_TEST_DIR = r"D:\modelCase_OH_single"
 
+# Candidate venv directories to probe under ``test_dir`` when ``--venv-dir``
+# is not supplied.  Matches what ``python -m venv`` / ``uv venv`` / ``poetry``
+# commonly create next to a project's main.py.
+DEFAULT_VENV_DIR_CANDIDATES: tuple[str, ...] = (".venv", "venv")
+
+# Relative paths to the python interpreter inside a venv.  We probe the
+# Windows layout first (Scripts\\python.exe, which is what ``activate.bat``
+# prepends to PATH) and fall back to the POSIX layout so the same
+# detection logic also works when this pipeline is run on macOS/Linux
+# for local testing.
+VENV_PYTHON_RELPATHS: tuple[str, ...] = (
+    os.path.join("Scripts", "python.exe"),
+    os.path.join("Scripts", "python3.exe"),
+    os.path.join("bin", "python"),
+    os.path.join("bin", "python3"),
+)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -185,14 +202,81 @@ def _truncate(text: str, max_chars: int = 4000) -> str:
     return text[:keep] + f"\n... [truncated {len(text) - max_chars} chars] ...\n" + text[-keep:]
 
 
-def _resolve_python_exe(override: str | None = None) -> str:
-    """Return a python executable suitable for launching main.py."""
+def _detect_venv_python(test_dir: str, venv_dir: str | None = None) -> str | None:
+    """Return an absolute path to a venv python inside *test_dir* if one exists.
+
+    Using the venv's ``python.exe`` directly is equivalent, for our purposes,
+    to running ``activate.bat`` first — ``activate.bat`` only prepends
+    ``<venv>\\Scripts`` to ``PATH``, which is exactly where this interpreter
+    lives.  So if ``<test_dir>\\.venv\\Scripts\\python.exe`` (or the
+    workspace-supplied ``--venv-dir``) is present, we launch ``main.py``
+    with it and the run sees the intended site-packages; if nothing is
+    found, we fall back to the system interpreter.
+
+    Probe order:
+      1. Explicit *venv_dir* (absolute or relative to *test_dir*).
+      2. ``<test_dir>\\.venv`` then ``<test_dir>\\venv``.
+      3. Within each root, Scripts\\python.exe -> bin/python.
+    """
+    if venv_dir:
+        candidate_roots: list[str] = [
+            venv_dir if os.path.isabs(venv_dir) else os.path.join(test_dir, venv_dir)
+        ]
+    else:
+        candidate_roots = [os.path.join(test_dir, d) for d in DEFAULT_VENV_DIR_CANDIDATES]
+
+    for root in candidate_roots:
+        if not os.path.isdir(root):
+            continue
+        for rel in VENV_PYTHON_RELPATHS:
+            path = os.path.join(root, rel)
+            if os.path.isfile(path):
+                return path
+    return None
+
+
+def _detect_activate_bat(test_dir: str, venv_dir: str | None = None) -> str | None:
+    """Return the path to ``Scripts\\activate.bat`` if it exists.
+
+    Used only for informational logging in the result JSON; the
+    interpreter itself is invoked via :func:`_detect_venv_python`, which
+    is equivalent but avoids a cmd.exe shim.
+    """
+    if venv_dir:
+        roots = [venv_dir if os.path.isabs(venv_dir) else os.path.join(test_dir, venv_dir)]
+    else:
+        roots = [os.path.join(test_dir, d) for d in DEFAULT_VENV_DIR_CANDIDATES]
+
+    for root in roots:
+        path = os.path.join(root, "Scripts", "activate.bat")
+        if os.path.isfile(path):
+            return path
+    return None
+
+
+def _resolve_python_exe(
+    override: str | None = None,
+    *,
+    test_dir: str | None = None,
+    venv_dir: str | None = None,
+    use_venv: bool = True,
+) -> tuple[str, str | None]:
+    """Pick the python interpreter to launch ``main.py`` with.
+
+    Returns ``(python_exe, venv_python_used_or_none)``.  When *override*
+    is supplied it always wins; otherwise a venv python under
+    *test_dir* is preferred; otherwise falls back to the interpreter
+    currently running this pipeline.
+    """
     if override:
-        return override
-    # Prefer the exact interpreter currently running this pipeline.
+        return override, None
+    if use_venv and test_dir:
+        venv_python = _detect_venv_python(test_dir, venv_dir=venv_dir)
+        if venv_python:
+            return venv_python, venv_python
     if sys.executable:
-        return sys.executable
-    return "python"
+        return sys.executable, None
+    return "python", None
 
 
 def _resolve_compare_script(override: str | None = None) -> str:
@@ -220,6 +304,8 @@ def run_instruction_test(
     metric_file: str | None = None,
     metric_key: str | None = None,
     metric_pattern: str | None = None,
+    use_venv: bool = True,
+    venv_dir: str | None = None,
 ) -> dict[str, Any]:
     """Run ``main.py`` under *test_dir* and locate the fresh report directory.
 
@@ -253,7 +339,20 @@ def run_instruction_test(
     started_at = datetime.now()
     _log(f"snapshot: {len(baseline_names)} existing report(s) in {reports_dir}")
 
-    python = _resolve_python_exe(python_exe)
+    python, venv_python = _resolve_python_exe(
+        python_exe,
+        test_dir=test_dir_abs,
+        venv_dir=venv_dir,
+        use_venv=use_venv,
+    )
+    activate_bat = _detect_activate_bat(test_dir_abs, venv_dir=venv_dir) if use_venv else None
+    if venv_python:
+        _log(f"venv detected: using {venv_python}")
+    elif use_venv:
+        _log(f"no venv detected under {test_dir_abs}; using {python}")
+    else:
+        _log(f"venv auto-detect disabled; using {python}")
+
     argv = [python, os.path.basename(main_script) if not os.path.isabs(main_script) else main_script]
     if extra_args:
         argv.extend(str(a) for a in extra_args)
@@ -277,6 +376,9 @@ def run_instruction_test(
             "test_dir": test_dir_abs,
             "reports_dir": reports_dir,
             "started_at": started_at.isoformat(timespec="seconds"),
+            "python_exe": python,
+            "venv_python": venv_python,
+            "activate_bat": activate_bat,
             "run_result": main_result_summary,
         }
 
@@ -296,6 +398,9 @@ def run_instruction_test(
             "test_dir": test_dir_abs,
             "reports_dir": reports_dir,
             "started_at": started_at.isoformat(timespec="seconds"),
+            "python_exe": python,
+            "venv_python": venv_python,
+            "activate_bat": activate_bat,
             "run_result": main_result_summary,
         }
 
@@ -312,6 +417,9 @@ def run_instruction_test(
         "report_name": report_name,
         "report_timestamp": report_ts.isoformat(timespec="seconds") if report_ts else None,
         "started_at": started_at.isoformat(timespec="seconds"),
+        "python_exe": python,
+        "venv_python": venv_python,
+        "activate_bat": activate_bat,
         "run_result": main_result_summary,
     }
 
@@ -383,7 +491,26 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"Test workspace (default: {DEFAULT_TEST_DIR}).",
     )
     parser.add_argument("--main-script", default=DEFAULT_MAIN_SCRIPT, help="Main script to run (default: main.py).")
-    parser.add_argument("--python-exe", default=None, help="Override python executable.")
+    parser.add_argument(
+        "--python-exe",
+        default=None,
+        help="Override python executable. Takes precedence over venv auto-detect.",
+    )
+    parser.add_argument(
+        "--venv-dir",
+        default=None,
+        help=(
+            "Override the venv directory (absolute or relative to --test-dir). "
+            "By default '.venv' then 'venv' are probed and the first "
+            "matching Scripts\\python.exe (or bin/python) is used, which is "
+            "equivalent to running activate.bat."
+        ),
+    )
+    parser.add_argument(
+        "--no-venv",
+        action="store_true",
+        help="Disable venv auto-detection; always use the system/override python.",
+    )
     parser.add_argument(
         "--extra-arg",
         action="append",
@@ -420,6 +547,8 @@ def main(argv: list[str] | None = None) -> int:
         metric_file=args.metric_file,
         metric_key=args.metric_key,
         metric_pattern=args.metric_pattern,
+        use_venv=not args.no_venv,
+        venv_dir=args.venv_dir,
     )
 
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
