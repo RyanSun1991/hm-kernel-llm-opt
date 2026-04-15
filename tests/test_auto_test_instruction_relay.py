@@ -221,6 +221,51 @@ def test_run_instruction_test_async_completes(fake_relay):
     assert status["result"]["success"] is True
 
 
+def test_run_instruction_test_compare_forwards_depth_and_top_n(fake_relay):
+    server, _ = fake_relay
+    server.response["stdout"] = json.dumps({
+        "success": True,
+        "phase": "complete",
+        "report_path": "x",
+        "report_name": "x",
+    })
+
+    svc.run_instruction_test(
+        compare=True,
+        baseline_report=r"D:\stock",
+        compare_depth="function",
+        compare_top_n=5,
+    )
+    argv = server.last_request["args"]
+    assert "--compare" in argv
+    assert "--compare-depth" in argv
+    assert "function" in argv
+    assert "--compare-top-n" in argv
+    assert "5" in argv
+
+
+def test_compare_reports_forwards_depth_and_top_n(fake_relay):
+    server, _ = fake_relay
+    server.response["stdout"] = json.dumps({
+        "success": True,
+        "aggregate": {"baseline_total": 100, "candidate_total": 90, "delta": -10, "delta_pct": -10.0},
+        "reports": [],
+    })
+
+    svc.compare_reports(
+        baseline_report=r"D:\a",
+        candidate_report=r"D:\b",
+        depth="thread",
+        top_n=7,
+    )
+    argv = server.last_request["args"]
+    assert argv[0] == svc.DEFAULT_REPORT_COMPARE_SCRIPT
+    assert "--depth" in argv
+    assert "thread" in argv
+    assert "--top-n" in argv
+    assert "7" in argv
+
+
 def test_run_instruction_test_forwards_venv_flags(fake_relay):
     server, _ = fake_relay
     server.response["stdout"] = json.dumps({"success": True, "phase": "complete", "report_path": "x", "report_name": "x"})

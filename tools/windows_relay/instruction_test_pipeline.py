@@ -329,9 +329,8 @@ def run_instruction_test(
     compare: bool = False,
     baseline_report: str | None = None,
     compare_script: str | None = None,
-    metric_file: str | None = None,
-    metric_key: str | None = None,
-    metric_pattern: str | None = None,
+    compare_depth: str = "process",
+    compare_top_n: int = 20,
     use_venv: bool = True,
     venv_dir: str | None = None,
     force_utf8: bool = True,
@@ -496,12 +495,10 @@ def run_instruction_test(
             "--baseline", baseline_report,
             "--candidate", report_path,
         ]
-        if metric_file:
-            cmp_argv.extend(["--metric-file", metric_file])
-        if metric_key:
-            cmp_argv.extend(["--metric-key", metric_key])
-        if metric_pattern:
-            cmp_argv.extend(["--metric-pattern", metric_pattern])
+        if compare_depth:
+            cmp_argv.extend(["--depth", compare_depth])
+        if compare_top_n is not None:
+            cmp_argv.extend(["--top-n", str(int(compare_top_n))])
 
         _log(f"comparing: {subprocess.list2cmdline(cmp_argv)}")
         cmp_result = _run(cmp_argv, cwd=None, timeout_s=300)
@@ -587,9 +584,21 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--compare", action="store_true", help="Compare the new report against --baseline-report.")
     parser.add_argument("--baseline-report", default=None, help="Baseline report directory for comparison.")
     parser.add_argument("--compare-script", default=None, help="Override path to report_compare.py.")
-    parser.add_argument("--metric-file", default=None, help="Relative metric filename inside each report dir.")
-    parser.add_argument("--metric-key", default=None, help="Dot-path key inside the metric JSON file.")
-    parser.add_argument("--metric-pattern", default=None, help="Regex with one capture group for text extraction.")
+    parser.add_argument(
+        "--compare-depth",
+        choices=("total", "process", "thread", "lib", "function"),
+        default="process",
+        help=(
+            "Depth of breakdown when --compare is set (default: process). "
+            "Forwarded to report_compare.py --depth."
+        ),
+    )
+    parser.add_argument(
+        "--compare-top-n",
+        type=int,
+        default=20,
+        help="Top N entries per breakdown (default 20). Forwarded to report_compare.py --top-n.",
+    )
     return parser
 
 
@@ -605,9 +614,8 @@ def main(argv: list[str] | None = None) -> int:
         compare=args.compare,
         baseline_report=args.baseline_report,
         compare_script=args.compare_script,
-        metric_file=args.metric_file,
-        metric_key=args.metric_key,
-        metric_pattern=args.metric_pattern,
+        compare_depth=args.compare_depth,
+        compare_top_n=args.compare_top_n,
         use_venv=not args.no_venv,
         venv_dir=args.venv_dir,
         force_utf8=not args.no_utf8,
