@@ -27,6 +27,18 @@ A typical stock or feature run takes **30–120 minutes** on real hardware. Acro
 5. Overall wait ceiling: **180 minutes (3 hours)** per phase. If the task is still `running` after that, escalate as an infrastructure issue.
 6. Keep a running note in the tester's conversation so the user can see progress: log every 5–10 polls with `elapsed`, `status`, and the test_dir being run in.
 
+## Post-Flash Settle Window
+
+Every `flash_stock` / `flash_feature` call returns **before** the device is ready to run a meaningful test. `flash_and_boot` only waits for the device to reappear in `hdc list targets` — that confirms the kernel booted, but the full userspace (xdevice agents, perf counters, UI services) takes several more minutes to settle. Starting `run_instruction_test_async` too early causes:
+
+- xdevice "device not supported" / connection-not-ready warnings
+- missing or truncated reports
+- flaky A/B deltas caused by settle-time overhead, not the patch
+
+**Mandatory settle**: after every successful flash, wait **~10 minutes (600 s)** before submitting the instruction-count test. Use a Bash `sleep 600` or equivalent. This applies to **both** phases (stock and feature), independently — do not try to parallelize.
+
+During the settle, you can optionally poll `list_hdc_targets` every 60 s as a liveness check; any hdc error during the window means the device did not boot cleanly, so mark the phase **skipped** and do not proceed to the test.
+
 ## Mandatory A/B Sequence
 
 ### Phase 0 — Infrastructure Check
@@ -40,11 +52,19 @@ If `relay_reachable` is False, verdict = **skipped** (infrastructure failure). D
 ### Phase A — Stock Baseline
 
 ```
-# A1. Flash the STOCK image
+# A1. Flash the STOCK image.
 flash_stock(device_serial="<serial>")    # synchronous, minutes, fine to await
 # Confirm flash.success is True before proceeding.
 
-# A2. Submit the stock instruction-count test (async — required)
+# A2. Post-flash settle (mandatory).  The device is back in hdc but
+#     userspace (xdevice, perf agents, etc.) is still coming up.
+#     Starting the test now returns flaky or empty reports.
+sleep 600s
+# Optional: every 60s call list_hdc_targets() to confirm the device
+# stays visible through the settle.  Any hdc error here → mark
+# phase skipped.
+
+# A3. Submit the stock instruction-count test (async — required).
 task_stock = run_instruction_test_async(
     compare=False,          # stock has no baseline yet
     # test_dir / main_script / pipeline_script default to the workspace
@@ -52,7 +72,7 @@ task_stock = run_instruction_test_async(
 )
 task_id_stock = task_stock["task_id"]
 
-# A3. Poll until terminal.
+# A4. Poll until terminal.
 #     Loop:
 #         status = instruction_test_status(task_id_stock)
 #         if status["status"] in ("succeeded", "failed"): break
@@ -62,7 +82,7 @@ task_id_stock = task_stock["task_id"]
 #     Every 5–10 iterations, emit a progress line to the conversation so
 #     the user can see liveness: elapsed minutes, current status, task_id.
 
-# A4. Extract baseline_report.
+# A5. Extract baseline_report.
 baseline_report = status["result"]["report_path"]
 #   e.g. r"D:\modelCase_OH_single\reports\report_20260414114948"
 # Save this path — Phase B needs it.
@@ -73,11 +93,18 @@ If `status["status"] == "failed"` or `status["result"]["success"] is False`, rep
 ### Phase B — Feature Candidate
 
 ```
-# B1. Flash the FEATURE image.
+# B1. Flash the FEATURE image.  The feature image must already have
+#     been built and sign/packaged via Build MCP (kernel_build_trigger
+#     + kernel_sign_trigger) before this step.  flash_feature assumes
+#     HMOPT_FLASH_FEATURE_IMAGE_DIR points at the signed output.
 flash_feature(device_serial="<serial>")
 # Confirm flash.success is True.
 
-# B2. Submit the feature test — this time with compare=True and the
+# B2. Post-flash settle (mandatory, same rationale as Phase A).
+sleep 600s
+# Optional hdc liveness check every 60s during the settle window.
+
+# B3. Submit the feature test — this time with compare=True and the
 #     baseline_report from Phase A.
 task_feature = run_instruction_test_async(
     compare=True,
@@ -93,7 +120,7 @@ task_feature = run_instruction_test_async(
 )
 task_id_feature = task_feature["task_id"]
 
-# B3. Same polling loop as A3, now on task_id_feature.
+# B4. Same polling loop as A4, now on task_id_feature.
 #     Same ceiling and cadence.
 ```
 
@@ -190,6 +217,7 @@ The validation artifact `.opencode/bench/*_validation.md` MUST include:
 
 ### Stock Baseline (Phase A)
 - Flash result: success | fail
+- Post-flash settle: {seconds_waited}s (target ~600s)
 - Async task_id: {task_id}
 - Wait time: {elapsed_minutes}m
 - Terminal status: succeeded | failed
@@ -198,6 +226,7 @@ The validation artifact `.opencode/bench/*_validation.md` MUST include:
 
 ### Feature Candidate (Phase B)
 - Flash result: success | fail
+- Post-flash settle: {seconds_waited}s (target ~600s)
 - Async task_id: {task_id}
 - Wait time: {elapsed_minutes}m
 - Terminal status: succeeded | failed
@@ -225,9 +254,11 @@ The validation artifact `.opencode/bench/*_validation.md` MUST include:
 
 1. NEVER use `run_instruction_test` (sync). Always use `run_instruction_test_async` + `instruction_test_status` polling.
 2. NEVER return to the manager, delegate, or end the session while an async test is still `pending` or `running`.
-3. NEVER report a verdict based on only the feature image without a stock baseline.
-4. NEVER fabricate comparison numbers if either phase fails. Report the failure and the phase that failed.
-5. Both phases MUST use identical test workspace and parameters (same `test_dir`, same `main_script`, same device). The only legitimate delta between phases is the flashed image.
-6. If the stock phase fails, report as infrastructure failure — not a patch failure.
-7. If the feature phase flashes fine but the test errors, inspect `run_result.stderr_tail`: patch-introduced crashes show up there.
-8. The comparison level chosen in Phase B MUST match the metric named in the plan. If the plan targets a specific function, use `compare_level="function"` with the exact names.
+3. NEVER submit a test without a post-flash settle wait (~10 min / 600 s). Skipping the settle produces flaky reports that pollute the A/B delta; running without it is worse than not running at all.
+4. NEVER report a verdict based on only the feature image without a stock baseline.
+5. NEVER fabricate comparison numbers if either phase fails. Report the failure and the phase that failed.
+6. The feature image MUST have gone through Build MCP `kernel_build_trigger` AND `kernel_sign_trigger` before `flash_feature` is called — flash pulls from the *signed* image directory, not the raw build output. If you skipped the sign step, flash will use a stale or mismatched image.
+7. Both phases MUST use identical test workspace and parameters (same `test_dir`, same `main_script`, same device). The only legitimate delta between phases is the flashed image.
+8. If the stock phase fails, report as infrastructure failure — not a patch failure.
+9. If the feature phase flashes fine but the test errors, inspect `run_result.stderr_tail`: patch-introduced crashes show up there.
+10. The comparison level chosen in Phase B MUST match the metric named in the plan. If the plan targets a specific function, use `compare_level="function"` with the exact names.

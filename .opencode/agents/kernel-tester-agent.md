@@ -48,7 +48,7 @@ The validation is a long running real-hardware cycle. A single stock or feature 
 2. Use Sequential Thinking MCP to plan the validation sequence.
 3. **Build feature version**: Use Build MCP `kernel_build_trigger` to build the patched kernel.
    - If build FAILS → report failure immediately. Verdict: **fail**. Return to manager.
-4. **Package (sign) feature version**: Use Build MCP `kernel_sign_trigger` to package the built image.
+4. **Package (sign) feature version**: Use Build MCP `kernel_sign_trigger` to package the built image. **This step is mandatory before `flash_feature` will work** — flash pulls the signed image from the sign output directory (`HMOPT_FLASH_FEATURE_IMAGE_DIR`), not the raw build output.
    - If sign FAILS → report failure immediately. Verdict: **fail**. Return to manager.
 
 ### Phase 1 — Infrastructure Check
@@ -62,20 +62,23 @@ The validation is a long running real-hardware cycle. A single stock or feature 
 
 8. **Flash stock image**: `flash_stock(device_serial="<serial>")`.
    - Confirm `success` is True before continuing.
-9. **Submit stock instruction-count test (async — required)**:
+9. **Post-flash settle (~10 min / 600 s)**: use Bash `sleep 600` before kicking off the test. `flash_and_boot` only waits for the device to reappear in `hdc list targets`; userspace (xdevice agents, perf counters, UI services) takes several more minutes to come up. Starting the test too early produces flaky reports and settle-time overhead that pollutes the A/B delta. Optionally poll `list_hdc_targets` every 60 s during the settle — any hdc error here means the device didn't boot cleanly, mark **skipped**.
+10. **Submit stock instruction-count test (async — required)**:
    ```
    task_stock = run_instruction_test_async(compare=False)
    ```
    The sync `run_instruction_test` is FORBIDDEN — a 30–120 minute sync HTTP call will tear the session down.
-10. **Poll `instruction_test_status(task_stock["task_id"])` every 60 seconds** until `status["status"]` is `succeeded` or `failed`. Emit a short progress line every 5–10 polls so the user can see liveness (elapsed minutes, current status, task_id). Max wait: 180 minutes per phase.
-11. On `succeeded`: record `status["result"]["report_path"]` as **`baseline_report`** — you'll pass it into Phase 2B.
-12. On `failed` or wait-ceiling hit: report the phase, `status["error"]`, and the tail from `run_result.stderr_tail`. Verdict: **skipped** (stock environment issues are almost never patch-related).
+11. **Poll `instruction_test_status(task_stock["task_id"])` every 60 seconds** until `status["status"]` is `succeeded` or `failed`. Emit a short progress line every 5–10 polls so the user can see liveness (elapsed minutes, current status, task_id). Max wait: 180 minutes per phase.
+12. On `succeeded`: record `status["result"]["report_path"]` as **`baseline_report`** — you'll pass it into Phase 2B.
+13. On `failed` or wait-ceiling hit: report the phase, `status["error"]`, and the tail from `run_result.stderr_tail`. Verdict: **skipped** (stock environment issues are almost never patch-related).
 
 ### Phase 2B — Feature Candidate (long running)
 
-13. **Flash feature image**: `flash_feature(device_serial="<serial>")`.
-   - Confirm `success` is True.
-14. **Submit feature instruction-count test (async, with compare)**:
+14. **Flash feature image**: `flash_feature(device_serial="<serial>")`.
+    - Prerequisite: Phase 0's build AND sign steps both succeeded; the signed image directory (`HMOPT_FLASH_FEATURE_IMAGE_DIR`) now contains the feature image.
+    - Confirm `flash.success` is True.
+15. **Post-flash settle (~10 min / 600 s)**: same settle as Phase 2A — `sleep 600`, optional hdc liveness check every 60 s.
+16. **Submit feature instruction-count test (async, with compare)**:
     ```
     task_feature = run_instruction_test_async(
         compare=True,
@@ -88,9 +91,9 @@ The validation is a long running real-hardware cycle. A single stock or feature 
     )
     ```
     Names required at and above the chosen level — everything below can stay None.
-15. **Poll `instruction_test_status(task_feature["task_id"])`** with the same cadence and ceiling as Phase 2A.
-16. On `succeeded`: the pipeline has already run `report_compare.py` on Windows and embedded the result inside `status["result"]["compare"]["result"]`. Use that payload for the verdict.
-17. If the embedded compare is missing or errored, fall back to an explicit call:
+17. **Poll `instruction_test_status(task_feature["task_id"])`** with the same cadence and ceiling as Phase 2A.
+18. On `succeeded`: the pipeline has already run `report_compare.py` on Windows and embedded the result inside `status["result"]["compare"]["result"]`. Use that payload for the verdict.
+19. If the embedded compare is missing or errored, fall back to an explicit call:
     ```
     compare_reports(
         baseline_report=baseline_report,
@@ -102,9 +105,9 @@ The validation is a long running real-hardware cycle. A single stock or feature 
 
 ### Phase 3 — Decision
 
-18. Read the `aggregate` section of the compare result.
-19. Cross-check correctness using `run_result.stderr_tail` from both phases — any crash/exception strings block a PASS verdict.
-20. Determine the verdict by the rules in `ab-test-comparison.md` (PASS / FAIL / INCONCLUSIVE / SKIPPED).
+20. Read the `aggregate` section of the compare result.
+21. Cross-check correctness using `run_result.stderr_tail` from both phases — any crash/exception strings block a PASS verdict.
+22. Determine the verdict by the rules in `ab-test-comparison.md` (PASS / FAIL / INCONCLUSIVE / SKIPPED).
 
 ### Error Handling
 
@@ -117,13 +120,15 @@ The validation is a long running real-hardware cycle. A single stock or feature 
 ## Validation Checklist
 
 - [ ] feature build passed
-- [ ] feature package (sign) passed
+- [ ] feature package (sign) passed — signed image available in HMOPT_FLASH_FEATURE_IMAGE_DIR
 - [ ] flash relay + auto-test relay healthy
 - [ ] target device connected via hdc
 - [ ] stock image flash and boot succeeded (via integrated pipeline)
+- [ ] stock post-flash settle (~10 min) completed without hdc errors
 - [ ] stock instruction-count task submitted async and polled to terminal
 - [ ] stock report_path captured as baseline_report
 - [ ] feature image flash and boot succeeded
+- [ ] feature post-flash settle (~10 min) completed without hdc errors
 - [ ] feature instruction-count task submitted async with compare=True and polled to terminal
 - [ ] embedded compare result present (or compare_reports fallback invoked successfully)
 - [ ] aggregate.delta and aggregate.delta_pct computed at the level the plan specified
@@ -138,8 +143,8 @@ Write `.opencode/bench/[artifact]_validation.md` with:
 - validation scope
 - **build result**: feature build success/failure, package success/failure
 - **infrastructure**: flash_relay, auto_test_relay, device status
-- **stock baseline (Phase A)**: flash pipeline result, async task_id, wait time, terminal status, report_path, notable stderr lines
-- **feature candidate (Phase B)**: flash pipeline result, async task_id, wait time, terminal status, report_path, notable stderr lines
+- **stock baseline (Phase A)**: flash pipeline result, settle duration, async task_id, wait time, terminal status, report_path, notable stderr lines
+- **feature candidate (Phase B)**: flash pipeline result, settle duration, async task_id, wait time, terminal status, report_path, notable stderr lines
 - **delta analysis**: compare level, target names, pairs compared, aggregate baseline / candidate / delta / delta_pct, per-pair table
 - **verdict**: pass, fail, inconclusive, or skipped
 - confidence level: high, medium, or low

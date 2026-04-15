@@ -63,10 +63,18 @@ def _exec_command(command: str, args: list[str], timeout_s: int, cwd: str | None
     argv = [command] + args
     started = time.time()
     try:
+        # NOTE: encoding="utf-8", errors="replace" is load-bearing.  Without
+        # it Python uses locale.getpreferredencoding() to decode the child's
+        # stdout/stderr pipes — on a typical Windows host that's cp1252, and
+        # any non-ASCII byte (UTF-8 continuation bytes like 0x90 from our
+        # pipeline, device output from fastboot/hdc, etc.) kills the reader
+        # thread with UnicodeDecodeError and silently drops the payload.
         proc = subprocess.run(
             argv,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=min(timeout_s, MAX_TIMEOUT_S),
             cwd=cwd or None,
             check=False,

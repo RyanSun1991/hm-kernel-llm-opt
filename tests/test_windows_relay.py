@@ -134,6 +134,42 @@ def test_allowed_commands_set():
     assert "powershell" not in ALLOWED_COMMANDS
 
 
+def test_exec_survives_non_cp1252_stdout(relay_server, tmp_path):
+    """Relay must not crash the reader thread when a child emits bytes that
+    aren't valid cp1252 (e.g. UTF-8 continuation bytes like 0x90 from a
+    pipeline whose sys.stdout is UTF-8).  Prior to the fix this showed up
+    on Windows hosts as 'UnicodeDecodeError: charmap codec can't decode
+    byte 0x90' in the relay's stderr and an empty payload returned."""
+    # Add python to the allowlist temporarily — the fixture may have
+    # already done so via the pytest process's ALLOWED_COMMANDS import.
+    from relay_service import ALLOWED_COMMANDS  # type: ignore
+
+    if "python" not in ALLOWED_COMMANDS and "python3" not in ALLOWED_COMMANDS:
+        pytest.skip("python not in relay allowlist for this test host")
+
+    # Child writes UTF-8 bytes containing U+4E2D (中, 0xE4 0xB8 0xAD) and
+    # U+521B (创, 0xE5 0x88 0x9B) to stdout.  Both have continuation bytes
+    # that cp1252 cannot decode.
+    script = tmp_path / "emit_utf8.py"
+    script.write_text(
+        "import sys\n"
+        "sys.stdout.buffer.write('pre 中创建 post'.encode('utf-8'))\n"
+        "sys.stdout.buffer.flush()\n",
+        encoding="utf-8",
+    )
+
+    command = "python3" if "python3" in ALLOWED_COMMANDS else "python"
+    code, result = _post(relay_server, "/exec", {
+        "command": command,
+        "args": [str(script)],
+        "timeout_s": 10,
+    })
+    assert code == 200
+    assert result["returncode"] == 0
+    # The payload should round-trip the UTF-8 characters intact.
+    assert "中创建" in result["stdout"], result
+
+
 def test_exec_timeout(relay_server):
     """Commands that exceed timeout should return -9."""
     # Use a command that would take a while but is in the allowlist
