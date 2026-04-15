@@ -1,11 +1,6 @@
 """Compare two modelCase test report directories on instruction count.
 
-Usage:
-  python report_compare.py --baseline <dir> --candidate <dir>
-  python report_compare.py --baseline <dir> --candidate <dir> \\
-      --depth function --top-n 20
-
-Report layout produced by the modelCase test pipeline looks like::
+The modelCase pipeline produces, for every (case, round, step) triple::
 
   <report_dir>/
     PerfLoad_<case>_round<N>/
@@ -15,31 +10,35 @@ Report layout produced by the modelCase test pipeline looks like::
 
 Each workbook has four worksheets:
 
-  1. ``process_instructions_info``
-       pid | processName | count
-       (first data row has pid="TOTAL" — that row's count is the overall
-       instruction total for the run.)
-  2. ``thread_instructions_info``
-       pid | processName | processCount | tid | threadName | threadCount
-  3. ``lib_instructions_info``
-       pid | processName | processCount | tid | threadName | threadCount |
-       fileId | libName | libCount
-  4. ``functions_instructions_info``
-       pid | processName | processCount | tid | threadName | threadCount |
-       fileId | libName | libCount | functionId | functionName |
-       functionCount_self | functionCount_total
+  1. ``process_instructions_info``    pid | processName | count
+       (first data row pid="TOTAL" holds the overall instruction count)
+  2. ``thread_instructions_info``     pid | processName | processCount
+                                       | tid | threadName | threadCount
+  3. ``lib_instructions_info``        ... | fileId | libName | libCount
+  4. ``functions_instructions_info``  ... | functionId | functionName
+                                       | functionCount_self | functionCount_total
 
-The script walks both report dirs, pairs up workbooks with the same
-``(case, round, step)`` triple, and for each pair reports:
+The comparison target is picked by ``--level`` and the names at that
+level and above.  Each level requires just the names of its own and
+parent tiers — you don't have to specify deeper names you don't care
+about::
 
-  - baseline_total / candidate_total / delta / delta_pct (from the TOTAL
-    row on page 1)
-  - top_processes: per-process diff (aggregated by processName)
-  - optionally per-thread / per-lib / per-function diffs, depending on
-    the ``--depth`` argument
+  python report_compare.py --baseline B --candidate C --level total
+  python report_compare.py --baseline B --candidate C --level process \\
+      --process samgr
+  python report_compare.py --baseline B --candidate C --level thread \\
+      --process sysmgr-main --thread sysmgr-reclaim0
+  python report_compare.py --baseline B --candidate C --level lib \\
+      --process init --thread /bin/init --lib /system/lib/ld-musl-aarch64.so.1
+  python report_compare.py --baseline B --candidate C --level function \\
+      --process init --thread /bin/init --lib /system/lib/ld-musl-aarch64.so.1 \\
+      --function strlen
 
-An aggregate across all pairs is also reported so a single number can be
-surfaced upstream.
+For every matched workbook pair the script emits baseline count,
+candidate count, delta and delta_pct.  When the target name appears
+multiple times (e.g. two pids share a processName) the counts are
+summed.  When the name is absent the count is reported as 0 with
+``baseline_found`` / ``candidate_found`` set to False.
 
 Requires ``openpyxl`` on the executing host (``pip install openpyxl``).
 """
@@ -53,7 +52,7 @@ import re
 import sys
 from typing import Any, Iterable
 
-try:  # pragma: no cover — import is trivial, availability is what we test
+try:  # pragma: no cover — availability is what we test, not the import itself
     from openpyxl import load_workbook  # type: ignore
 except ImportError:  # pragma: no cover
     load_workbook = None  # type: ignore[assignment]
@@ -151,7 +150,12 @@ def _iter_data_rows(ws: Any, min_cols: int) -> Iterable[tuple]:
 
 
 def _parse_process_sheet(ws: Any) -> tuple[int | None, dict[str, int]]:
-    """Return (total, {processName: sum_count})."""
+    """Return ``(total, {processName: sum_count})``.
+
+    ``total`` is the count on the ``pid="TOTAL"`` row; ``None`` if
+    missing.  Process rows are summed by name so two pids with the
+    same processName collapse into one entry.
+    """
     total: int | None = None
     processes: dict[str, int] = {}
     for row in _iter_data_rows(ws, min_cols=3):
@@ -168,63 +172,90 @@ def _parse_process_sheet(ws: Any) -> tuple[int | None, dict[str, int]]:
     return total, processes
 
 
-def _parse_thread_sheet(ws: Any) -> dict[str, int]:
-    """Return {'<processName>|<threadName>': sum_threadCount}."""
-    threads: dict[str, int] = {}
+def _sum_thread_sheet(ws: Any, *, process: str, thread: str) -> tuple[int, bool]:
+    """Return ``(sum_threadCount, found)`` for rows matching ``process``+``thread``."""
+    total = 0
+    found = False
     for row in _iter_data_rows(ws, min_cols=6):
         _pid, process_name, _pcnt, _tid, thread_name, thread_count = row[:6]
+        if _clean_str(process_name) != process or _clean_str(thread_name) != thread:
+            continue
         value = _to_int(thread_count)
         if value is None:
             continue
-        key = f"{_clean_str(process_name)}|{_clean_str(thread_name)}"
-        threads[key] = threads.get(key, 0) + value
-    return threads
+        total += value
+        found = True
+    return total, found
 
 
-def _parse_lib_sheet(ws: Any) -> dict[str, int]:
-    """Return {'<processName>|<threadName>|<libName>': sum_libCount}."""
-    libs: dict[str, int] = {}
+def _sum_lib_sheet(ws: Any, *, process: str, thread: str, lib: str) -> tuple[int, bool]:
+    """Return ``(sum_libCount, found)`` for rows matching process+thread+lib."""
+    total = 0
+    found = False
     for row in _iter_data_rows(ws, min_cols=9):
         _pid, process_name, _pcnt, _tid, thread_name, _tcnt, _fid, lib_name, lib_count = row[:9]
+        if (
+            _clean_str(process_name) != process
+            or _clean_str(thread_name) != thread
+            or _clean_str(lib_name) != lib
+        ):
+            continue
         value = _to_int(lib_count)
         if value is None:
             continue
-        key = "|".join((
-            _clean_str(process_name),
-            _clean_str(thread_name),
-            _clean_str(lib_name),
-        ))
-        libs[key] = libs.get(key, 0) + value
-    return libs
+        total += value
+        found = True
+    return total, found
 
 
-def _parse_function_sheet(ws: Any) -> dict[str, int]:
-    """Return {'<processName>|<threadName>|<libName>|<functionName>': functionCount_total}."""
-    functions: dict[str, int] = {}
+def _sum_function_sheet(
+    ws: Any,
+    *,
+    process: str,
+    thread: str,
+    lib: str,
+    function: str,
+) -> tuple[int, bool]:
+    """Return ``(sum_functionCount_total, found)`` for the matching function."""
+    total = 0
+    found = False
     for row in _iter_data_rows(ws, min_cols=13):
         (
             _pid, process_name, _pcnt, _tid, thread_name, _tcnt,
             _fid, lib_name, _lcnt, _funcid, function_name,
             _fc_self, fc_total,
         ) = row[:13]
+        if (
+            _clean_str(process_name) != process
+            or _clean_str(thread_name) != thread
+            or _clean_str(lib_name) != lib
+            or _clean_str(function_name) != function
+        ):
+            continue
         value = _to_int(fc_total)
         if value is None:
             continue
-        key = "|".join((
-            _clean_str(process_name),
-            _clean_str(thread_name),
-            _clean_str(lib_name),
-            _clean_str(function_name),
-        ))
-        functions[key] = functions.get(key, 0) + value
-    return functions
+        total += value
+        found = True
+    return total, found
 
 
 # ---------------------------------------------------------------------------
-# Workbook loading
+# Workbook extraction for a specific target
 # ---------------------------------------------------------------------------
 
-DEPTH_CHOICES = ("total", "process", "thread", "lib", "function")
+LEVEL_CHOICES = ("total", "process", "thread", "lib", "function")
+
+# Which name flags each level needs.  The flags above the chosen level
+# are required because they identify *where* the target lives in the
+# hierarchy, but levels below it are irrelevant.
+_LEVEL_REQUIRED_NAMES: dict[str, tuple[str, ...]] = {
+    "total": (),
+    "process": ("process",),
+    "thread": ("process", "thread"),
+    "lib": ("process", "thread", "lib"),
+    "function": ("process", "thread", "lib", "function"),
+}
 
 
 def _ensure_openpyxl() -> None:
@@ -235,102 +266,156 @@ def _ensure_openpyxl() -> None:
         )
 
 
-def parse_hiperf_workbook(path: str, depth: str = "process") -> dict[str, Any]:
-    """Load a single hiperf xlsx and return total + breakdown maps.
+def _validate_target(
+    level: str,
+    *,
+    process: str | None,
+    thread: str | None,
+    lib: str | None,
+    function: str | None,
+) -> None:
+    if level not in LEVEL_CHOICES:
+        raise ValueError(f"invalid level {level!r}; choose from {LEVEL_CHOICES}")
+    required = _LEVEL_REQUIRED_NAMES[level]
+    supplied = {
+        "process": process,
+        "thread": thread,
+        "lib": lib,
+        "function": function,
+    }
+    missing = [name for name in required if not supplied[name]]
+    if missing:
+        flag_list = ", ".join(f"--{name}" for name in missing)
+        raise ValueError(f"--level {level} requires {flag_list}")
 
-    *depth* controls how many sheets are read; the TOTAL from page 1 is
-    always returned regardless of depth.
+
+def extract_target_count(
+    path: str,
+    *,
+    level: str,
+    process: str | None = None,
+    thread: str | None = None,
+    lib: str | None = None,
+    function: str | None = None,
+) -> dict[str, Any]:
+    """Open *path* and pull the count for the specified target.
+
+    Returns a dict with:
+      total:  total instruction count from page 1 (always populated
+              when page 1 is present; useful context regardless of the
+              requested level)
+      value:  the target's count (summed across matching rows)
+      found:  True if the target name was present at least once
+      level:  echo of the requested level
     """
     _ensure_openpyxl()
-    if depth not in DEPTH_CHOICES:
-        raise ValueError(f"invalid depth {depth!r}; choose from {DEPTH_CHOICES}")
+    _validate_target(level, process=process, thread=thread, lib=lib, function=function)
 
     wb = load_workbook(path, read_only=True, data_only=True)
     try:
-        out: dict[str, Any] = {
-            "path": path,
-            "total": None,
-            "processes": {},
-            "threads": {},
-            "libs": {},
-            "functions": {},
-        }
+        total: int | None = None
+        processes: dict[str, int] = {}
         if PROCESS_SHEET in wb.sheetnames:
             total, processes = _parse_process_sheet(wb[PROCESS_SHEET])
-            out["total"] = total
-            out["processes"] = processes
 
-        if depth in ("thread", "lib", "function") and THREAD_SHEET in wb.sheetnames:
-            out["threads"] = _parse_thread_sheet(wb[THREAD_SHEET])
-        if depth in ("lib", "function") and LIB_SHEET in wb.sheetnames:
-            out["libs"] = _parse_lib_sheet(wb[LIB_SHEET])
-        if depth == "function" and FUNCTION_SHEET in wb.sheetnames:
-            out["functions"] = _parse_function_sheet(wb[FUNCTION_SHEET])
+        value = 0
+        found = False
+
+        if level == "total":
+            if total is not None:
+                value = total
+                found = True
+
+        elif level == "process":
+            assert process is not None  # guaranteed by _validate_target
+            process_value = processes.get(process)
+            if process_value is not None:
+                value = process_value
+                found = True
+
+        elif level == "thread":
+            if THREAD_SHEET in wb.sheetnames:
+                assert process is not None and thread is not None
+                value, found = _sum_thread_sheet(wb[THREAD_SHEET], process=process, thread=thread)
+
+        elif level == "lib":
+            if LIB_SHEET in wb.sheetnames:
+                assert process is not None and thread is not None and lib is not None
+                value, found = _sum_lib_sheet(
+                    wb[LIB_SHEET], process=process, thread=thread, lib=lib,
+                )
+
+        elif level == "function":
+            if FUNCTION_SHEET in wb.sheetnames:
+                assert (
+                    process is not None and thread is not None
+                    and lib is not None and function is not None
+                )
+                value, found = _sum_function_sheet(
+                    wb[FUNCTION_SHEET],
+                    process=process,
+                    thread=thread,
+                    lib=lib,
+                    function=function,
+                )
     finally:
         wb.close()
 
-    return out
-
-
-# ---------------------------------------------------------------------------
-# Diff helpers
-# ---------------------------------------------------------------------------
-
-def _pct(delta: int, baseline: int | None) -> float | None:
-    if not baseline:
-        return None
-    return round(delta / baseline * 100, 4)
-
-
-def diff_maps(
-    baseline: dict[str, int],
-    candidate: dict[str, int],
-    *,
-    top_n: int = 20,
-) -> list[dict[str, Any]]:
-    """Return per-key diffs sorted by ``abs(delta)`` descending, capped at *top_n*."""
-    rows: list[dict[str, Any]] = []
-    for key in sorted(set(baseline) | set(candidate)):
-        b = baseline.get(key, 0)
-        c = candidate.get(key, 0)
-        delta = c - b
-        if delta == 0 and b == 0 and c == 0:
-            continue
-        rows.append({
-            "key": key,
-            "baseline": b,
-            "candidate": c,
-            "delta": delta,
-            "delta_pct": _pct(delta, b),
-        })
-    rows.sort(key=lambda r: abs(r["delta"]), reverse=True)
-    if top_n is not None and top_n > 0:
-        rows = rows[:top_n]
-    return rows
+    return {
+        "path": path,
+        "level": level,
+        "total": total,
+        "value": value,
+        "found": found,
+    }
 
 
 # ---------------------------------------------------------------------------
 # Top-level compare
 # ---------------------------------------------------------------------------
 
+def _pct(delta: int, baseline: int) -> float | None:
+    if not baseline:
+        return None
+    return round(delta / baseline * 100, 4)
+
+
 def _pair_key(report: dict[str, Any]) -> tuple[str, int, int]:
     return (report["case"], report["round"], report["step"])
+
+
+def _build_target_dict(
+    level: str,
+    *,
+    process: str | None,
+    thread: str | None,
+    lib: str | None,
+    function: str | None,
+) -> dict[str, str | None]:
+    """Return the subset of target names relevant to the chosen level."""
+    required = _LEVEL_REQUIRED_NAMES[level]
+    lookup = {"process": process, "thread": thread, "lib": lib, "function": function}
+    return {name: lookup[name] for name in required}
 
 
 def compare_reports(
     *,
     baseline_dir: str,
     candidate_dir: str,
-    depth: str = "process",
-    top_n: int = 20,
+    level: str = "total",
+    process: str | None = None,
+    thread: str | None = None,
+    lib: str | None = None,
+    function: str | None = None,
 ) -> dict[str, Any]:
-    """Compare two report directories and summarize the per-pair delta.
+    """Compare two report directories at the requested granularity.
 
-    Pairs workbooks by ``(case, round, step)``.  Missing members are
-    reported with ``missing: baseline|candidate``.
+    Pairs workbooks by ``(case, round, step)``.  For each pair extracts
+    the count for the named target and reports baseline / candidate /
+    delta.  Summed across pairs the same way — so one top-level number
+    can be surfaced upstream.
     """
-    if depth not in DEPTH_CHOICES:
-        raise ValueError(f"invalid depth {depth!r}; choose from {DEPTH_CHOICES}")
+    _validate_target(level, process=process, thread=thread, lib=lib, function=function)
 
     baseline_reports = find_reports(baseline_dir)
     candidate_reports = find_reports(candidate_dir)
@@ -339,9 +424,10 @@ def compare_reports(
     all_keys = sorted(set(b_map) | set(c_map))
 
     pair_results: list[dict[str, Any]] = []
-    agg_baseline = 0
-    agg_candidate = 0
-    totals_complete = True
+    agg_b = 0
+    agg_c = 0
+    agg_b_found = False
+    agg_c_found = False
     pair_errors = False
 
     for key in all_keys:
@@ -365,71 +451,62 @@ def compare_reports(
         entry["candidate_path"] = c["path"]
 
         try:
-            b_data = parse_hiperf_workbook(b["path"], depth=depth)
-            c_data = parse_hiperf_workbook(c["path"], depth=depth)
+            b_data = extract_target_count(
+                b["path"], level=level,
+                process=process, thread=thread, lib=lib, function=function,
+            )
+            c_data = extract_target_count(
+                c["path"], level=level,
+                process=process, thread=thread, lib=lib, function=function,
+            )
         except Exception as exc:  # noqa: BLE001 — surface parse errors per-pair
             entry["error"] = f"failed to parse xlsx: {exc}"
             pair_errors = True
             pair_results.append(entry)
             continue
 
-        b_total = b_data.get("total")
-        c_total = c_data.get("total")
-        entry["baseline_total"] = b_total
-        entry["candidate_total"] = c_total
-        if b_total is not None and c_total is not None:
-            delta = c_total - b_total
-            entry["delta"] = delta
-            entry["delta_pct"] = _pct(delta, b_total)
-            agg_baseline += b_total
-            agg_candidate += c_total
-        else:
-            totals_complete = False
+        b_val = b_data["value"]
+        c_val = c_data["value"]
+        entry["baseline"] = b_val
+        entry["candidate"] = c_val
+        entry["baseline_found"] = b_data["found"]
+        entry["candidate_found"] = c_data["found"]
+        entry["baseline_total"] = b_data["total"]
+        entry["candidate_total"] = c_data["total"]
+        delta = c_val - b_val
+        entry["delta"] = delta
+        entry["delta_pct"] = _pct(delta, b_val)
 
-        if depth in ("process", "thread", "lib", "function"):
-            entry["top_processes"] = diff_maps(
-                b_data.get("processes", {}),
-                c_data.get("processes", {}),
-                top_n=top_n,
-            )
-        if depth in ("thread", "lib", "function"):
-            entry["top_threads"] = diff_maps(
-                b_data.get("threads", {}),
-                c_data.get("threads", {}),
-                top_n=top_n,
-            )
-        if depth in ("lib", "function"):
-            entry["top_libs"] = diff_maps(
-                b_data.get("libs", {}),
-                c_data.get("libs", {}),
-                top_n=top_n,
-            )
-        if depth == "function":
-            entry["top_functions"] = diff_maps(
-                b_data.get("functions", {}),
-                c_data.get("functions", {}),
-                top_n=top_n,
-            )
+        agg_b += b_val
+        agg_c += c_val
+        if b_data["found"]:
+            agg_b_found = True
+        if c_data["found"]:
+            agg_c_found = True
 
         pair_results.append(entry)
 
-    agg_delta = agg_candidate - agg_baseline
+    agg_delta = agg_c - agg_b
     aggregate = {
-        "baseline_total": agg_baseline,
-        "candidate_total": agg_candidate,
+        "baseline": agg_b,
+        "candidate": agg_c,
         "delta": agg_delta,
-        "delta_pct": _pct(agg_delta, agg_baseline),
+        "delta_pct": _pct(agg_delta, agg_b),
+        "baseline_found": agg_b_found,
+        "candidate_found": agg_c_found,
         "pairs_compared": sum(1 for r in pair_results if "missing" not in r and "error" not in r),
         "pairs_missing_baseline": sum(1 for r in pair_results if r.get("missing") == "baseline"),
         "pairs_missing_candidate": sum(1 for r in pair_results if r.get("missing") == "candidate"),
     }
 
     return {
-        "success": totals_complete and not pair_errors and bool(pair_results),
+        "success": not pair_errors and bool(pair_results),
         "baseline_dir": os.path.abspath(baseline_dir),
         "candidate_dir": os.path.abspath(candidate_dir),
-        "depth": depth,
-        "top_n": top_n,
+        "level": level,
+        "target": _build_target_dict(
+            level, process=process, thread=thread, lib=lib, function=function,
+        ),
         "aggregate": aggregate,
         "reports": pair_results,
     }
@@ -446,21 +523,20 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--baseline", required=True, help="Baseline (stock) report directory.")
     parser.add_argument("--candidate", required=True, help="Candidate (feature) report directory.")
     parser.add_argument(
-        "--depth",
-        choices=DEPTH_CHOICES,
-        default="process",
+        "--level",
+        choices=LEVEL_CHOICES,
+        default="total",
         help=(
-            "How deep to diff.  'total' = only TOTAL row; 'process' (default) "
-            "adds per-process; 'thread' adds per-thread; 'lib' adds per-library; "
-            "'function' adds per-function (functionCount_total)."
+            "Granularity of comparison (default: total). "
+            "Each level requires the names at and above it: "
+            "process -> --process; thread -> --process --thread; "
+            "lib -> --process --thread --lib; function -> all four."
         ),
     )
-    parser.add_argument(
-        "--top-n",
-        type=int,
-        default=20,
-        help="Keep top N entries by abs(delta) in each breakdown (default 20).",
-    )
+    parser.add_argument("--process", default=None, help="Target processName.")
+    parser.add_argument("--thread", default=None, help="Target threadName.")
+    parser.add_argument("--lib", default=None, help="Target libName.")
+    parser.add_argument("--function", default=None, help="Target functionName.")
     return parser
 
 
@@ -470,10 +546,13 @@ def main(argv: list[str] | None = None) -> int:
         result = compare_reports(
             baseline_dir=args.baseline,
             candidate_dir=args.candidate,
-            depth=args.depth,
-            top_n=args.top_n,
+            level=args.level,
+            process=args.process,
+            thread=args.thread,
+            lib=args.lib,
+            function=args.function,
         )
-    except RuntimeError as exc:  # openpyxl missing
+    except (RuntimeError, ValueError) as exc:
         json.dump({"success": False, "error": str(exc)}, sys.stdout, ensure_ascii=False, indent=2)
         sys.stdout.write("\n")
         return 1

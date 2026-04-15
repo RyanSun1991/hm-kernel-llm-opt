@@ -221,7 +221,7 @@ def test_run_instruction_test_async_completes(fake_relay):
     assert status["result"]["success"] is True
 
 
-def test_run_instruction_test_compare_forwards_depth_and_top_n(fake_relay):
+def test_run_instruction_test_compare_forwards_level_and_names(fake_relay):
     server, _ = fake_relay
     server.response["stdout"] = json.dumps({
         "success": True,
@@ -230,40 +230,60 @@ def test_run_instruction_test_compare_forwards_depth_and_top_n(fake_relay):
         "report_name": "x",
     })
 
+    # total level: no names forwarded
     svc.run_instruction_test(
         compare=True,
         baseline_report=r"D:\stock",
-        compare_depth="function",
-        compare_top_n=5,
+        compare_level="total",
     )
     argv = server.last_request["args"]
-    assert "--compare" in argv
-    assert "--compare-depth" in argv
+    assert "--compare-level" in argv
+    assert "total" in argv
+    assert "--compare-process" not in argv
+
+    # function level with full name stack
+    svc.run_instruction_test(
+        compare=True,
+        baseline_report=r"D:\stock",
+        compare_level="function",
+        compare_process="init",
+        compare_thread="/bin/init",
+        compare_lib="/system/lib/ld-musl.so",
+        compare_function="strlen",
+    )
+    argv = server.last_request["args"]
+    assert "--compare-level" in argv
     assert "function" in argv
-    assert "--compare-top-n" in argv
-    assert "5" in argv
+    assert "--compare-process" in argv and "init" in argv
+    assert "--compare-thread" in argv and "/bin/init" in argv
+    assert "--compare-lib" in argv and "/system/lib/ld-musl.so" in argv
+    assert "--compare-function" in argv and "strlen" in argv
 
 
-def test_compare_reports_forwards_depth_and_top_n(fake_relay):
+def test_compare_reports_forwards_level_and_names(fake_relay):
     server, _ = fake_relay
     server.response["stdout"] = json.dumps({
         "success": True,
-        "aggregate": {"baseline_total": 100, "candidate_total": 90, "delta": -10, "delta_pct": -10.0},
+        "level": "thread",
+        "aggregate": {"baseline": 100, "candidate": 90, "delta": -10, "delta_pct": -10.0},
         "reports": [],
     })
 
     svc.compare_reports(
         baseline_report=r"D:\a",
         candidate_report=r"D:\b",
-        depth="thread",
-        top_n=7,
+        level="thread",
+        process="sysmgr-main",
+        thread="sysmgr-reclaim0",
     )
     argv = server.last_request["args"]
     assert argv[0] == svc.DEFAULT_REPORT_COMPARE_SCRIPT
-    assert "--depth" in argv
+    assert "--level" in argv
     assert "thread" in argv
-    assert "--top-n" in argv
-    assert "7" in argv
+    assert "--process" in argv and "sysmgr-main" in argv
+    assert "--thread" in argv and "sysmgr-reclaim0" in argv
+    assert "--lib" not in argv
+    assert "--function" not in argv
 
 
 def test_run_instruction_test_forwards_venv_flags(fake_relay):

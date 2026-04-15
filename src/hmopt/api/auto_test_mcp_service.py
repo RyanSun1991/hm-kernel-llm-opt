@@ -441,8 +441,11 @@ def run_instruction_test(
     compare_script: str | None = None,
     extra_args: list[str] | None = None,
     run_timeout_s: int = DEFAULT_INSTRUCTION_RUN_TIMEOUT_S,
-    compare_depth: str = "process",
-    compare_top_n: int = 20,
+    compare_level: str = "total",
+    compare_process: str | None = None,
+    compare_thread: str | None = None,
+    compare_lib: str | None = None,
+    compare_function: str | None = None,
     python_exe: str | None = None,
     use_venv: bool = True,
     venv_dir: str | None = None,
@@ -473,11 +476,13 @@ def run_instruction_test(
             ``report_compare.py``).
         extra_args: Extra CLI args forwarded to ``main.py``.
         run_timeout_s: Ceiling on the ``main.py`` execution time.
-        compare_depth: Breakdown depth when *compare* is True.  One of
-            ``total`` / ``process`` (default) / ``thread`` / ``lib`` /
-            ``function``; forwarded to ``report_compare.py --depth``.
-        compare_top_n: Max per-breakdown rows kept (default 20).
-            Forwarded to ``report_compare.py --top-n``.
+        compare_level: Granularity when *compare* is True. One of
+            ``total`` (default) / ``process`` / ``thread`` / ``lib`` /
+            ``function``; forwarded to ``report_compare.py --level``.
+        compare_process / compare_thread / compare_lib / compare_function:
+            Target names needed at and above the chosen level (e.g.
+            ``compare_level="thread"`` requires both ``compare_process``
+            and ``compare_thread``).
         python_exe: Override the python interpreter on Windows. Takes
             precedence over venv auto-detection.
         use_venv: When True (default) the pipeline probes
@@ -521,8 +526,15 @@ def run_instruction_test(
         argv.append("--compare")
         argv.extend(["--baseline-report", baseline_report or ""])
         argv.extend(["--compare-script", compare_name])
-        argv.extend(["--compare-depth", compare_depth])
-        argv.extend(["--compare-top-n", str(int(compare_top_n))])
+        argv.extend(["--compare-level", compare_level])
+        if compare_process:
+            argv.extend(["--compare-process", compare_process])
+        if compare_thread:
+            argv.extend(["--compare-thread", compare_thread])
+        if compare_lib:
+            argv.extend(["--compare-lib", compare_lib])
+        if compare_function:
+            argv.extend(["--compare-function", compare_function])
     for extra in extra_args or []:
         argv.extend(["--extra-arg", str(extra)])
 
@@ -569,17 +581,27 @@ def compare_reports(
     baseline_report: str,
     candidate_report: str,
     compare_script: str | None = None,
-    depth: str = "process",
-    top_n: int = 20,
+    level: str = "total",
+    process: str | None = None,
+    thread: str | None = None,
+    lib: str | None = None,
+    function: str | None = None,
     timeout_s: int = DEFAULT_COMPARE_TIMEOUT_S,
     cwd: str | None = None,
 ) -> dict[str, Any]:
     """Run ``report_compare.py`` on the Windows host via the relay.
 
-    Diffs the hiperf xlsx reports produced under each report directory:
-    every ``PerfLoad_<case>_round<N>_step<M>_nosym_hiperfReport.xlsx`` is
-    paired by ``(case, round, step)`` and the TOTAL / per-process (plus
-    optionally per-thread/lib/function) instruction counts are compared.
+    For every hiperf xlsx pair found under *baseline_report* and
+    *candidate_report* (keyed by ``(case, round, step)``) this extracts
+    the count at the requested granularity and returns a single
+    baseline/candidate/delta per pair plus an aggregate.
+
+    Levels map to names that must be supplied alongside:
+      - ``total``:    no names
+      - ``process``:  *process*
+      - ``thread``:   *process*, *thread*
+      - ``lib``:      *process*, *thread*, *lib*
+      - ``function``: *process*, *thread*, *lib*, *function*
     """
     if not baseline_report or not candidate_report:
         raise ValueError("baseline_report and candidate_report are both required")
@@ -589,9 +611,16 @@ def compare_reports(
         script,
         "--baseline", baseline_report,
         "--candidate", candidate_report,
-        "--depth", depth,
-        "--top-n", str(int(top_n)),
+        "--level", level,
     ]
+    if process:
+        argv.extend(["--process", process])
+    if thread:
+        argv.extend(["--thread", thread])
+    if lib:
+        argv.extend(["--lib", lib])
+    if function:
+        argv.extend(["--function", function])
 
     relay_result = _relay_exec("python", argv, timeout_s=int(timeout_s), cwd=cwd)
     compare_result, parse_error = _parse_pipeline_stdout(relay_result.get("stdout", ""))
@@ -772,8 +801,11 @@ def build_auto_test_fastmcp_server() -> Any | None:
         compare_script: str | None = None,
         extra_args: list[str] | None = None,
         run_timeout_s: int = DEFAULT_INSTRUCTION_RUN_TIMEOUT_S,
-        compare_depth: str = "process",
-        compare_top_n: int = 20,
+        compare_level: str = "total",
+        compare_process: str | None = None,
+        compare_thread: str | None = None,
+        compare_lib: str | None = None,
+        compare_function: str | None = None,
         python_exe: str | None = None,
         use_venv: bool = True,
         venv_dir: str | None = None,
@@ -788,8 +820,11 @@ def build_auto_test_fastmcp_server() -> Any | None:
             compare_script=compare_script,
             extra_args=extra_args,
             run_timeout_s=run_timeout_s,
-            compare_depth=compare_depth,
-            compare_top_n=compare_top_n,
+            compare_level=compare_level,
+            compare_process=compare_process,
+            compare_thread=compare_thread,
+            compare_lib=compare_lib,
+            compare_function=compare_function,
             python_exe=python_exe,
             use_venv=use_venv,
             venv_dir=venv_dir,
@@ -813,8 +848,11 @@ def build_auto_test_fastmcp_server() -> Any | None:
         compare_script: str | None = None,
         extra_args: list[str] | None = None,
         run_timeout_s: int = DEFAULT_INSTRUCTION_RUN_TIMEOUT_S,
-        compare_depth: str = "process",
-        compare_top_n: int = 20,
+        compare_level: str = "total",
+        compare_process: str | None = None,
+        compare_thread: str | None = None,
+        compare_lib: str | None = None,
+        compare_function: str | None = None,
         python_exe: str | None = None,
         use_venv: bool = True,
         venv_dir: str | None = None,
@@ -829,8 +867,11 @@ def build_auto_test_fastmcp_server() -> Any | None:
             compare_script=compare_script,
             extra_args=extra_args,
             run_timeout_s=run_timeout_s,
-            compare_depth=compare_depth,
-            compare_top_n=compare_top_n,
+            compare_level=compare_level,
+            compare_process=compare_process,
+            compare_thread=compare_thread,
+            compare_lib=compare_lib,
+            compare_function=compare_function,
             python_exe=python_exe,
             use_venv=use_venv,
             venv_dir=venv_dir,
@@ -856,16 +897,22 @@ def build_auto_test_fastmcp_server() -> Any | None:
         baseline_report: str,
         candidate_report: str,
         compare_script: str | None = None,
-        depth: str = "process",
-        top_n: int = 20,
+        level: str = "total",
+        process: str | None = None,
+        thread: str | None = None,
+        lib: str | None = None,
+        function: str | None = None,
         timeout_s: int = DEFAULT_COMPARE_TIMEOUT_S,
     ) -> dict[str, Any]:
         return compare_reports(
             baseline_report=baseline_report,
             candidate_report=candidate_report,
             compare_script=compare_script,
-            depth=depth,
-            top_n=top_n,
+            level=level,
+            process=process,
+            thread=thread,
+            lib=lib,
+            function=function,
             timeout_s=timeout_s,
         )
 

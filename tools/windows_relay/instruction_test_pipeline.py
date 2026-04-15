@@ -329,8 +329,11 @@ def run_instruction_test(
     compare: bool = False,
     baseline_report: str | None = None,
     compare_script: str | None = None,
-    compare_depth: str = "process",
-    compare_top_n: int = 20,
+    compare_level: str = "total",
+    compare_process: str | None = None,
+    compare_thread: str | None = None,
+    compare_lib: str | None = None,
+    compare_function: str | None = None,
     use_venv: bool = True,
     venv_dir: str | None = None,
     force_utf8: bool = True,
@@ -495,10 +498,15 @@ def run_instruction_test(
             "--baseline", baseline_report,
             "--candidate", report_path,
         ]
-        if compare_depth:
-            cmp_argv.extend(["--depth", compare_depth])
-        if compare_top_n is not None:
-            cmp_argv.extend(["--top-n", str(int(compare_top_n))])
+        cmp_argv.extend(["--level", compare_level or "total"])
+        if compare_process:
+            cmp_argv.extend(["--process", compare_process])
+        if compare_thread:
+            cmp_argv.extend(["--thread", compare_thread])
+        if compare_lib:
+            cmp_argv.extend(["--lib", compare_lib])
+        if compare_function:
+            cmp_argv.extend(["--function", compare_function])
 
         _log(f"comparing: {subprocess.list2cmdline(cmp_argv)}")
         cmp_result = _run(cmp_argv, cwd=None, timeout_s=300)
@@ -585,20 +593,20 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--baseline-report", default=None, help="Baseline report directory for comparison.")
     parser.add_argument("--compare-script", default=None, help="Override path to report_compare.py.")
     parser.add_argument(
-        "--compare-depth",
+        "--compare-level",
         choices=("total", "process", "thread", "lib", "function"),
-        default="process",
+        default="total",
         help=(
-            "Depth of breakdown when --compare is set (default: process). "
-            "Forwarded to report_compare.py --depth."
+            "Granularity for --compare (default: total). Forwarded to "
+            "report_compare.py --level.  Deeper levels require the "
+            "corresponding --compare-process / --compare-thread / "
+            "--compare-lib / --compare-function names."
         ),
     )
-    parser.add_argument(
-        "--compare-top-n",
-        type=int,
-        default=20,
-        help="Top N entries per breakdown (default 20). Forwarded to report_compare.py --top-n.",
-    )
+    parser.add_argument("--compare-process", default=None, help="Target processName for --compare.")
+    parser.add_argument("--compare-thread", default=None, help="Target threadName for --compare.")
+    parser.add_argument("--compare-lib", default=None, help="Target libName for --compare.")
+    parser.add_argument("--compare-function", default=None, help="Target functionName for --compare.")
     return parser
 
 
@@ -614,8 +622,11 @@ def main(argv: list[str] | None = None) -> int:
         compare=args.compare,
         baseline_report=args.baseline_report,
         compare_script=args.compare_script,
-        compare_depth=args.compare_depth,
-        compare_top_n=args.compare_top_n,
+        compare_level=args.compare_level,
+        compare_process=args.compare_process,
+        compare_thread=args.compare_thread,
+        compare_lib=args.compare_lib,
+        compare_function=args.compare_function,
         use_venv=not args.no_venv,
         venv_dir=args.venv_dir,
         force_utf8=not args.no_utf8,
