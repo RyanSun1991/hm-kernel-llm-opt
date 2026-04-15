@@ -130,7 +130,8 @@ class RunInstructionTestValidationTests(unittest.TestCase):
         test_dir.mkdir()
         (test_dir / "main.py").write_text("# placeholder", encoding="utf-8")
 
-        def fake_run(argv: list, *, cwd: str, timeout_s: int, capture_output: bool = True) -> dict:
+        def fake_run(argv: list, *, cwd: str, timeout_s: int,
+                     capture_output: bool = True, env: dict | None = None) -> dict:
             return {
                 "ok": False,
                 "returncode": 7,
@@ -157,7 +158,8 @@ class RunInstructionTestValidationTests(unittest.TestCase):
         # Pre-existing report should not be picked.
         (test_dir / "reports" / "report_20260101010101").mkdir()
 
-        def fake_run(argv: list, *, cwd: str, timeout_s: int, capture_output: bool = True) -> dict:
+        def fake_run(argv: list, *, cwd: str, timeout_s: int,
+                     capture_output: bool = True, env: dict | None = None) -> dict:
             # Simulate the script creating a new report dir during its run.
             stamp = (datetime.now() + timedelta(seconds=1)).strftime("%Y%m%d%H%M%S")
             (Path(cwd) / "reports" / f"report_{stamp}").mkdir()
@@ -180,6 +182,71 @@ class RunInstructionTestValidationTests(unittest.TestCase):
         self.assertIsNotNone(result["report_path"])
         self.assertTrue(result["report_name"].startswith("report_"))
         self.assertNotEqual(result["report_name"], "report_20260101010101")
+
+
+class Utf8ModeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._root = Path(tempfile.mkdtemp(prefix="hmopt_itp_utf8_"))
+        self.addCleanup(shutil.rmtree, self._root, ignore_errors=True)
+
+    def _setup_ws(self) -> Path:
+        d = self._root / "ws"
+        d.mkdir()
+        (d / "main.py").write_text("# placeholder", encoding="utf-8")
+        (d / "reports").mkdir()
+        return d
+
+    def test_force_utf8_default_adds_X_flag_and_env(self) -> None:
+        test_dir = self._setup_ws()
+        captured: dict = {}
+
+        def fake_run(argv: list, *, cwd: str, timeout_s: int,
+                     capture_output: bool = True, env: dict | None = None) -> dict:
+            captured["argv"] = argv
+            captured["env"] = env
+            stamp = (datetime.now() + timedelta(seconds=1)).strftime("%Y%m%d%H%M%S")
+            (Path(cwd) / "reports" / f"report_{stamp}").mkdir()
+            return {"ok": True, "returncode": 0, "stdout": "", "stderr": "", "duration_s": 0.01, "command": ""}
+
+        with mock.patch.object(itp, "_run", side_effect=fake_run):
+            result = itp.run_instruction_test(test_dir=str(test_dir), main_script="main.py")
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["force_utf8"])
+        argv = captured["argv"]
+        # Expected layout: [<python>, "-X", "utf8", "main.py"]
+        self.assertEqual(argv[1], "-X")
+        self.assertEqual(argv[2], "utf8")
+        self.assertEqual(argv[3], "main.py")
+        self.assertIsNotNone(captured["env"])
+        self.assertEqual(captured["env"]["PYTHONUTF8"], "1")
+        self.assertEqual(captured["env"]["PYTHONIOENCODING"], "utf-8")
+
+    def test_force_utf8_false_omits_flag_and_env(self) -> None:
+        test_dir = self._setup_ws()
+        captured: dict = {}
+
+        def fake_run(argv: list, *, cwd: str, timeout_s: int,
+                     capture_output: bool = True, env: dict | None = None) -> dict:
+            captured["argv"] = argv
+            captured["env"] = env
+            stamp = (datetime.now() + timedelta(seconds=1)).strftime("%Y%m%d%H%M%S")
+            (Path(cwd) / "reports" / f"report_{stamp}").mkdir()
+            return {"ok": True, "returncode": 0, "stdout": "", "stderr": "", "duration_s": 0.01, "command": ""}
+
+        with mock.patch.object(itp, "_run", side_effect=fake_run):
+            result = itp.run_instruction_test(
+                test_dir=str(test_dir),
+                main_script="main.py",
+                force_utf8=False,
+            )
+
+        self.assertTrue(result["success"])
+        self.assertFalse(result["force_utf8"])
+        argv = captured["argv"]
+        self.assertNotIn("-X", argv)
+        self.assertNotIn("utf8", argv)
+        self.assertIsNone(captured["env"])
 
 
 class VenvDetectionTests(unittest.TestCase):
@@ -286,7 +353,8 @@ class RunInstructionTestVenvIntegrationTests(unittest.TestCase):
 
         captured: dict = {}
 
-        def fake_run(argv: list, *, cwd: str, timeout_s: int, capture_output: bool = True) -> dict:
+        def fake_run(argv: list, *, cwd: str, timeout_s: int,
+                     capture_output: bool = True, env: dict | None = None) -> dict:
             captured["argv"] = argv
             # Create a fresh report dir so the pipeline reports success.
             stamp = (datetime.now() + timedelta(seconds=1)).strftime("%Y%m%d%H%M%S")
@@ -316,7 +384,8 @@ class RunInstructionTestVenvIntegrationTests(unittest.TestCase):
         (test_dir / "main.py").write_text("# placeholder", encoding="utf-8")
         (test_dir / "reports").mkdir()
 
-        def fake_run(argv: list, *, cwd: str, timeout_s: int, capture_output: bool = True) -> dict:
+        def fake_run(argv: list, *, cwd: str, timeout_s: int,
+                     capture_output: bool = True, env: dict | None = None) -> dict:
             stamp = (datetime.now() + timedelta(seconds=1)).strftime("%Y%m%d%H%M%S")
             (Path(cwd) / "reports" / f"report_{stamp}").mkdir()
             return {
@@ -346,7 +415,8 @@ class RunInstructionTestVenvIntegrationTests(unittest.TestCase):
         venv_python.parent.mkdir(parents=True)
         venv_python.write_text("", encoding="utf-8")
 
-        def fake_run(argv: list, *, cwd: str, timeout_s: int, capture_output: bool = True) -> dict:
+        def fake_run(argv: list, *, cwd: str, timeout_s: int,
+                     capture_output: bool = True, env: dict | None = None) -> dict:
             stamp = (datetime.now() + timedelta(seconds=1)).strftime("%Y%m%d%H%M%S")
             (Path(cwd) / "reports" / f"report_{stamp}").mkdir()
             return {

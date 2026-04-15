@@ -144,8 +144,15 @@ def _run(
     cwd: str | None,
     timeout_s: int,
     capture_output: bool = True,
+    env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """Run a subprocess and return a structured result dict."""
+    """Run a subprocess and return a structured result dict.
+
+    Decodes stdout/stderr as UTF-8 with ``errors='replace'`` so a mis-encoded
+    byte from the child cannot crash the pipeline itself.  When *env* is
+    supplied it replaces the child's environment entirely — callers should
+    typically copy ``os.environ`` first.
+    """
     cmd_str = subprocess.list2cmdline(argv)
     started = time.time()
     stdout = ""
@@ -157,8 +164,11 @@ def _run(
             cwd=cwd,
             capture_output=capture_output,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout_s,
             check=False,
+            env=env,
         )
         stdout = proc.stdout or ""
         stderr = proc.stderr or ""
@@ -173,8 +183,10 @@ def _run(
             "command": cmd_str,
         }
     except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout.decode("utf-8", errors="replace") if exc.stdout else ""
-        stderr = exc.stderr.decode("utf-8", errors="replace") if exc.stderr else ""
+        stdout_bytes = exc.stdout if isinstance(exc.stdout, (bytes, bytearray)) else b""
+        stderr_bytes = exc.stderr if isinstance(exc.stderr, (bytes, bytearray)) else b""
+        stdout = stdout_bytes.decode("utf-8", errors="replace") if stdout_bytes else (exc.stdout or "")
+        stderr = stderr_bytes.decode("utf-8", errors="replace") if stderr_bytes else (exc.stderr or "")
         return {
             "ok": False,
             "returncode": -9,
@@ -192,6 +204,22 @@ def _run(
         "duration_s": round(time.time() - started, 3),
         "command": cmd_str,
     }
+
+
+def _build_utf8_child_env() -> dict[str, str]:
+    """Return a child environment that pins Python to UTF-8 mode.
+
+    ``PYTHONUTF8=1`` enables PEP 540 UTF-8 mode globally and
+    ``PYTHONIOENCODING=utf-8`` is a belt-and-braces for older Python /
+    third-party subprocesses that read the env var directly.  Both
+    settings propagate to any subprocess main.py spawns (e.g.
+    multiprocessing workers, hiperf HTML report builders) which is
+    exactly where the cp1252 UnicodeEncodeErrors actually originate.
+    """
+    env = os.environ.copy()
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    return env
 
 
 def _truncate(text: str, max_chars: int = 4000) -> str:
@@ -306,11 +334,22 @@ def run_instruction_test(
     metric_pattern: str | None = None,
     use_venv: bool = True,
     venv_dir: str | None = None,
+    force_utf8: bool = True,
 ) -> dict[str, Any]:
     """Run ``main.py`` under *test_dir* and locate the fresh report directory.
 
     If *compare* is True and *baseline_report* is supplied, invoke
     ``report_compare.py`` to produce an instruction-count diff.
+
+    When *force_utf8* is True (default) the child is launched with
+    ``-X utf8`` and ``PYTHONUTF8=1`` / ``PYTHONIOENCODING=utf-8`` in
+    its environment.  Without this, piping main.py's stdout through
+    subprocess on a Windows host whose locale is e.g. cp1252 causes
+    ``UnicodeEncodeError`` whenever main.py (or a multiprocessing
+    worker it spawns) tries to print a non-ASCII character, even
+    though running main.py directly in a cmd window works fine
+    because the console's active code page is different from the
+    pipe's default.
 
     Always returns a JSON-serializable dict.
     """
@@ -353,12 +392,20 @@ def run_instruction_test(
     else:
         _log(f"venv auto-detect disabled; using {python}")
 
-    argv = [python, os.path.basename(main_script) if not os.path.isabs(main_script) else main_script]
+    argv: list[str] = [python]
+    if force_utf8:
+        argv.extend(["-X", "utf8"])
+    argv.append(os.path.basename(main_script) if not os.path.isabs(main_script) else main_script)
     if extra_args:
         argv.extend(str(a) for a in extra_args)
 
-    _log(f"launching: {subprocess.list2cmdline(argv)} (cwd={test_dir_abs}, timeout={run_timeout_s}s)")
-    main_result = _run(argv, cwd=test_dir_abs, timeout_s=run_timeout_s)
+    child_env = _build_utf8_child_env() if force_utf8 else None
+
+    _log(
+        f"launching: {subprocess.list2cmdline(argv)} (cwd={test_dir_abs}, "
+        f"timeout={run_timeout_s}s, utf8={'on' if force_utf8 else 'off'})"
+    )
+    main_result = _run(argv, cwd=test_dir_abs, timeout_s=run_timeout_s, env=child_env)
     main_result_summary = {
         "ok": main_result["ok"],
         "returncode": main_result["returncode"],
@@ -379,6 +426,7 @@ def run_instruction_test(
             "python_exe": python,
             "venv_python": venv_python,
             "activate_bat": activate_bat,
+            "force_utf8": force_utf8,
             "run_result": main_result_summary,
         }
 
@@ -401,6 +449,7 @@ def run_instruction_test(
             "python_exe": python,
             "venv_python": venv_python,
             "activate_bat": activate_bat,
+            "force_utf8": force_utf8,
             "run_result": main_result_summary,
         }
 
@@ -420,6 +469,7 @@ def run_instruction_test(
         "python_exe": python,
         "venv_python": venv_python,
         "activate_bat": activate_bat,
+        "force_utf8": force_utf8,
         "run_result": main_result_summary,
     }
 
@@ -512,6 +562,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Disable venv auto-detection; always use the system/override python.",
     )
     parser.add_argument(
+        "--no-utf8",
+        action="store_true",
+        help=(
+            "Disable the default UTF-8 mode (-X utf8 + PYTHONUTF8=1 + "
+            "PYTHONIOENCODING=utf-8).  On Windows hosts with a non-UTF-8 "
+            "locale, main.py's stdout becomes a cp1252 pipe under "
+            "subprocess and non-ASCII prints raise UnicodeEncodeError; "
+            "leaving this on avoids that."
+        ),
+    )
+    parser.add_argument(
         "--extra-arg",
         action="append",
         default=[],
@@ -549,6 +610,7 @@ def main(argv: list[str] | None = None) -> int:
         metric_pattern=args.metric_pattern,
         use_venv=not args.no_venv,
         venv_dir=args.venv_dir,
+        force_utf8=not args.no_utf8,
     )
 
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)

@@ -447,6 +447,7 @@ def run_instruction_test(
     python_exe: str | None = None,
     use_venv: bool = True,
     venv_dir: str | None = None,
+    force_utf8: bool = True,
 ) -> dict[str, Any]:
     """Trigger modelCase's ``main.py`` on the Windows host via the relay.
 
@@ -484,6 +485,13 @@ def run_instruction_test(
             force the system interpreter.
         venv_dir: Override the venv directory name (absolute or
             relative to ``test_dir``).
+        force_utf8: When True (default) the pipeline launches main.py
+            with ``-X utf8`` and ``PYTHONUTF8=1`` /
+            ``PYTHONIOENCODING=utf-8`` so multiprocessing workers
+            spawned by main.py don't hit ``UnicodeEncodeError`` when
+            their stdout is piped on a cp1252 Windows host.  Set
+            False only if a workload actually depends on a legacy
+            codepage.
     """
     if compare and not baseline_report:
         raise ValueError("baseline_report is required when compare=True")
@@ -505,6 +513,8 @@ def run_instruction_test(
         argv.append("--no-venv")
     elif venv_dir:
         argv.extend(["--venv-dir", venv_dir])
+    if not force_utf8:
+        argv.append("--no-utf8")
     if compare:
         argv.append("--compare")
         argv.extend(["--baseline-report", baseline_report or ""])
@@ -774,6 +784,7 @@ def build_auto_test_fastmcp_server() -> Any | None:
         python_exe: str | None = None,
         use_venv: bool = True,
         venv_dir: str | None = None,
+        force_utf8: bool = True,
     ) -> dict[str, Any]:
         return run_instruction_test(
             compare=compare,
@@ -790,6 +801,7 @@ def build_auto_test_fastmcp_server() -> Any | None:
             python_exe=python_exe,
             use_venv=use_venv,
             venv_dir=venv_dir,
+            force_utf8=force_utf8,
         )
 
     @mcp.tool(
@@ -815,6 +827,7 @@ def build_auto_test_fastmcp_server() -> Any | None:
         python_exe: str | None = None,
         use_venv: bool = True,
         venv_dir: str | None = None,
+        force_utf8: bool = True,
     ) -> dict[str, Any]:
         return run_instruction_test_async(
             compare=compare,
@@ -831,6 +844,7 @@ def build_auto_test_fastmcp_server() -> Any | None:
             python_exe=python_exe,
             use_venv=use_venv,
             venv_dir=venv_dir,
+            force_utf8=force_utf8,
         )
 
     @mcp.tool(
