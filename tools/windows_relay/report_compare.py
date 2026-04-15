@@ -52,6 +52,27 @@ import re
 import sys
 from typing import Any, Iterable
 
+
+def _reconfigure_stdio_utf8() -> None:
+    """Pin stdout/stderr to UTF-8 so logs can't crash on non-ASCII paths.
+
+    Same rationale as instruction_test_pipeline.py: when the relay
+    launches us via subprocess its pipe inherits the Windows locale
+    (often cp1252), which turns any non-ASCII write into a crash.
+    The final JSON is still emitted with ``ensure_ascii=True`` so the
+    relay's own pipe-decoding cannot corrupt it either.
+    """
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        if stream is not None and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, OSError, ValueError):
+                pass
+
+
+_reconfigure_stdio_utf8()
+
 try:  # pragma: no cover — availability is what we test, not the import itself
     from openpyxl import load_workbook  # type: ignore
 except ImportError:  # pragma: no cover
@@ -553,10 +574,13 @@ def main(argv: list[str] | None = None) -> int:
             function=args.function,
         )
     except (RuntimeError, ValueError) as exc:
-        json.dump({"success": False, "error": str(exc)}, sys.stdout, ensure_ascii=False, indent=2)
+        json.dump({"success": False, "error": str(exc)}, sys.stdout, ensure_ascii=True, indent=2)
         sys.stdout.write("\n")
         return 1
-    json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
+    # See module docstring for why ensure_ascii=True: survives any pipe
+    # encoding the relay might attach; json.loads decodes \uXXXX escapes
+    # back into real characters on the Linux side.
+    json.dump(result, sys.stdout, ensure_ascii=True, indent=2)
     sys.stdout.write("\n")
     return 0 if result.get("success") else 2
 

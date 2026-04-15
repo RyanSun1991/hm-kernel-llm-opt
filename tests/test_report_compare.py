@@ -485,6 +485,39 @@ class CompareReportsTests(_TmpBase):
         self.assertTrue(payload["success"])
         self.assertEqual(payload["aggregate"]["delta"], 20)
 
+    def test_cli_main_output_is_pure_ascii(self) -> None:
+        """Same rationale as the pipeline script — the relay may read our
+        pipe with cp1252, so non-ASCII must be \\uXXXX-escaped."""
+        base = self.tmpdir("ascii_base")
+        cand = self.tmpdir("ascii_cand")
+        _make_report_tree(
+            base, case="a", round_n=0, step=1, total=100,
+            processes=[(1, "进程名", 100)],
+        )
+        _make_report_tree(
+            cand, case="a", round_n=0, step=1, total=80,
+            processes=[(1, "进程名", 80)],
+        )
+
+        buf = StringIO()
+        original = sys.stdout
+        sys.stdout = buf
+        try:
+            rc = report_compare.main([
+                "--baseline", str(base),
+                "--candidate", str(cand),
+                "--level", "process",
+                "--process", "进程名",
+            ])
+        finally:
+            sys.stdout = original
+        self.assertEqual(rc, 0)
+        raw = buf.getvalue()
+        self.assertTrue(raw.isascii(), msg=f"non-ASCII leaked: {raw!r}")
+        payload = json.loads(raw)
+        self.assertEqual(payload["target"], {"process": "进程名"})
+        self.assertEqual(payload["aggregate"]["delta"], -20)
+
     def test_cli_main_missing_required_name_emits_error(self) -> None:
         base = self.tmpdir("cli_bad_base")
         cand = self.tmpdir("cli_bad_cand")

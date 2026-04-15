@@ -39,6 +39,33 @@ import time
 from datetime import datetime
 from typing import Any
 
+
+def _reconfigure_stdio_utf8() -> None:
+    """Pin this process's own stdout/stderr to UTF-8 with errors='replace'.
+
+    Without this, on a Windows host whose locale is e.g. cp1252 the pipe
+    the parent (our relay) attaches to us inherits cp1252 — and the
+    moment we try to write a non-ASCII character (captured from main.py's
+    tail, a Chinese log line, etc.) we crash with UnicodeEncodeError.
+    Reconfiguring defends the script from that regardless of the
+    surrounding environment.
+
+    On top of this, the final JSON is still emitted with
+    ``ensure_ascii=True`` so that the relay — which decodes our pipe
+    with *its* locale — cannot corrupt the payload either: pure-ASCII
+    JSON round-trips identically through cp1252 and UTF-8.
+    """
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        if stream is not None and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, OSError, ValueError):
+                pass
+
+
+_reconfigure_stdio_utf8()
+
 REPORT_DIR_NAME = "reports"
 REPORT_NAME_PATTERN = re.compile(r"^report_(\d{14})$")
 DEFAULT_MAIN_SCRIPT = "main.py"
@@ -632,7 +659,12 @@ def main(argv: list[str] | None = None) -> int:
         force_utf8=not args.no_utf8,
     )
 
-    json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
+    # ensure_ascii=True: non-ASCII characters (Chinese logs captured from
+    # main.py, etc.) are encoded as \uXXXX escapes so the output is pure
+    # ASCII and survives whatever encoding the relay uses to read our
+    # pipe.  json.loads on the Linux side decodes the escapes back into
+    # real characters, so no information is lost.
+    json.dump(result, sys.stdout, ensure_ascii=True, indent=2)
     sys.stdout.write("\n")
     return 0 if result.get("success") else 2
 

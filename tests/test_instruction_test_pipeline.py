@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unittest
 from datetime import datetime, timedelta
+from io import StringIO
 from pathlib import Path
 from unittest import mock
 
@@ -437,6 +438,61 @@ class RunInstructionTestVenvIntegrationTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertIsNone(result["venv_python"])
         self.assertIsNone(result["activate_bat"])
+
+
+class AsciiSafeJsonOutputTests(unittest.TestCase):
+    """The pipeline's own JSON output must be ASCII-safe so it survives
+    whatever encoding the relay's pipe uses (cp1252 on many Windows
+    hosts) — a real-world regression where Chinese chars captured from
+    main.py's stdout tail crashed the json.dump step or got corrupted
+    in transit."""
+
+    def setUp(self) -> None:
+        self._root = Path(tempfile.mkdtemp(prefix="hmopt_itp_ascii_"))
+        self.addCleanup(shutil.rmtree, self._root, ignore_errors=True)
+
+    def test_cli_output_is_pure_ascii_even_with_chinese_in_tails(self) -> None:
+        test_dir = self._root / "ws"
+        test_dir.mkdir()
+        (test_dir / "main.py").write_text("# placeholder", encoding="utf-8")
+        (test_dir / "reports").mkdir()
+
+        chinese = "创建索引失败"
+
+        def fake_run(argv: list, *, cwd: str, timeout_s: int,
+                     capture_output: bool = True, env: dict | None = None) -> dict:
+            stamp = (datetime.now() + timedelta(seconds=1)).strftime("%Y%m%d%H%M%S")
+            (Path(cwd) / "reports" / f"report_{stamp}").mkdir()
+            return {
+                "ok": True,
+                "returncode": 0,
+                "stdout": f"prefix {chinese} suffix",
+                "stderr": f"boom {chinese}",
+                "duration_s": 0.01,
+                "command": "python main.py",
+            }
+
+        buf = StringIO()
+        original = sys.stdout
+        sys.stdout = buf
+        try:
+            with mock.patch.object(itp, "_run", side_effect=fake_run):
+                rc = itp.main([
+                    "--test-dir", str(test_dir),
+                    "--main-script", "main.py",
+                    "--no-utf8",  # skip -X utf8 for main.py — not relevant to this test
+                ])
+        finally:
+            sys.stdout = original
+
+        self.assertEqual(rc, 0)
+        raw = buf.getvalue()
+        # The serialized output is pure ASCII, not raw Chinese bytes.
+        self.assertTrue(raw.isascii(), msg=f"non-ASCII leaked: {raw!r}")
+        # But a parser recovers the original Chinese text via \uXXXX escapes.
+        payload = json.loads(raw)
+        self.assertIn(chinese, payload["run_result"]["stdout_tail"])
+        self.assertIn(chinese, payload["run_result"]["stderr_tail"])
 
 
 if __name__ == "__main__":
