@@ -25,7 +25,7 @@ Actions / 动作:
   up-prebuilt     Start with preloaded image (no local build) / 使用预置镜像启动（不本地构建）
   index           Build kernel index / 执行内核索引
   mcp             Start MCP server (port 7331) / 启动 MCP 服务（7331）
-  seq-mcp         Start sequential thinking MCP server (host 7334 -> container 7333) / 启动顺序思考 MCP 服务（宿主7334->容器7333）
+  seq-mcp         Start sequential thinking MCP server (host 7333 -> container 7333) / 启动顺序思考 MCP 服务（宿主7333->容器7333）
   git-mcp         Start Git MCP server (host port 7334 -> container 7334) / 启动 Git MCP 服务（宿主7334->容器7334）
   build-mcp       Start Build MCP server (host 7335 -> container 7335) / 启动 Build MCP 服务（宿主7335->容器7335）
   oneclick        Start MCP + sequential MCP servers in background / 一键后台启动 MCP+顺序思考 MCP 服务
@@ -472,7 +472,9 @@ case "$ACTION" in
   seq-mcp) up_docker_native; seq_mcp_docker_native ;;
   git-mcp) up_docker_native; git_mcp_docker_native ;;
   build-mcp) up_docker_native; build_mcp_docker_native ;;
-  mcp-all) up_docker_native; oneclick_docker_native ;;
+  oneclick|mcp-all) up_docker_native; oneclick_docker_native ;;
+  api) up_docker_native; api_docker_native ;;
+  clone) clone_repo ;;
   down) down_docker_native ;;
   logs) logs_docker_native ;;
   shell)shell_docker_native ;;

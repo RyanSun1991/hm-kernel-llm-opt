@@ -171,7 +171,13 @@ def _resolve_lz4_install_policy(mode: str) -> str:
     return ""
 
 
-def _run_in_build_docker(inner_cmd: str, *, timeout_s: int, workdir: str | None = None) -> dict[str, Any]:
+def _run_in_build_docker(
+    inner_cmd: str,
+    *,
+    timeout_s: int,
+    workdir: str | None = None,
+    project_path: str | None = None,
+) -> dict[str, Any]:
     docker_bin = _env("HMOPT_BUILD_MCP_DOCKER_BIN", "docker")
     mode = _env("HMOPT_BUILD_MCP_MODE", "exec").lower()
     runtime_workdir = (workdir or _env("HMOPT_BUILD_MCP_WORKDIR")).strip()
@@ -203,7 +209,11 @@ def _run_in_build_docker(inner_cmd: str, *, timeout_s: int, workdir: str | None 
         if not image:
             raise ValueError("HMOPT_BUILD_MCP_RUNNER_IMAGE is required in run mode")
 
-        container_project_path = _resolve_project_path()
+        # Honor a per-request project_path when the caller provides one.
+        # Without this, run mode always falls back to HMOPT_BUILD_MCP_PROJECT_PATH
+        # (or the workspace/subpath env trio), which breaks callers that pass
+        # project_path as an argument to trigger_hione_build.
+        container_project_path = _resolve_project_path(project_path)
 
         host_workspace = _env("HMOPT_BUILD_MCP_HOST_WORKDIR")
         container_workspace = _env("HMOPT_BUILD_MCP_CONTAINER_WORKDIR")
@@ -270,6 +280,7 @@ def trigger_hione_build(
         full_cmd,
         timeout_s=timeout_s,
         workdir=resolved_project_path,
+        project_path=resolved_project_path,
     )
 
 
