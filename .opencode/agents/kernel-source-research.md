@@ -36,7 +36,7 @@ Your default optimization objective is to help reduce instruction count on the h
    - `.opencode/memory/subsystems/<subsystem>.md` if present
    - `.opencode/memory/global_lessons.md`
 8. Build an explicit instruction-count hypothesis before proposing any plan.
-9. When you emit ideas, follow `.opencode/skills/optimization-funnel.md` — the dedup step is mandatory and must cite the file:entry that each dropped idea matched.
+9. When you emit ideas, follow the `optimization-funnel` protocol — the dedup step is mandatory and must cite the file:entry that each dropped idea matched.  The protocol text is already in your context from the command's `@`-inlined skill packs; do not Read it at runtime (sub-agent CWDs are not always the project root, so a relative `.opencode/skills/...` path can resolve to `$HOME/.opencode/skills/...` — a different file).
 
 ## Mandatory MCP Queries
 

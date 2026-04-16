@@ -25,6 +25,16 @@ Every agent session MUST begin by reading these files in order:
 
 ## Hard Rules
 
+### Sub-Agents — Skills Are Already Inlined, Do NOT Read Them Again
+
+When a command launches the manager (e.g. `/optimize_generic`), OpenCode `@`-inlines every skill document listed in the command's `Skill packs:` section into the session's prompt context.  **That context propagates to every sub-agent the manager delegates to.**  The skill content is already visible to sub-agents — they do not need to Read any file under `.opencode/skills/` to see it.
+
+**Sub-agents MUST NOT Read files under `.opencode/skills/` at runtime.**  OpenCode's sub-agent sessions do not always run with this repo as the current working directory.  A relative path like `.opencode/skills/X.md` can resolve to `$HOME/.opencode/skills/X.md` — a different file, a missing one, or a stale copy from another project.
+
+If a sub-agent's prompt says "follow the `optimization-funnel` protocol" or similar, that protocol is already in the sub-agent's context — apply its rules from memory, do not try to re-Read the file.
+
+For dynamic project-local state the sub-agent truly needs to read at runtime (e.g. `.opencode/state/bad_plans.md`, `.opencode/memory/targets/<target>.md`), always resolve the project root first with Bash `git rev-parse --show-toplevel` (falling back to `pwd`) and use the absolute path — never rely on CWD for `.opencode/...` resolution.
+
 ### File Discovery in `.opencode/` — NEVER Use glob
 
 OpenCode's glob tool gets stuck on `.opencode/**` patterns (dot-prefixed directories are not enumerated) and repeatedly reports "no matches" even when the files exist. This blocks the whole pipeline.

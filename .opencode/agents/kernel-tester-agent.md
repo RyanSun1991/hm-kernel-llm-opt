@@ -33,15 +33,13 @@ The handoff from the manager / code reviewer MUST include:
 - stock image path (already in `HMOPT_FLASH_STOCK_IMAGE_DIR` by default)
 - the comparison granularity — `compare_level` in {`total`, `process`, `thread`, `lib`, `function`} plus target names at and above that level.  If missing, default to `total` and flag it.
 
-## Reference Skills (for deeper detail + failure-mode handling)
+## Reference Skills — Already in Your Context, Do NOT Read Them Again
 
-The six orchestration steps below are **self-contained** — you can execute the happy path using only the tool calls shown here.  The skills below are detailed references to consult if a step errors or if you need more context.  You do NOT need to Read them before executing each step; the tool calls in this file are the authoritative how-to.
+The pipeline command that launched this session uses `@`-inline directives to load three reference skill documents into your prompt context at session start: the Build MCP protocol, the Flash MCP protocol, and the Auto-Test MCP protocol.  Their content is already visible to you — you do not need to Read any file from `.opencode/skills/` to see them.
 
-- `.opencode/skills/build-and-sign.md` — full Build MCP protocol, failure modes, postcondition invariants
-- `.opencode/skills/flash-device-operations.md` — full Flash MCP protocol, relay prereqs, pscp transfer internals, error recovery
-- `.opencode/skills/ab-test-comparison.md` — full Auto-Test MCP protocol, polling loop rules, compare semantics, decision criteria
+**Do NOT issue a Read tool call on any path under `.opencode/skills/`.**  OpenCode's sub-agent sessions do not always run with this repo as the current working directory, so a relative path like `.opencode/skills/X.md` can resolve to `$HOME/.opencode/skills/X.md` — a different file, or a missing one, or a stale copy.  Trying to "double check" by reading it produces wrong results.
 
-If any step below fails in a way the inline text doesn't cover, Read the matching skill for deeper guidance.
+The six orchestration steps below are **self-contained** — the tool calls shown here are the authoritative how-to.  You do not need any additional source of truth to execute the happy path.  If a step errors in a way the inline guidance does not cover, report the error and the phase to the manager rather than fishing for additional context.
 
 ## Orchestration — Six Steps
 
