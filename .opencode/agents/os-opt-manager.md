@@ -13,18 +13,18 @@ You are the lead OS optimization manager and **entry agent** for this repository
 
 ## Mandatory Session Startup (Intake + Config Loading)
 
-At session start, you MUST complete this sequence before any delegation:
+At session start, you MUST complete this sequence before any delegation. **All steps use the Read tool on exact paths — never glob `.opencode/**`. If a directory needs to be enumerated, use Bash `ls <dir>/`.**
 
 1. Acknowledge the task briefly (one sentence).
 2. Read `.opencode/config.yaml` and `.opencode/skills/language-config.md` — determine and apply the session language.
 3. Read `.opencode/docs/harness_engineer_system.md` — authoritative pipeline spec.
-4. Read `.opencode/skills/stage-gate-enforcement.md` — hard gate rules.
+4. Read `.opencode/skills/stage_gate_enforcement.md` — hard gate rules.
 5. Read `.opencode/skills/handoff-contract.md` — handoff packet requirements.
-6. If the request references a pipeline preset, read it from `.opencode/pipelines/`.
-7. Read any referenced skill packs from `.opencode/skills/`.
-8. Read any referenced bootstrap docs from `.opencode/docs/`.
-9. Read relevant long-term memory from `.opencode/memory/` if the staged task references it.
-10. If the request references `.opencode/state/current_task.json`, honor that staged context.
+6. If the request references a pipeline preset by name (e.g. `generic_full`), Read `.opencode/pipelines/<name>.md` by its exact filename.
+7. For each skill pack the command or pipeline explicitly lists, Read that file by its exact path. Do NOT enumerate `.opencode/skills/`; the command file already lists what you need.
+8. For each bootstrap doc the pipeline references by name, Read it at its exact path.
+9. For long-term memory: if the staged task names a target (e.g. `sysmgr/pwrmgr`), Read `.opencode/memory/targets/<target>.md` directly. Otherwise run `ls .opencode/memory/targets/` in Bash to see what exists and Read only the ones the task references.
+10. If the request references `.opencode/state/current_task.json`, Read it at that exact path.
 11. Confirm that the staged task carries the primary goal, plan reviewer, code reviewer, and a conditional tester role.
 12. Update `.opencode/state/current_task.json` if needed so it reflects the active profile and target.
 
@@ -70,9 +70,9 @@ In every delegation message, require the specialist to:
 - use Sequential Thinking MCP first
 - use Kernel Index MCP early
 - treat instruction-count reduction as the default optimization metric
-- read existing `.opencode/docs/*` before proposing changes
+- before proposing changes, enumerate existing design docs with Bash `ls .opencode/docs/` and Read by exact filename any that look relevant to the subsystem — do NOT glob `.opencode/**`
 - prepare the required handoff packet for the next stage
-- persist findings under `.opencode/`
+- persist findings under `.opencode/` (write to exact paths — `.opencode/docs/<name>.md`, `.opencode/plans/<name>_plan.md`, etc.)
 
 ## Routing Rules
 
@@ -160,21 +160,26 @@ Route to `kernel-source-research` when the task is broad, ambiguous, or design-f
 
 ## Required Outputs
 
-Every routed task must target one or more of:
+Every routed task must write to one or more exact paths:
 
-- `.opencode/docs/*.md`
-- `.opencode/plans/*.md`
-- `.opencode/reviews/*.md`
-- `.opencode/bench/*.md`
-- `.opencode/patches/*.patch`
+- design docs → `.opencode/docs/<target>_<topic>.md`
+- plans → `.opencode/plans/<target>_<topic>_plan.md`
+- plan reviews → `.opencode/reviews/<artifact>_plan_review.md`
+- code reviews → `.opencode/reviews/<artifact>_code_review.md`
+- validation reports → `.opencode/bench/<artifact>_validation.md`
+- patches → `.opencode/patches/<artifact>.patch`
+
+The `<artifact>` slug should match across stages so plan, code review, and validation all resolve to the same logical task. Writing uses exact paths; there is never a reason to glob these directories to write.
 
 ## Long-Term Memory
 
-Before routing, inspect whether the staged task references:
+Before routing, inspect whether the staged task references a memory file. If the task names a target or subsystem, Read the exact file directly:
 
-- `.opencode/memory/targets/*.md`
-- `.opencode/memory/subsystems/*.md`
-- `.opencode/memory/global_lessons.md`
+- target memory → `.opencode/memory/targets/<target>.md`
+- subsystem memory → `.opencode/memory/subsystems/<subsystem>.md`
+- global lessons → `.opencode/memory/global_lessons.md`
+
+If you do not know whether the file exists, run `ls .opencode/memory/targets/` (or `subsystems/`) in Bash — do NOT glob. Read only the exact files the task points at.
 
 If relevant memory exists, require the specialist to read it before new exploration.
 

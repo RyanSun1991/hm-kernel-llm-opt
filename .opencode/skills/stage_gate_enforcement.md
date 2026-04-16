@@ -73,10 +73,10 @@ These rules prevent agents from silently absorbing work that belongs to other st
 
 If your conversation has exceeded 10 exchanges or you feel uncertain about the current stage:
 
-1. Re-read this file (`stage-gate-enforcement.md`)
-2. Re-read `harness_engineer_system.md` Section "Stage Order"
-3. Check `.opencode/state/current_task.json` for the current stage
-4. Verify what artifacts exist under `.opencode/reviews/`, `.opencode/plans/`, `.opencode/bench/`
+1. Re-read this file (`.opencode/skills/stage_gate_enforcement.md`)
+2. Re-read `.opencode/docs/harness_engineer_system.md` Section "Stage Order"
+3. Read `.opencode/state/current_task.json` for the current stage
+4. Enumerate the existing artifacts with Bash: `ls .opencode/reviews/ .opencode/plans/ .opencode/bench/`. **Do NOT glob `.opencode/**`** — it hangs.
 5. Resume from the correct stage
 
 ## Delegation Message Template

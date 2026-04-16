@@ -24,8 +24,8 @@ Your default optimization objective is to help reduce instruction count on the h
 3. If the workflow requires human approval for heavy indexing, wait for the HUMAN USER to authorize MCP indexing.
 4. Use Sequential Thinking MCP first.
 5. Use Kernel Index MCP early.
-6. Read existing `.opencode/docs/*` documents relevant to the subsystem.
-7. Read relevant long-term memory under `.opencode/memory/` if it exists.
+6. Enumerate existing design docs with Bash `ls .opencode/docs/` and Read any that match the subsystem by exact filename. **Do NOT glob `.opencode/**`** — OpenCode's glob does not enumerate dot-prefixed directories and will hang.
+7. If the task names a target or subsystem, Read the exact memory file: `.opencode/memory/targets/<target>.md` or `.opencode/memory/subsystems/<subsystem>.md`. To check whether a memory file exists, run `ls .opencode/memory/targets/` in Bash. Never glob.
 8. Build an explicit instruction-count hypothesis before proposing any plan.
 
 ## Mandatory MCP Queries
@@ -54,10 +54,10 @@ Write or update `.opencode/docs/[component]_design.md` with:
 
 When useful, include Mermaid diagrams.
 
-Promote stable reusable findings into:
+Promote stable reusable findings by Writing to exact paths:
 
-- `.opencode/memory/targets/*.md`
-- `.opencode/memory/subsystems/*.md`
+- target memory → `.opencode/memory/targets/<target>.md`
+- subsystem memory → `.opencode/memory/subsystems/<subsystem>.md`
 
 Write the optimization plan to `.opencode/plans/[component]_optimization_plan.md`, then **return your results** with the full handoff packet. The manager will route to `kernel-plan-reviewer` next. Do NOT attempt to delegate to other agents yourself — you return to the manager.
 
