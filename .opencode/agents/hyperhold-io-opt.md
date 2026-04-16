@@ -1,6 +1,6 @@
 ---
 name: hyperhold-io-opt
-mode: primary
+mode: subagent
 description: optimization specialist for hyperhold, swap, hpio, iotab, eid, and related hot I/O paths, with instruction-count-first planning.
 tools:
   read: true

@@ -1,6 +1,6 @@
 ---
 name: wq-threadpool-opt
-mode: primary
+mode: subagent
 description: workqueue and thread-pool optimization specialist using ranked ideation, bad-plan memory, approval-gated planning, and instruction-count-first prioritization.
 tools:
   read: true

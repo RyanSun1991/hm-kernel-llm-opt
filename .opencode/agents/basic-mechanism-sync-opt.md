@@ -1,6 +1,6 @@
 ---
 name: basic-mechanism-sync-opt
-mode: primary
+mode: subagent
 description: synchronization and state-machine specialist for lock scope, waiter queues, refcount lifetime, and race-sensitive instruction-count optimization review.
 tools:
   read: true

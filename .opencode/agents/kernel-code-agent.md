@@ -1,6 +1,6 @@
 ---
 name: kernel-code-agent
-mode: primary
+mode: subagent
 description: implementation specialist that turns approved plans into minimal patches and review-ready code changes.
 tools:
   read: true

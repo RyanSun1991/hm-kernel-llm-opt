@@ -1,6 +1,6 @@
 ---
 name: memmgr-reclaim-research
-mode: primary
+mode: subagent
 description: repo-specific research specialist for sysmgr/memmgr reclaim, allocator slow paths, vmpressure, psi, and reclaim-control interactions, with instruction-count-first optimization planning.
 tools:
   read: true

@@ -1,6 +1,6 @@
 ---
 name: kernel-tester-agent
-mode: primary
+mode: subagent
 description: validation specialist that owns Build MCP, Flash MCP, and Auto-Test MCP execution, runs the async instruction-count A/B cycle on real hardware, and reports validation status.
 tools:
   read: true

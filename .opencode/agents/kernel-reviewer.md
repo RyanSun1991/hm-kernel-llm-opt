@@ -1,6 +1,6 @@
 ---
 name: kernel-reviewer
-mode: primary
+mode: subagent
 description: legacy compatibility alias for the code-review stage. use `kernel-code-reviewer` for new workflows.
 tools:
   read: true

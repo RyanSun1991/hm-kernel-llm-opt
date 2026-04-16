@@ -1,6 +1,6 @@
 ---
 name: kernel-source-research
-mode: primary
+mode: subagent
 description: deep-dive researcher for kernel components. builds design understanding, symbol relationships, control flow, and concurrency documentation before instruction-count-first optimization.
 tools:
   read: true

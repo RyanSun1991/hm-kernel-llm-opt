@@ -1,6 +1,6 @@
 ---
 name: kernel-plan-reviewer
-mode: primary
+mode: subagent
 description: plan-review specialist that audits research output and optimization plans before coding, with instruction-count reduction as the primary evaluation target.
 tools:
   read: true

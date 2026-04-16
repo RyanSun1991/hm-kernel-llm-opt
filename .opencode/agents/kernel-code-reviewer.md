@@ -1,6 +1,6 @@
 ---
 name: kernel-code-reviewer
-mode: primary
+mode: subagent
 description: code-review specialist that reviews implemented patches from the code and performance angles only, with instruction-count reduction as the primary metric.
 tools:
   read: true
