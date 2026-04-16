@@ -27,6 +27,10 @@ A domain-agnostic pipeline for analyzing and optimizing any kernel directory, su
 - `.opencode/skills/implementation-guardrails.md`
 - `.opencode/skills/validation-flight-check.md`
 - `.opencode/skills/memory-accumulation.md`
+- `.opencode/skills/stage_gate_enforcement.md`
+- `.opencode/skills/build-and-sign.md`
+- `.opencode/skills/flash-device-operations.md`
+- `.opencode/skills/ab-test-comparison.md`
 - `.opencode/docs/memory_system.md`
 
 ## Execution Shape

@@ -27,26 +27,31 @@ If any precondition fails: verdict = **fail**, return to manager.
 
 ## Mandatory Sequence
 
-```
-# Step 1: build the patched kernel
-build_result = kernel_build_trigger(
-    # branch / config / target per the staged task
-)
-# Confirm build_result.success is True.  If False:
-#   - read build_result.stderr_tail for the compiler error
-#   - set verdict=fail, record the error, return to manager
-#   - do NOT attempt sign on a failed build
+Call these Build MCP tools in order.  Both are typically synchronous; if your Build MCP variant exposes an async form, submit the task and poll the status tool with a 60 s cadence.
 
-# Step 2: sign + package the built image
-sign_result = kernel_sign_trigger(
-    # usually no arguments; defaults target the build output
-)
-# Confirm sign_result.success is True.  If False:
-#   - verdict=fail, record sign_result error
-#   - return to manager
+### 1. Build
+
+```
+build_result = kernel_build_trigger()
 ```
 
-Both steps are synchronous in typical configurations.  If your Build MCP variant is async, submit the task and poll `kernel_build_status(task_id)` with a 60 s cadence.
+No arguments needed in the default configuration — the tool uses the current feature branch and the repo's build config.  If the plan requires a non-default config or target, pass it explicitly per the staged task.
+
+Confirm `build_result.success is True`.  On failure:
+
+- Read `build_result.stderr_tail` for the compiler error.
+- verdict = **fail**, record the error, return to manager.
+- Do NOT attempt sign on a failed build.
+
+### 2. Sign / Package
+
+```
+sign_result = kernel_sign_trigger()
+```
+
+No arguments in the default configuration — the tool signs the output of the previous build step.  Confirm `sign_result.success is True`.  On failure:
+
+- verdict = **fail**, record `sign_result` error, return to manager.
 
 ## Postcondition
 
