@@ -170,6 +170,37 @@ def test_exec_survives_non_cp1252_stdout(relay_server, tmp_path):
     assert "中创建" in result["stdout"], result
 
 
+def test_main_installs_openpyxl_when_missing(monkeypatch):
+    """relay's main() does `import openpyxl` at startup; on ImportError it
+    shells out to `pip install openpyxl`.  Simulate the missing case and
+    assert the pip command is issued with the right args."""
+    import relay_service  # type: ignore
+
+    # Force the import to fail inside main() by masking openpyxl.
+    monkeypatch.setitem(sys.modules, "openpyxl", None)
+
+    pip_calls: list = []
+
+    def fake_run(argv, **kwargs):
+        pip_calls.append(argv)
+        class _R:
+            returncode = 0
+        return _R()
+
+    # Patch subprocess.run used by main(); avoid touching real pip.  Also
+    # make HTTPServer.serve_forever return immediately so main() exits.
+    monkeypatch.setattr(relay_service.subprocess, "run", fake_run)
+    monkeypatch.setattr(relay_service.HTTPServer, "serve_forever", lambda self: None)
+    monkeypatch.setattr(relay_service.HTTPServer, "server_close", lambda self: None)
+
+    relay_service.main(["--port", "0"])
+
+    assert pip_calls, "pip was not invoked when openpyxl was missing"
+    pip_argv = pip_calls[0]
+    assert "-m" in pip_argv and "pip" in pip_argv and "install" in pip_argv
+    assert "openpyxl" in pip_argv
+
+
 def test_exec_timeout(relay_server):
     """Commands that exceed timeout should return -9."""
     # Use a command that would take a while but is in the allowlist

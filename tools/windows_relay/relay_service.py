@@ -15,6 +15,7 @@ import os
 import platform
 import socket
 import subprocess
+import sys
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from typing import Any
@@ -177,6 +178,14 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--port", type=int, default=int(os.environ.get("RELAY_PORT", DEFAULT_PORT)))
     parser.add_argument("--bind", default=os.environ.get("RELAY_BIND", "0.0.0.0"))
     args = parser.parse_args(argv)
+
+    # report_compare.py needs openpyxl.  Install it on first startup so
+    # operators don't have to remember.
+    try:
+        import openpyxl  # noqa: F401
+    except ImportError:
+        print("[deps] openpyxl not found, installing ...")
+        subprocess.run([sys.executable, "-m", "pip", "install", "openpyxl"], check=False)
 
     server = HTTPServer((args.bind, args.port), RelayHandler)
     secret_status = "enabled" if os.environ.get("RELAY_SECRET", "").strip() else "disabled"

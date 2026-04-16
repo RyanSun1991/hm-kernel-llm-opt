@@ -499,6 +499,10 @@ def run_instruction_test(
             their stdout is piped on a cp1252 Windows host.  Set
             False only if a workload actually depends on a legacy
             codepage.
+
+    The pipeline always wakes the device to the home screen before
+    launching main.py — this is baked into ``instruction_test_pipeline.py``
+    and not a tunable here.
     """
     if compare and not baseline_report:
         raise ValueError("baseline_report is required when compare=True")

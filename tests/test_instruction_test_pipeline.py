@@ -17,10 +17,20 @@ from io import StringIO
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "tools" / "windows_relay"))
 
 import instruction_test_pipeline as itp  # type: ignore  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _no_real_sleep(monkeypatch):
+    """The pipeline's wake sequence calls time.sleep(5) then time.sleep(1).
+    Skip real sleeps during tests so the suite finishes in seconds, not
+    tens of seconds per affected test."""
+    monkeypatch.setattr(itp.time, "sleep", lambda *a, **kw: None)
 
 
 class ParseReportTimestampTests(unittest.TestCase):
@@ -162,6 +172,9 @@ class RunInstructionTestValidationTests(unittest.TestCase):
         def fake_run(argv: list, *, cwd: str, timeout_s: int,
                      capture_output: bool = True, env: dict | None = None) -> dict:
             # Simulate the script creating a new report dir during its run.
+            if cwd is None:  # hdc wake call — no cwd, no report to create
+                return {"ok": True, "returncode": 0, "stdout": "", "stderr": "",
+                        "duration_s": 0.01, "command": "hdc shell ..."}
             stamp = (datetime.now() + timedelta(seconds=1)).strftime("%Y%m%d%H%M%S")
             (Path(cwd) / "reports" / f"report_{stamp}").mkdir()
             return {
@@ -205,12 +218,18 @@ class Utf8ModeTests(unittest.TestCase):
                      capture_output: bool = True, env: dict | None = None) -> dict:
             captured["argv"] = argv
             captured["env"] = env
+            if cwd is None:  # hdc wake call — no cwd, no report to create
+                return {"ok": True, "returncode": 0, "stdout": "", "stderr": "",
+                        "duration_s": 0.01, "command": "hdc shell ..."}
             stamp = (datetime.now() + timedelta(seconds=1)).strftime("%Y%m%d%H%M%S")
             (Path(cwd) / "reports" / f"report_{stamp}").mkdir()
             return {"ok": True, "returncode": 0, "stdout": "", "stderr": "", "duration_s": 0.01, "command": ""}
 
         with mock.patch.object(itp, "_run", side_effect=fake_run):
-            result = itp.run_instruction_test(test_dir=str(test_dir), main_script="main.py")
+            result = itp.run_instruction_test(
+                test_dir=str(test_dir),
+                main_script="main.py",
+            )
 
         self.assertTrue(result["success"])
         self.assertTrue(result["force_utf8"])
@@ -231,6 +250,9 @@ class Utf8ModeTests(unittest.TestCase):
                      capture_output: bool = True, env: dict | None = None) -> dict:
             captured["argv"] = argv
             captured["env"] = env
+            if cwd is None:  # hdc wake call — no cwd, no report to create
+                return {"ok": True, "returncode": 0, "stdout": "", "stderr": "",
+                        "duration_s": 0.01, "command": "hdc shell ..."}
             stamp = (datetime.now() + timedelta(seconds=1)).strftime("%Y%m%d%H%M%S")
             (Path(cwd) / "reports" / f"report_{stamp}").mkdir()
             return {"ok": True, "returncode": 0, "stdout": "", "stderr": "", "duration_s": 0.01, "command": ""}
@@ -358,6 +380,9 @@ class RunInstructionTestVenvIntegrationTests(unittest.TestCase):
                      capture_output: bool = True, env: dict | None = None) -> dict:
             captured["argv"] = argv
             # Create a fresh report dir so the pipeline reports success.
+            if cwd is None:  # hdc wake call — no cwd, no report to create
+                return {"ok": True, "returncode": 0, "stdout": "", "stderr": "",
+                        "duration_s": 0.01, "command": "hdc shell ..."}
             stamp = (datetime.now() + timedelta(seconds=1)).strftime("%Y%m%d%H%M%S")
             (Path(cwd) / "reports" / f"report_{stamp}").mkdir()
             return {
@@ -370,7 +395,10 @@ class RunInstructionTestVenvIntegrationTests(unittest.TestCase):
             }
 
         with mock.patch.object(itp, "_run", side_effect=fake_run):
-            result = itp.run_instruction_test(test_dir=str(test_dir), main_script="main.py")
+            result = itp.run_instruction_test(
+                test_dir=str(test_dir),
+                main_script="main.py",
+            )
 
         self.assertTrue(result["success"])
         self.assertEqual(result["python_exe"], str(venv_python))
@@ -387,6 +415,9 @@ class RunInstructionTestVenvIntegrationTests(unittest.TestCase):
 
         def fake_run(argv: list, *, cwd: str, timeout_s: int,
                      capture_output: bool = True, env: dict | None = None) -> dict:
+            if cwd is None:  # hdc wake call — no cwd, no report to create
+                return {"ok": True, "returncode": 0, "stdout": "", "stderr": "",
+                        "duration_s": 0.01, "command": "hdc shell ..."}
             stamp = (datetime.now() + timedelta(seconds=1)).strftime("%Y%m%d%H%M%S")
             (Path(cwd) / "reports" / f"report_{stamp}").mkdir()
             return {
@@ -399,7 +430,10 @@ class RunInstructionTestVenvIntegrationTests(unittest.TestCase):
             }
 
         with mock.patch.object(itp, "_run", side_effect=fake_run):
-            result = itp.run_instruction_test(test_dir=str(test_dir), main_script="main.py")
+            result = itp.run_instruction_test(
+                test_dir=str(test_dir),
+                main_script="main.py",
+            )
 
         self.assertTrue(result["success"])
         self.assertIsNone(result["venv_python"])
@@ -418,6 +452,9 @@ class RunInstructionTestVenvIntegrationTests(unittest.TestCase):
 
         def fake_run(argv: list, *, cwd: str, timeout_s: int,
                      capture_output: bool = True, env: dict | None = None) -> dict:
+            if cwd is None:  # hdc wake call — no cwd, no report to create
+                return {"ok": True, "returncode": 0, "stdout": "", "stderr": "",
+                        "duration_s": 0.01, "command": "hdc shell ..."}
             stamp = (datetime.now() + timedelta(seconds=1)).strftime("%Y%m%d%H%M%S")
             (Path(cwd) / "reports" / f"report_{stamp}").mkdir()
             return {
@@ -438,6 +475,53 @@ class RunInstructionTestVenvIntegrationTests(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertIsNone(result["venv_python"])
         self.assertIsNone(result["activate_bat"])
+
+
+class WakeDeviceTests(unittest.TestCase):
+    """Before main.py runs, the pipeline wakes the phone to the home
+    screen via two hdc shell commands.  Kept a single integration check
+    — hdc calls should appear before main.py in _run call order."""
+
+    def setUp(self) -> None:
+        self._root = Path(tempfile.mkdtemp(prefix="hmopt_itp_wake_"))
+        self.addCleanup(shutil.rmtree, self._root, ignore_errors=True)
+        self.test_dir = self._root / "ws"
+        self.test_dir.mkdir()
+        (self.test_dir / "main.py").write_text("# placeholder", encoding="utf-8")
+        (self.test_dir / "reports").mkdir()
+
+    def test_hdc_wake_runs_before_main(self) -> None:
+        calls: list[list[str]] = []
+
+        def fake_run(argv: list, *, cwd: str | None, timeout_s: int,
+                     capture_output: bool = True, env: dict | None = None) -> dict:
+            calls.append(argv)
+            if argv and argv[0] == "hdc":
+                return {"ok": True, "returncode": 0, "stdout": "", "stderr": "",
+                        "duration_s": 0.01, "command": "hdc ..."}
+            if cwd is None:  # hdc wake call — no cwd, no report to create
+                return {"ok": True, "returncode": 0, "stdout": "", "stderr": "",
+                        "duration_s": 0.01, "command": "hdc shell ..."}
+            stamp = (datetime.now() + timedelta(seconds=1)).strftime("%Y%m%d%H%M%S")
+            (Path(cwd) / "reports" / f"report_{stamp}").mkdir()
+            return {"ok": True, "returncode": 0, "stdout": "", "stderr": "",
+                    "duration_s": 0.01, "command": "python main.py"}
+
+        with mock.patch.object(itp, "_run", side_effect=fake_run), \
+             mock.patch.object(itp.time, "sleep", return_value=None):
+            result = itp.run_instruction_test(
+                test_dir=str(self.test_dir),
+                main_script="main.py",
+            )
+
+        self.assertTrue(result["success"])
+        # First two calls are the hdc wake pair, third is main.py.
+        self.assertGreaterEqual(len(calls), 3)
+        self.assertEqual(calls[0][0], "hdc")
+        self.assertIn("aa start -b com.huawei.hmos.settings -a EntryAbility", calls[0])
+        self.assertEqual(calls[1][0], "hdc")
+        self.assertIn("aa force-stop com.huawei.hmos.settings", calls[1])
+        self.assertNotEqual(calls[2][0], "hdc")
 
 
 class AsciiSafeJsonOutputTests(unittest.TestCase):
@@ -461,6 +545,9 @@ class AsciiSafeJsonOutputTests(unittest.TestCase):
 
         def fake_run(argv: list, *, cwd: str, timeout_s: int,
                      capture_output: bool = True, env: dict | None = None) -> dict:
+            if cwd is None:  # hdc wake call — no cwd, no report to create
+                return {"ok": True, "returncode": 0, "stdout": "", "stderr": "",
+                        "duration_s": 0.01, "command": "hdc shell ..."}
             stamp = (datetime.now() + timedelta(seconds=1)).strftime("%Y%m%d%H%M%S")
             (Path(cwd) / "reports" / f"report_{stamp}").mkdir()
             return {

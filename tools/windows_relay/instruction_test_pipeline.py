@@ -421,6 +421,16 @@ def run_instruction_test(
     else:
         _log(f"venv auto-detect disabled; using {python}")
 
+    # Wake the phone to the home screen so xdevice/main.py don't fight a
+    # locked device.  Best-effort; ignore failures.
+    _log("waking device to home screen")
+    _run(["hdc", "shell", "aa start -b com.huawei.hmos.settings -a EntryAbility"],
+         cwd=None, timeout_s=30)
+    time.sleep(5)
+    _run(["hdc", "shell", "aa force-stop com.huawei.hmos.settings"],
+         cwd=None, timeout_s=30)
+    time.sleep(1)
+
     argv: list[str] = [python]
     if force_utf8:
         argv.extend(["-X", "utf8"])
