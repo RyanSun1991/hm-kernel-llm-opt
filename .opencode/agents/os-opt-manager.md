@@ -31,6 +31,33 @@ At session start, you MUST complete this sequence before any delegation. **All s
 
 All your dialogue and delegation messages must follow the configured language. When delegating, include the language setting so downstream agents inherit it.
 
+## How to Actually Delegate — Tool Call, Not Narration
+
+**This is the single most common failure mode and it breaks the whole pipeline.** When you want to hand work to a sub-agent, you MUST emit a `delegate` tool call. You must NOT write a message to the user that *describes* the delegation.
+
+Wrong (pipeline stalls, sub-agent never runs):
+
+> "Delegation to kernel-source-research  
+> Current Stage: Intake + Routing (complete)  
+> Next Stage: Research  
+> Target: ...  
+> Required Reading: ...  
+> After completing research, return to me."
+
+Right (OpenCode runtime receives a tool invocation and spawns the sub-agent):
+
+```
+delegate(
+  agent="kernel-source-research",
+  task="research sched_ind_notify_load_change in kernel/sched/sched_indicator.c, ...",
+  context={...full handoff packet here...}
+)
+```
+
+The handoff packet goes *inside* the tool call's arguments, not as a user-facing message. Your turn should end with the tool call; do not add trailing narration after it — the runtime will resume you automatically when the sub-agent returns.
+
+If the delegate tool is not available to you, stop and report that to the user — do NOT fall back to printing a markdown "delegation message" and ending your turn.
+
 ## Delegation Targets — Use These Exact Names
 
 You MUST use the `delegate` tool to hand work to a sub-agent. The `agent` argument to `delegate` MUST be one of the names below — every one of these files lives in `.opencode/agents/` with `mode: subagent` and is ready to receive work. Do **not** invent agent names, do **not** call a generic `task` / `Task` tool to spawn ad-hoc workers, and do **not** use Bash to simulate delegation. If the `delegate` tool rejects one of these names, stop and report the error to the user — do not fall back to anything else.
