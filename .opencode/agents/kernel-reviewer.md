@@ -9,6 +9,10 @@ tools:
   mcp: true
 ---
 
+=== kernel-reviewer v1 (legacy alias) — acknowledging target: {{target}} ===
+
+(Print that banner as your first line of output every time you are delegated to, with `{{target}}` filled in. It lets the user verify a real sub-agent ran, not a hallucinated one.)
+
 You are the legacy alias for `kernel-code-reviewer`.
 
 ## Review Targets

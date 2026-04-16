@@ -1,118 +1,83 @@
-# A/B Test Comparison Protocol
+# A/B Instruction-Count Test + Compare Protocol
 
-This skill defines the mandatory A/B (stock vs feature) test comparison protocol. When the tester agent validates a patch, it MUST run both a stock baseline instruction-count test and a feature candidate instruction-count test, then compare the two reports.
+This skill defines the Auto-Test MCP workflow the tester runs **after** stock / feature images have been flashed and settled.  It covers only the instruction-count test execution and the compare step — nothing about build/sign/flash/settle.
 
-## Tools Used
+## Scope
+
+- Auto-Test MCP only.
+- Assumes `build-and-sign.md` produced a signed feature image *and* `flash-device-operations.md` flashed both stock and feature (each followed by a ~10 min settle).
+
+## Tools
 
 | Tool | Purpose |
 |---|---|
-| Flash MCP `flash_stock` / `flash_feature` | Flash the baseline / patched image to the device |
-| Auto-Test MCP `run_instruction_test_async` | Submit the modelCase `main.py` instruction-count run on Windows; returns a `task_id` immediately |
-| Auto-Test MCP `instruction_test_status` | Poll the async task by `task_id` |
-| Auto-Test MCP `compare_reports` | (Optional) Re-run `report_compare.py` against two existing report dirs without re-running the test |
-| Auto-Test MCP `auto_test_relay_health` | Verify the Windows relay is reachable before anything else |
+| Auto-Test MCP `auto_test_relay_health` | Confirm the Windows relay used for instruction tests is reachable |
+| Auto-Test MCP `run_instruction_test_async` | Submit modelCase `main.py` as an async task; returns `task_id` |
+| Auto-Test MCP `instruction_test_status` | Poll a submitted task by `task_id` |
+| Auto-Test MCP `compare_reports` | Fallback — re-compare two existing report dirs without re-running the test |
 
-**Only `run_instruction_test_async` is acceptable for the test step.** The synchronous `run_instruction_test` is NOT permitted: a single test run is 30 minutes to 2 hours, and a sync call will either block the MCP transport until it times out or tear the session down mid-run. Always go async and poll.
+**Only `run_instruction_test_async` is acceptable** for the test step.  A single instruction-count run is 30–120 minutes on device; the sync `run_instruction_test` will tear the MCP session down before it finishes.  Always go async and poll.
 
-## Long-Running Reality
+## Preconditions
 
-A typical stock or feature run takes **30–120 minutes** on real hardware. Across a full A/B cycle the tester is waiting for ~1–4 hours of device time. This is fine — the close-loop (research → plan → code → review → test → compare → iterate) only works if the tester stays alive through the wait.
+Before invoking any tool in this skill:
 
-### Hard Rules for the Polling Loop
+1. `auto_test_relay_health()` returns `relay_reachable=True`.  If not: verdict = **skipped** (infrastructure failure), return.
+2. For Phase A: stock image already flashed and settled.
+3. For Phase B: feature image already flashed and settled, and the `baseline_report` path from Phase A is in hand.
 
-1. After `run_instruction_test_async` returns a `task_id`, the tester MUST keep polling `instruction_test_status(task_id)` until the task's `status` is `succeeded` or `failed`. The `status` progression is `pending` → `running` → `succeeded | failed`.
-2. The tester MUST NOT return to the manager, delegate elsewhere, or declare a verdict until **both** the stock and the feature task have reached a terminal status.
-3. A failed `run_instruction_test_async` payload parse or a `failed` task in either phase → report as infrastructure failure (verdict: **skipped** / **fail**), do NOT fabricate a delta.
-4. Poll interval: **60 seconds** between `instruction_test_status` calls. Faster polling wastes tokens; slower polling delays the close-loop. Use Bash `sleep 60` between status calls if a native sleep primitive isn't available.
-5. Overall wait ceiling: **180 minutes (3 hours)** per phase. If the task is still `running` after that, escalate as an infrastructure issue.
-6. Keep a running note in the tester's conversation so the user can see progress: log every 5–10 polls with `elapsed`, `status`, and the test_dir being run in.
+If any precondition fails, do not invoke the test — return the failing precondition to the manager.
 
-## Post-Flash Settle Window
+## Long-Running Reality — Hard Rules for the Polling Loop
 
-Every `flash_stock` / `flash_feature` call returns **before** the device is ready to run a meaningful test. `flash_and_boot` only waits for the device to reappear in `hdc list targets` — that confirms the kernel booted, but the full userspace (xdevice agents, perf counters, UI services) takes several more minutes to settle. Starting `run_instruction_test_async` too early causes:
+A full A/B cycle is 1–4 hours of device time.  The tester must stay alive:
 
-- xdevice "device not supported" / connection-not-ready warnings
-- missing or truncated reports
-- flaky A/B deltas caused by settle-time overhead, not the patch
+1. After `run_instruction_test_async` returns a `task_id`, keep polling `instruction_test_status(task_id)` until `status["status"]` is `succeeded` or `failed`.  Progression: `pending` → `running` → `succeeded | failed`.
+2. Do NOT return to the manager, delegate elsewhere, or declare a verdict while either async task is `pending` or `running`.
+3. Poll interval: **60 seconds**.  Use Bash `sleep 60` if the model has no native sleep primitive.
+4. Ceiling: **180 minutes per phase**.  Past that, mark **inconclusive** and report.
+5. Emit a progress line every 5–10 polls so the user can see liveness: elapsed minutes, current status, task_id.
 
-**Mandatory settle**: after every successful flash, wait **~10 minutes (600 s)** before submitting the instruction-count test. Use a Bash `sleep 600` or equivalent. This applies to **both** phases (stock and feature), independently — do not try to parallelize.
+## Mandatory Sequence
 
-During the settle, you can optionally poll `list_hdc_targets` every 60 s as a liveness check; any hdc error during the window means the device did not boot cleanly, so mark the phase **skipped** and do not proceed to the test.
-
-## Mandatory A/B Sequence
-
-### Phase 0 — Infrastructure Check
+### Phase A — Stock Instruction-Count Test
 
 ```
-auto_test_relay_health()
-```
+# Precondition: stock image is already flashed + settled (flash-device-operations.md).
 
-If `relay_reachable` is False, verdict = **skipped** (infrastructure failure). Do NOT continue.
-
-### Phase A — Stock Baseline
-
-```
-# A1. Flash the STOCK image.
-flash_stock(device_serial="<serial>")    # synchronous, minutes, fine to await
-# Confirm flash.success is True before proceeding.
-
-# A2. Post-flash settle (mandatory).  The device is back in hdc but
-#     userspace (xdevice, perf agents, etc.) is still coming up.
-#     Starting the test now returns flaky or empty reports.
-sleep 600s
-# Optional: every 60s call list_hdc_targets() to confirm the device
-# stays visible through the settle.  Any hdc error here → mark
-# phase skipped.
-
-# A3. Submit the stock instruction-count test (async — required).
+# A1. Submit the async test.
 task_stock = run_instruction_test_async(
-    compare=False,          # stock has no baseline yet
-    # test_dir / main_script / pipeline_script default to the workspace
-    # configured on the Windows host (D:\modelCase_OH_single by default).
+    compare=False,        # stock has no baseline yet
+    # test_dir / main_script / pipeline_script default to the Windows host config.
 )
 task_id_stock = task_stock["task_id"]
 
-# A4. Poll until terminal.
-#     Loop:
-#         status = instruction_test_status(task_id_stock)
+# A2. Poll until terminal.
+#   Loop: status = instruction_test_status(task_id_stock)
 #         if status["status"] in ("succeeded", "failed"): break
 #         sleep 60s
-#         continue
-#
-#     Every 5–10 iterations, emit a progress line to the conversation so
-#     the user can see liveness: elapsed minutes, current status, task_id.
+#         (every 5–10 iterations, emit a progress line)
 
-# A5. Extract baseline_report.
+# A3. Capture baseline_report.
 baseline_report = status["result"]["report_path"]
 #   e.g. r"D:\modelCase_OH_single\reports\report_20260414114948"
-# Save this path — Phase B needs it.
+# Pass this into Phase B.
 ```
 
-If `status["status"] == "failed"` or `status["result"]["success"] is False`, report the phase, the recorded `error`, and the tail from `run_result.stderr_tail`. Verdict = **skipped** (test infrastructure / stock image) or **fail** (stock failure is almost always environmental, not patch-related).
+On `failed` / wait-ceiling / `result.success=False`: report the phase, `status["error"]`, and `run_result.stderr_tail`.  Verdict = **skipped** (stock environment issues are almost never patch-related).
 
-### Phase B — Feature Candidate
+### Phase B — Feature Instruction-Count Test + Compare
 
 ```
-# B1. Flash the FEATURE image.  The feature image must already have
-#     been built and sign/packaged via Build MCP (kernel_build_trigger
-#     + kernel_sign_trigger) before this step.  flash_feature assumes
-#     HMOPT_FLASH_FEATURE_IMAGE_DIR points at the signed output.
-flash_feature(device_serial="<serial>")
-# Confirm flash.success is True.
+# Precondition: feature image is already flashed + settled AND baseline_report from Phase A is known.
 
-# B2. Post-flash settle (mandatory, same rationale as Phase A).
-sleep 600s
-# Optional hdc liveness check every 60s during the settle window.
-
-# B3. Submit the feature test — this time with compare=True and the
-#     baseline_report from Phase A.
+# B1. Submit async test with compare=True.
 task_feature = run_instruction_test_async(
     compare=True,
     baseline_report=baseline_report,
-
-    # Pick the granularity the plan cares about.  Defaults to "total".
-    compare_level="total",         # or "process" / "thread" / "lib" / "function"
-    # For anything deeper than total, pass the names at and above that level:
+    # Granularity — pick the metric the plan actually targets (default "total"):
+    compare_level="total",   # or "process" / "thread" / "lib" / "function"
+    # For anything deeper than "total", provide the names at and above that level:
     #   compare_level="process"  → compare_process="<processName>"
     #   compare_level="thread"   → compare_process=... compare_thread=...
     #   compare_level="lib"      → compare_process=... compare_thread=... compare_lib=...
@@ -120,25 +85,23 @@ task_feature = run_instruction_test_async(
 )
 task_id_feature = task_feature["task_id"]
 
-# B4. Same polling loop as A4, now on task_id_feature.
-#     Same ceiling and cadence.
+# B2. Poll using the same loop as Phase A.
 ```
 
 ### Phase C — Extract Comparison
 
-The feature task's terminal `status["result"]` already contains the comparison output from `report_compare.py` (the pipeline ran it in-process on Windows after the test finished):
+When `task_feature` reaches `succeeded`, the pipeline has already invoked `report_compare.py` on Windows and embedded the result:
 
 ```
 status["result"]["compare"] = {
     "ok": true,
     "returncode": 0 | 2,
-    "command": "...",
     "baseline_report": "D:\\...\\report_20260414114948",
     "candidate_report": "D:\\...\\report_20260414120950",
     "result": {
         "success": true,
-        "level": "total",            # or process / thread / lib / function
-        "target": {...},             # names at the chosen level
+        "level": "total",       # or process / thread / lib / function
+        "target": {...},        # names at the chosen level
         "aggregate": {
             "baseline": 101886000000,
             "candidate": 98500000000,
@@ -150,115 +113,96 @@ status["result"]["compare"] = {
             "pairs_missing_baseline": 0,
             "pairs_missing_candidate": 0
         },
-        "reports": [
-            {"case": "...", "round": 0, "step": 1,
-             "baseline": ..., "candidate": ..., "delta": ..., "delta_pct": ...,
-             "baseline_found": true, "candidate_found": true,
-             "baseline_path": "...xlsx", "candidate_path": "...xlsx"}
-            ...
-        ]
+        "reports": [ /* per (case, round, step) pair */ ]
     }
 }
 ```
 
-If the pipeline somehow produced a report pair but the embedded compare didn't run (e.g. it errored or was skipped), you can still invoke the comparison directly against the two report dirs:
+If the embedded compare is missing or errored, fall back to an explicit call:
 
 ```
 compare_reports(
-    baseline_report=baseline_report,          # stock report_path from Phase A
-    candidate_report=status["result"]["report_path"],  # feature report_path
-    level="total",
-    # …plus process / thread / lib / function names if needed
+    baseline_report=baseline_report,
+    candidate_report=status["result"]["report_path"],
+    level=<same level as B1>,
+    process=..., thread=..., lib=..., function=...,
 )
 ```
 
 ## Decision Criteria
 
-All judgments use the **aggregate** section of the compare result — that's the sum across every matched `(case, round, step)` pair.
+All judgments use the `aggregate` section — the sum across every matched `(case, round, step)` pair.
 
 ### PASS
 
 ALL of the following must hold:
 
 - `aggregate.delta <= 0` (feature uses no more instructions than stock at the chosen level)
-- `aggregate.pairs_missing_baseline == 0` and `aggregate.pairs_missing_candidate == 0` (every pair matched — no dropped test case)
-- `aggregate.baseline_found` and `aggregate.candidate_found` are both True when a named target was specified (target exists on both sides)
-- Test correctness maintained (no crashes, no functional failures in `run_result.stderr_tail`)
-- Both flash operations succeeded
+- `aggregate.pairs_missing_baseline == 0` AND `aggregate.pairs_missing_candidate == 0` (every pair matched — no dropped test case)
+- `aggregate.baseline_found` AND `aggregate.candidate_found` are both True when a named target was specified
+- No correctness regressions in `run_result.stderr_tail` of either phase
 - Both async tasks reached `status == "succeeded"`
 
 ### FAIL
 
-ANY of the following triggers a fail:
+ANY of the following:
 
-- `aggregate.delta > 0` (feature uses more instructions than stock — regression at the chosen level)
-- A previously-present process/thread/lib/function disappears on the feature side (`candidate_found == False` when the baseline had it) if the target is the metric the plan chose
-- Functional regression detected (crash, hang, test failure in stderr tail)
-- Feature image flash failed but stock succeeded (patch likely broke the image)
+- `aggregate.delta > 0` (regression at the chosen level)
+- A previously-present process/thread/lib/function disappears on the feature side when the plan's metric depends on it
+- Crash / hang / test-failure strings in stderr tail
 
 ### INCONCLUSIVE
 
-- `abs(aggregate.delta_pct)` is within noise margin (< 1 %)
-- One or both phases produced `pairs_missing_*` > 0 — report dirs didn't line up
-- One or both tasks hit the 180-minute wait ceiling
-- Relay / device intermittence corrupted runs
+- `abs(aggregate.delta_pct)` within noise margin (< 1 %)
+- `pairs_missing_*` > 0
+- 180-minute wait ceiling hit on either phase
 
-## Comparison Output Format
+### SKIPPED
 
-The validation artifact `.opencode/bench/*_validation.md` MUST include:
+- Infrastructure failure (relay unreachable, device not flashed/settled, build/sign failed upstream)
+
+## Output Format (Validation Report Section)
+
+The tester's validation artifact `.opencode/bench/<artifact>_validation.md` includes for this skill's scope:
 
 ```markdown
-## A/B Comparison
+## A/B Instruction-Count Test
 
-### Infrastructure
-- Relay reachable: yes | no
-- Device serial: {serial}
-- Windows test workspace: {test_dir}
-
-### Stock Baseline (Phase A)
-- Flash result: success | fail
-- Post-flash settle: {seconds_waited}s (target ~600s)
+### Stock (Phase A)
 - Async task_id: {task_id}
 - Wait time: {elapsed_minutes}m
 - Terminal status: succeeded | failed
 - report_path: {D:\modelCase_OH_single\reports\report_YYYYMMDDHHMMSS}
-- Stdout tail notable lines: {one or two diagnostic lines}
+- Notable stderr lines: {one or two diagnostic lines}
 
-### Feature Candidate (Phase B)
-- Flash result: success | fail
-- Post-flash settle: {seconds_waited}s (target ~600s)
+### Feature (Phase B)
 - Async task_id: {task_id}
 - Wait time: {elapsed_minutes}m
 - Terminal status: succeeded | failed
 - report_path: {D:\modelCase_OH_single\reports\report_YYYYMMDDHHMMSS}
-- Stdout tail notable lines: {one or two diagnostic lines}
+- Notable stderr lines: {one or two diagnostic lines}
 
-### Delta Analysis
+### Delta (Phase C)
 - Compare level: total | process | thread | lib | function
 - Target: {names at and above the level, or "—" for total}
 - Pairs compared: {N}
 - Aggregate baseline: {int} instructions
 - Aggregate candidate: {int} instructions
 - Aggregate delta: {signed int} ({signed pct}%)
-- Per-pair breakdown: {table of case/round/step → baseline / candidate / delta / delta_pct}
-- New missing targets: {list or "none"}
+- Per-pair table: case/round/step → baseline / candidate / delta / delta_pct
+- Missing targets: {list or "none"}
 
-### Verdict
-- Decision: pass | fail | inconclusive | skipped
-- Confidence: high | medium | low
-- Recommended next route: accept | iterate | reject
-- Rationale: {one-paragraph explanation that cites the aggregate.delta_pct and any notable per-pair entries}
+### Verdict: pass | fail | inconclusive | skipped
+### Confidence: high | medium | low
+### Recommended next route: accept | iterate | reject
+### Rationale: {one-paragraph; cite aggregate.delta_pct and notable per-pair entries}
 ```
 
 ## Hard Rules (recap)
 
-1. NEVER use `run_instruction_test` (sync). Always use `run_instruction_test_async` + `instruction_test_status` polling.
+1. NEVER use `run_instruction_test` (sync).  Only `run_instruction_test_async` + `instruction_test_status` polling.
 2. NEVER return to the manager, delegate, or end the session while an async test is still `pending` or `running`.
-3. NEVER submit a test without a post-flash settle wait (~10 min / 600 s). Skipping the settle produces flaky reports that pollute the A/B delta; running without it is worse than not running at all.
-4. NEVER report a verdict based on only the feature image without a stock baseline.
-5. NEVER fabricate comparison numbers if either phase fails. Report the failure and the phase that failed.
-6. The feature image MUST have gone through Build MCP `kernel_build_trigger` AND `kernel_sign_trigger` before `flash_feature` is called — flash pulls from the *signed* image directory, not the raw build output. If you skipped the sign step, flash will use a stale or mismatched image.
-7. Both phases MUST use identical test workspace and parameters (same `test_dir`, same `main_script`, same device). The only legitimate delta between phases is the flashed image.
-8. If the stock phase fails, report as infrastructure failure — not a patch failure.
-9. If the feature phase flashes fine but the test errors, inspect `run_result.stderr_tail`: patch-introduced crashes show up there.
-10. The comparison level chosen in Phase B MUST match the metric named in the plan. If the plan targets a specific function, use `compare_level="function"` with the exact names.
+3. NEVER start the test before the image is flashed AND settled.  This skill assumes `flash-device-operations.md` already ran.
+4. Both phases MUST use identical test workspace + parameters — the only legitimate delta is the flashed image.
+5. If stock phase fails, report infrastructure failure — not a patch failure.
+6. The `compare_level` in Phase B MUST match the metric named in the plan.

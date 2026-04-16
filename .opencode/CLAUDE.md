@@ -77,6 +77,26 @@ Pipeline presets list required skills. Every listed skill MUST be read and follo
 - `flash-device-operations.md` (when tester validation is active)
 - `ab-test-comparison.md` (when tester validation is active)
 
+## Verifying Delegation Actually Hit a Real Sub-Agent
+
+If you suspect the manager is hallucinating a sub-agent instead of actually delegating (see the "How to Actually Delegate" section in `os-opt-manager.md`), here are the four signals, strongest first:
+
+1. **Agent status line switches.**  When `delegate` succeeds, OpenCode's UI shows the sub-agent's name as the active agent while it runs.  If the status line stays on the manager, delegate was not called.
+2. **Identity banner in the trace.**  Every sub-agent is required to print a unique banner as its first line:
+   ```
+   === <agent-name> v1 — acknowledging target: <X> ===
+   ```
+   The banner text is defined inside the sub-agent's own prompt, which the manager cannot see.  If you see the banner, the real sub-agent ran.  If you see a manager-formatted "Delegation to X" markdown block but no banner, the manager hallucinated.
+3. **Artifact check.**  Each sub-agent writes to a fixed path:
+   - research → `.opencode/docs/<target>_design.md` + `.opencode/plans/<target>_plan.md`
+   - plan-reviewer → `.opencode/reviews/<artifact>_plan_review.md`
+   - coder → `.opencode/patches/<artifact>.patch` + actual source edits
+   - code-reviewer → `.opencode/reviews/<artifact>_code_review.md`
+   - tester → `.opencode/bench/<artifact>_validation.md`
+   
+   `ls` the expected path before and after a delegate step.  No new file = nothing real ran.
+4. **Tool-call trace.**  OpenCode's debug view shows `tool_call: delegate({agent: "...", ...})` entries.  Zero delegate calls = zero real sub-agents.
+
 ## Self-Check Before Every Action
 
 Before performing any significant action, ask yourself:

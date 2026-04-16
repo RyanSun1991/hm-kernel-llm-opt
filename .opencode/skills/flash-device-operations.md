@@ -133,6 +133,18 @@ Configure via environment variables:
 - `HMOPT_FLASH_SCP_PASSWORD` — SSH password (for pscp `-pw` flag)
 - `HMOPT_FLASH_WINDOWS_IMAGE_DIR` — Local directory on Windows for images (default: `.`)
 
+## Post-Flash Settle Window — Mandatory
+
+`flash_and_boot` (and therefore `flash_stock` / `flash_feature`) only waits for the device to reappear in `hdc list targets` — that confirms the kernel booted, but userspace (xdevice agents, perf counters, UI services, settings app) takes several more minutes to settle.  Kicking off a test immediately after flash returns produces:
+
+- xdevice "device not supported" / connection-not-ready warnings
+- missing or truncated reports
+- flaky A/B deltas caused by settle-time overhead, not the patch
+
+**After every successful flash, wait ~10 minutes (600 s) before running a test or any downstream protocol that depends on a ready device.**  Use Bash `sleep 600` (or equivalent).  Apply to **both** stock and feature independently — never parallelize.
+
+During the settle, optionally poll `list_hdc_targets()` every 60 s as a liveness check.  If hdc loses the device during the window, the flash didn't land cleanly — mark the phase **skipped** and do not proceed.
+
 ## Error Recovery
 
 - **Transfer failure**: Report the exact pscp error. Check network connectivity and credentials.
