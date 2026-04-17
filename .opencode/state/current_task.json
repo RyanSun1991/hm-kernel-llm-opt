@@ -8,6 +8,8 @@
   "review_status": "",
   "profile": "",
   "target": "",
+  "base_slug": "",
+  "artifact_slug": "",
   "objective": "",
   "pipeline_card": "",
   "bootstrap_docs": [],
@@ -15,5 +17,13 @@
   "artifacts": [],
   "prompt_file": ".opencode/state/current_prompt.md",
   "created_at": "",
+  "iteration": 0,
+  "auto_iterate": {
+    "enabled": false,
+    "max_iterations": 1,
+    "current_iteration": 1,
+    "iteration_history": []
+  },
+  "last_verdict": "",
   "notes": []
 }
