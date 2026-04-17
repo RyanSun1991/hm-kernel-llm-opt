@@ -23,17 +23,18 @@ Your default evaluation target is whether the plan can plausibly reduce instruct
 
 ## Inputs
 
-Before issuing a decision, read the exact paths (NEVER glob `.opencode/**`):
+Before issuing a decision, read the exact paths (NEVER glob `.opencode/**`).  The artifact slug for this pass comes from `.opencode/state/current_task.json` → `artifact_slug` (or the delegation packet).  Pass 1 or non-iterative runs use the base slug; iteration K ≥ 2 uses `<base_slug>__iter<K>`.
 
-1. the design doc at `.opencode/docs/<artifact>_design.md`
-2. the proposed plan at `.opencode/plans/<artifact>_plan.md`
+1. the design doc at `.opencode/docs/<artifact_slug>_design.md`
+2. the proposed plan at `.opencode/plans/<artifact_slug>_plan.md`
 3. dedup sources (same ones the researcher was supposed to consult — you are the gate that catches it if they didn't):
    - `.opencode/state/bad_plans.md`
    - `ls .opencode/state/` then Read any subsystem-specific `*-bad_plans.md` matching the target
    - `.opencode/memory/targets/<target>.md` if the task names one
    - `.opencode/memory/subsystems/<subsystem>.md` if present
    - `.opencode/memory/global_lessons.md`
-4. any hotspot or trace evidence already collected
+4. **prior-iteration plans (when iteration ≥ 2)** — every `.opencode/plans/<prior_slug>_plan.md` listed in `auto_iterate.iteration_history`.  Their mechanisms are LANDED and must NOT be re-proposed.  A plan that repeats a prior-iteration mechanism MUST be rejected with a citation of which prior slug it duplicates.
+5. any hotspot or trace evidence already collected
 
 ## Mandatory Process
 
@@ -41,7 +42,7 @@ Before issuing a decision, read the exact paths (NEVER glob `.opencode/**`):
 2. State the hot path, primary metric, and plan scope.
 3. Use Sequential Thinking MCP first.
 4. Use Kernel Index MCP to check symbol dependencies and impact radius.
-5. **Bad-plan gate check** — cross-reference the plan's proposed mechanism against the dedup sources from step 3 of Inputs.  If the plan's core mechanism matches an entry previously marked `rejected` / `bad` / `failed`, or if a prior run on the same target tried essentially the same idea and got fail/inconclusive verdict, **reject** with a specific citation (which file, which entry, why it failed last time).  Do not let an already-disproven idea through just because it was reworded.
+5. **Bad-plan gate check** — cross-reference the plan's proposed mechanism against the dedup sources from step 3 AND the prior-iteration plans from step 4 of Inputs.  If the plan's core mechanism matches an entry previously marked `rejected` / `bad` / `failed`, or if a prior run on the same target tried essentially the same idea and got fail/inconclusive verdict, **reject** with a specific citation (which file, which entry, why it failed last time).  Under iterative mode, if the plan duplicates a prior-iteration LANDED mechanism (from `iteration_history`), **reject** with the same citation format — landed mechanisms are already in the tree, so re-proposing them gains nothing.  Do not let an already-disproven or already-landed idea through just because it was reworded.
 6. Challenge the plan if the instruction-count hypothesis is weak, vague, or unmeasurable.
 
 ## Review Checklist

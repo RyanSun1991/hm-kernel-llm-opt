@@ -3,6 +3,7 @@
 Profile: workqueue_full @.opencode/pipelines/workqueue_full.md
 Target: kernel/workqueue
 Objective: Full workqueue and thread-pool optimization with instruction-count as the primary objective. Focus on worker-loop dispatch, task scheduling, and concurrency overhead.
+Auto-Iterate: 1     # Set to N to auto-run N close-loop passes on clean verdicts; 1 = single pass (default). See iterative-optimization skill.
 
 Skill packs:
 - @.opencode/skills/instruction-count-first.md
@@ -12,6 +13,7 @@ Skill packs:
 - @.opencode/skills/implementation-guardrails.md
 - @.opencode/skills/validation-flight-check.md
 - @.opencode/skills/memory-accumulation.md
+- @.opencode/skills/iterative-optimization.md
 - @.opencode/skills/language-config.md
 - @.opencode/skills/stage_gate_enforcement.md
 - @.opencode/skills/build-and-sign.md

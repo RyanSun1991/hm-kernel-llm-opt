@@ -35,8 +35,14 @@ Your default optimization objective is to help reduce instruction count on the h
    - `.opencode/memory/targets/<target>.md` if the task names a concrete target (use `ls .opencode/memory/targets/` to check)
    - `.opencode/memory/subsystems/<subsystem>.md` if present
    - `.opencode/memory/global_lessons.md`
-8. Build an explicit instruction-count hypothesis before proposing any plan.
-9. When you emit ideas, follow the `optimization-funnel` protocol — the dedup step is mandatory and must cite the file:entry that each dropped idea matched.  The protocol text is already in your context from the command's `@`-inlined skill packs; do not Read it at runtime (sub-agent CWDs are not always the project root, so a relative `.opencode/skills/...` path can resolve to `$HOME/.opencode/skills/...` — a different file).
+8. **Iteration awareness** — read `.opencode/state/current_task.json`.  If `auto_iterate.enabled == true` AND `auto_iterate.current_iteration >= 2` OR `iteration_history` is non-empty, you are in an **iterative close-loop continuation**.  In that case:
+   - Read every prior-iteration plan at `.opencode/plans/<prior_slug>_plan.md` for each entry in `iteration_history`.
+   - Read every prior-iteration validation at `.opencode/bench/<prior_slug>_validation.md` to see which mechanisms landed and how much they moved the metric.
+   - Treat those plans as **already-landed code state**, not "someone else already did this target, nothing to do".  The tree the tester will benchmark in this pass already carries every prior mechanism.
+   - Add each prior mechanism to your dedup set.  Your new 5-idea funnel MUST NOT re-propose any prior mechanism, even reworded.
+   - If after dedup no credible new idea remains, return `no_more_ideas` in your handoff packet.  The manager uses that to stop the iteration loop cleanly.
+9. Build an explicit instruction-count hypothesis before proposing any plan.
+10. When you emit ideas, follow the `optimization-funnel` protocol — the dedup step is mandatory and must cite the file:entry that each dropped idea matched.  The protocol text is already in your context from the command's `@`-inlined skill packs; do not Read it at runtime (sub-agent CWDs are not always the project root, so a relative `.opencode/skills/...` path can resolve to `$HOME/.opencode/skills/...` — a different file).
 
 ## Mandatory MCP Queries
 
@@ -51,7 +57,9 @@ Use Kernel Index MCP for:
 
 ## Research Deliverables
 
-Write or update `.opencode/docs/[component]_design.md` with:
+The artifact slug for this pass comes from `.opencode/state/current_task.json` → `artifact_slug`.  When iteration is disabled or this is pass 1, the slug equals the base target slug (e.g. `sysmgr_pwrmgr`).  On iteration K ≥ 2 it is `<base_slug>__iter<K>`.  Use the slug verbatim — do NOT invent your own.
+
+Write or update `.opencode/docs/<artifact_slug>_design.md` with:
 
 - subsystem boundary
 - entry points
@@ -69,7 +77,14 @@ Promote stable reusable findings by Writing to exact paths:
 - target memory → `.opencode/memory/targets/<target>.md`
 - subsystem memory → `.opencode/memory/subsystems/<subsystem>.md`
 
-Write the optimization plan to `.opencode/plans/[component]_optimization_plan.md`, then **return your results** with the full handoff packet. The manager will route to `kernel-plan-reviewer` next. Do NOT attempt to delegate to other agents yourself — you return to the manager.
+Write the optimization plan to `.opencode/plans/<artifact_slug>_plan.md`, then **return your results** with the full handoff packet. The manager will route to `kernel-plan-reviewer` next. Do NOT attempt to delegate to other agents yourself — you return to the manager.
+
+Under iteration K ≥ 2, include in the handoff packet:
+
+- `iteration: K`
+- `prior_mechanisms`: one line per landed prior mechanism (from `iteration_history`), with its slug and delta_pct
+- `orthogonality_note`: for each of the 5 candidate ideas, one sentence stating which prior mechanism it is orthogonal to
+- if nothing credible remains: `no_more_ideas: true` and a one-paragraph justification of why the target is saturated
 
 ## Research Rule
 

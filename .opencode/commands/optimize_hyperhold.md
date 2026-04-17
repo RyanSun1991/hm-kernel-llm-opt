@@ -3,6 +3,7 @@
 Profile: hyperhold_full @.opencode/pipelines/hyperhold_full.md
 Target: sysmgr/memmgr/mem/swap/hyperhold
 Objective: Full-spectrum instruction-count-first analysis and optimization for Hyperhold, swap I/O, hpio, iotab, eid, and hot serialization paths.
+Auto-Iterate: 1     # Set to N to auto-run N close-loop passes on clean verdicts; 1 = single pass (default). See iterative-optimization skill.
 
 Skill packs:
 - @.opencode/skills/instruction-count-first.md
@@ -12,6 +13,7 @@ Skill packs:
 - @.opencode/skills/implementation-guardrails.md
 - @.opencode/skills/validation-flight-check.md
 - @.opencode/skills/memory-accumulation.md
+- @.opencode/skills/iterative-optimization.md
 - @.opencode/skills/language-config.md
 - @.opencode/skills/stage_gate_enforcement.md
 - @.opencode/skills/build-and-sign.md

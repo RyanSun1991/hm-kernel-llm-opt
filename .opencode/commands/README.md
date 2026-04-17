@@ -29,7 +29,8 @@ Before triggering a command, you typically need to edit it to set your specific 
 1. Open the `.md` file in this directory.
 2. Change the `Target:` line to your actual file or subsystem path.
 3. Optionally adjust the `Objective:` to narrow or broaden the scope.
-4. Save and trigger via `/commands` in OpenCode.
+4. Optionally set `Auto-Iterate: N` — on clean pass verdicts the manager will auto-start another full pipeline pass on the same target, up to N passes total. Prior passes' plans/patches are treated as LANDED context and the researcher must find **orthogonal** new wins each pass. Default is 1 (single pass, legacy behavior). See `.opencode/skills/iterative-optimization.md`.
+5. Save and trigger via `/commands` in OpenCode.
 
 ## Creating Your Own Command
 

@@ -27,7 +27,13 @@ At session start, you MUST complete this sequence before any delegation. **All s
 9. For long-term memory: if the staged task names a target (e.g. `sysmgr/pwrmgr`), Read `.opencode/memory/targets/<target>.md` directly. Otherwise run `ls .opencode/memory/targets/` in Bash to see what exists and Read only the ones the task references.
 10. If the request references `.opencode/state/current_task.json`, Read it at that exact path.
 11. Confirm that the staged task carries the primary goal, plan reviewer, code reviewer, and a conditional tester role.
-12. Update `.opencode/state/current_task.json` if needed so it reflects the active profile and target.
+12. **Parse `Auto-Iterate:` from the incoming prompt.** If the command carries `Auto-Iterate: N` with N ≥ 2, apply the iterative close-loop protocol — see `.opencode/skills/iterative-optimization.md` (inlined into your context by the launching command when present). You MUST:
+    a. Initialize / update `.opencode/state/current_task.json` → `auto_iterate.enabled=true`, `auto_iterate.max_iterations=N`.
+    b. Compute `base_slug` from the target (replace `/` with `_`, strip leading/trailing separators).
+    c. On pass 1 set `artifact_slug = base_slug`; on pass K≥2 set `artifact_slug = f"{base_slug}__iter{K}"`. Write both back to `current_task.json` before delegating to the researcher.
+    d. `ls .opencode/plans/`, `ls .opencode/reviews/`, `ls .opencode/bench/` once at startup. Any artifact whose name begins with `<base_slug>` (optionally followed by `__iter<M>`) is **prior-iteration landed context** — NOT an "already done" short-circuit signal. Pass that list to the researcher so it can skip previously-landed mechanisms while proposing new ones.
+    e. If the task prompt does not carry `Auto-Iterate:` at all, default to a single pass (`auto_iterate.enabled=false`) — identical to the legacy flow.
+13. Update `.opencode/state/current_task.json` if needed so it reflects the active profile, target, artifact_slug, and iteration state.
 
 All your dialogue and delegation messages must follow the configured language. When delegating, include the language setting so downstream agents inherit it.
 
@@ -258,6 +264,8 @@ Every routed task must write to one or more exact paths:
 
 The `<artifact>` slug should match across stages so plan, code review, and validation all resolve to the same logical task. Writing uses exact paths; there is never a reason to glob these directories to write.
 
+Under auto-iterate (Auto-Iterate ≥ 2), the slug varies per iteration: pass 1 uses `<base_slug>` and pass K≥2 uses `<base_slug>__iter<K>`. The **current** pass's slug lives in `.opencode/state/current_task.json` → `artifact_slug` and is written by the manager before each delegation. Sub-agents read it from there (or from the delegation packet) — they do NOT derive their own.
+
 ## Long-Term Memory
 
 Before routing, inspect whether the staged task references a memory file. If the task names a target or subsystem, Read the exact file directly:
@@ -271,3 +279,58 @@ If you do not know whether the file exists, run `ls .opencode/memory/targets/` (
 If relevant memory exists, require the specialist to read it before new exploration.
 
 At the end of a non-trivial run, require the active specialist or reviewer to promote stable findings into long-term memory.
+
+## Post-Decision Auto-Iterate — Closing the Close-Loop
+
+After the decision stage produces a verdict for the current pass and memory has been updated, check `.opencode/state/current_task.json` → `auto_iterate`:
+
+| Condition | Action |
+|---|---|
+| `auto_iterate.enabled == false` | Stop. Single-pass behavior, report to user. |
+| `enabled == true` AND verdict is **pass** AND `current_iteration < max_iterations` | Start the next pass automatically. |
+| `enabled == true` AND verdict is **pass** AND `current_iteration == max_iterations` | Stop. Write `.opencode/bench/<base_slug>_iteration_summary.md` summarizing every iteration. |
+| `enabled == true` AND verdict is **fail** or **inconclusive** with a valid back-edge (per "Feedback Routing Table") | Let the back-edge run. Do NOT increment `current_iteration` — the iteration budget is only burned on clean passes. |
+| `enabled == true` AND the back-edge stall cap is hit, or verdict is infra-SKIPPED | Stop. Write the stall artifact and surface to the user. |
+| researcher returned `no_more_ideas` during pass K | Stop. Write the iteration summary with the "saturation" reason. |
+| two consecutive passes ended `inconclusive within noise` | Stop. Target is saturated. Write the iteration summary. |
+
+### Starting the Next Pass
+
+To start pass K+1:
+
+1. Append the current pass's outcome to `auto_iterate.iteration_history`:
+   ```json
+   {"iteration": K, "slug": "<artifact_slug>", "verdict": "pass", "delta_pct": <aggregate.delta_pct>, "mechanism": "<short mechanism tag from plan>"}
+   ```
+2. Increment `auto_iterate.current_iteration` → K+1.
+3. Compute next slug: `artifact_slug = f"{base_slug}__iter{K+1}"`.
+4. Write both back to `.opencode/state/current_task.json` **before** the next delegation so downstream agents pick up the new slug.
+5. Delegate to the research specialist with a handoff packet that includes:
+   - `iteration: K+1`
+   - `artifact_slug: <new slug>`
+   - `prior_iterations`: the full `iteration_history`
+   - explicit instruction: *"Pass K+1 — treat every prior-iteration plan as LANDED in the tree. Propose an orthogonal instruction-count win different from every mechanism listed in prior_iterations. If no credible new mechanism exists, return `no_more_ideas`."*
+6. The rest of the pipeline then runs exactly as before, using the new artifact slug. The tester's Step 2 stock flash naturally captures the tree-with-all-prior-iterations-landed as the new baseline.
+
+### Stopping Cleanly
+
+When iteration stops, write `.opencode/bench/<base_slug>_iteration_summary.md`:
+
+```markdown
+# Iteration Summary — <target>
+
+| Iter | Slug | Verdict | Δ% | Mechanism |
+|---|---|---|---|---|
+| 1 | <base_slug>          | pass | -3.1% | hoist-check-out-of-loop |
+| 2 | <base_slug>__iter2   | pass | -1.8% | drop-redundant-refcount |
+| 3 | <base_slug>__iter3   | no_more_ideas | — | — |
+
+Cumulative Δ%: -4.9%
+Stop reason: researcher returned no_more_ideas on iter 3
+```
+
+### Invariants
+
+- `current_iteration` increments ONLY on a clean pass. A fail-then-recover cycle under the feedback-routing rules does NOT burn iteration budget.
+- Memory (`.opencode/memory/...`) and bad-plans (`.opencode/state/bad_plans.md`) are SHARED across iterations; artifacts (docs / plans / reviews / patches / bench) use the per-iteration slug.
+- Never silently loop past `max_iterations`. Never auto-start a pass K+1 while a pass K failure is still under active back-edge handling.

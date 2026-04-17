@@ -30,6 +30,10 @@ The default optimization objective is to reduce instruction count on the hot pat
 6. conditional flash + A/B test validation: flash stock, test stock, flash feature, test feature, compare (returns to manager)
 7. decision, memory update, and next-step routing (`os-opt-manager`)
 
+### Iterative Close-Loop Mode (Optional)
+
+When a command carries `Auto-Iterate: N` (with N ≥ 2) and loads `.opencode/skills/iterative-optimization.md`, stage 7 for a **pass** verdict does not end the session — the manager automatically starts pass K+1 on the same target, treating all prior-pass plans/patches as LANDED context. The researcher must propose orthogonal new mechanisms each pass. Iteration stops when N passes complete, the researcher returns `no_more_ideas`, two consecutive passes land within noise, or a failure hits the back-edge stall cap. See `iterative-optimization.md` for the full protocol.
+
 ## Role Summary
 
 ### Research Specialist
