@@ -480,9 +480,14 @@ def run_instruction_test(
             ``total`` (default) / ``process`` / ``thread`` / ``lib`` /
             ``function``; forwarded to ``report_compare.py --level``.
         compare_process / compare_thread / compare_lib / compare_function:
-            Target names needed at and above the chosen level (e.g.
-            ``compare_level="thread"`` requires both ``compare_process``
-            and ``compare_thread``).
+            Target names forwarded to ``report_compare.py``. Only the
+            name matching the chosen ``compare_level`` is required; any
+            higher-tier name supplied acts as an additional narrowing
+            filter (e.g. ``compare_level="function"`` with just
+            ``compare_function`` sums all FUNCTION_SHEET rows matching
+            that function across every process/thread/lib; adding
+            ``compare_process`` restricts the sum to rows belonging to
+            that process). ``compare_level="total"`` accepts no names.
         python_exe: Override the python interpreter on Windows. Takes
             precedence over venv auto-detection.
         use_venv: When True (default) the pipeline probes
@@ -600,12 +605,22 @@ def compare_reports(
     the count at the requested granularity and returns a single
     baseline/candidate/delta per pair plus an aggregate.
 
-    Levels map to names that must be supplied alongside:
-      - ``total``:    no names
-      - ``process``:  *process*
-      - ``thread``:   *process*, *thread*
-      - ``lib``:      *process*, *thread*, *lib*
-      - ``function``: *process*, *thread*, *lib*, *function*
+    Only the name for the chosen *level* is required; any higher-tier
+    names (when supplied) act as optional narrowing filters that
+    restrict the aggregation to rows also matching those tiers.  The
+    minimum/optional mapping is:
+
+      - ``total``:    no names accepted
+      - ``process``:  *process* required
+      - ``thread``:   *thread* required; *process* optional filter
+      - ``lib``:      *lib* required; *process*, *thread* optional filters
+      - ``function``: *function* required; *process*, *thread*, *lib*
+        optional filters
+
+    Example: ``level="function", function="do_foo"`` sums every
+    FUNCTION_SHEET row whose function name is ``do_foo`` regardless of
+    which process/thread/lib owns it.  Adding ``process="P1"`` restricts
+    the sum to ``do_foo`` rows owned by ``P1``.
     """
     if not baseline_report or not candidate_report:
         raise ValueError("baseline_report and candidate_report are both required")
