@@ -18,27 +18,56 @@ Each workbook has four worksheets:
   4. ``functions_instructions_info``  ... | functionId | functionName
                                        | functionCount_self | functionCount_total
 
-The comparison target is picked by ``--level`` and the names at that
-level and above.  Each level requires just the names of its own and
-parent tiers — you don't have to specify deeper names you don't care
-about::
+The comparison target is picked by ``--level`` and any subset of the
+names at or above that level.  The level picks **which sheet** to sum
+from; the names act as **optional narrowing filters**.  The only
+strictly-required name is the one that matches the chosen level
+itself; every name above it is optional and, when omitted, collapses
+into a "sum across all values of that tier".
 
+``total`` sums the ``pid=TOTAL`` row — no names accepted.
+
+``process``/``thread``/``lib``/``function`` each require the name that
+matches that level (e.g. ``--function <name>`` for function level).
+Higher-tier names (process/thread/lib) are optional filters — supply
+them only to narrow the search.
+
+Examples::
+
+  # Everything.
   python report_compare.py --baseline B --candidate C --level total
+
+  # Only --process — sums all pids with this processName.
   python report_compare.py --baseline B --candidate C --level process \\
       --process samgr
+
+  # Only --thread — sums every (pid, tid) whose threadName matches.
+  python report_compare.py --baseline B --candidate C --level thread \\
+      --thread sysmgr-reclaim0
+
+  # Thread inside a specific process.
   python report_compare.py --baseline B --candidate C --level thread \\
       --process sysmgr-main --thread sysmgr-reclaim0
-  python report_compare.py --baseline B --candidate C --level lib \\
-      --process init --thread /bin/init --lib /system/lib/ld-musl-aarch64.so.1
+
+  # All instances of one function across every process/thread/lib.
+  python report_compare.py --baseline B --candidate C --level function \\
+      --function strlen
+
+  # Same function, narrowed to a single process.
+  python report_compare.py --baseline B --candidate C --level function \\
+      --process init --function strlen
+
+  # Fully pinned (original strict form — still supported).
   python report_compare.py --baseline B --candidate C --level function \\
       --process init --thread /bin/init --lib /system/lib/ld-musl-aarch64.so.1 \\
       --function strlen
 
 For every matched workbook pair the script emits baseline count,
-candidate count, delta and delta_pct.  When the target name appears
-multiple times (e.g. two pids share a processName) the counts are
-summed.  When the name is absent the count is reported as 0 with
-``baseline_found`` / ``candidate_found`` set to False.
+candidate count, delta and delta_pct.  When the target name(s) match
+multiple rows (e.g. two pids share a processName, or ``strlen`` lives
+in several libs) their counts are summed.  When the name is absent the
+count is reported as 0 with ``baseline_found`` / ``candidate_found``
+set to False.
 
 Requires ``openpyxl`` on the executing host (``pip install openpyxl``).
 """
@@ -193,13 +222,25 @@ def _parse_process_sheet(ws: Any) -> tuple[int | None, dict[str, int]]:
     return total, processes
 
 
-def _sum_thread_sheet(ws: Any, *, process: str, thread: str) -> tuple[int, bool]:
-    """Return ``(sum_threadCount, found)`` for rows matching ``process``+``thread``."""
+def _sum_thread_sheet(
+    ws: Any,
+    *,
+    process: str | None,
+    thread: str,
+) -> tuple[int, bool]:
+    """Return ``(sum_threadCount, found)`` for rows whose threadName matches.
+
+    ``process`` is an optional narrowing filter.  When None, threads
+    with the same name are summed across every process that contains
+    them.
+    """
     total = 0
     found = False
     for row in _iter_data_rows(ws, min_cols=6):
         _pid, process_name, _pcnt, _tid, thread_name, thread_count = row[:6]
-        if _clean_str(process_name) != process or _clean_str(thread_name) != thread:
+        if _clean_str(thread_name) != thread:
+            continue
+        if process is not None and _clean_str(process_name) != process:
             continue
         value = _to_int(thread_count)
         if value is None:
@@ -209,17 +250,27 @@ def _sum_thread_sheet(ws: Any, *, process: str, thread: str) -> tuple[int, bool]
     return total, found
 
 
-def _sum_lib_sheet(ws: Any, *, process: str, thread: str, lib: str) -> tuple[int, bool]:
-    """Return ``(sum_libCount, found)`` for rows matching process+thread+lib."""
+def _sum_lib_sheet(
+    ws: Any,
+    *,
+    process: str | None,
+    thread: str | None,
+    lib: str,
+) -> tuple[int, bool]:
+    """Return ``(sum_libCount, found)`` for rows whose libName matches.
+
+    ``process`` and ``thread`` are optional narrowing filters.  Either
+    or both may be None.
+    """
     total = 0
     found = False
     for row in _iter_data_rows(ws, min_cols=9):
         _pid, process_name, _pcnt, _tid, thread_name, _tcnt, _fid, lib_name, lib_count = row[:9]
-        if (
-            _clean_str(process_name) != process
-            or _clean_str(thread_name) != thread
-            or _clean_str(lib_name) != lib
-        ):
+        if _clean_str(lib_name) != lib:
+            continue
+        if process is not None and _clean_str(process_name) != process:
+            continue
+        if thread is not None and _clean_str(thread_name) != thread:
             continue
         value = _to_int(lib_count)
         if value is None:
@@ -232,12 +283,19 @@ def _sum_lib_sheet(ws: Any, *, process: str, thread: str, lib: str) -> tuple[int
 def _sum_function_sheet(
     ws: Any,
     *,
-    process: str,
-    thread: str,
-    lib: str,
+    process: str | None,
+    thread: str | None,
+    lib: str | None,
     function: str,
 ) -> tuple[int, bool]:
-    """Return ``(sum_functionCount_total, found)`` for the matching function."""
+    """Return ``(sum_functionCount_total, found)`` for the matching function.
+
+    Only ``function`` is required; ``process`` / ``thread`` / ``lib``
+    are optional narrowing filters.  When a filter is None, all values
+    of that tier are accepted — so ``function=strlen`` with everything
+    else None sums every row naming ``strlen``, regardless of which
+    process / thread / lib owns it.
+    """
     total = 0
     found = False
     for row in _iter_data_rows(ws, min_cols=13):
@@ -246,12 +304,13 @@ def _sum_function_sheet(
             _fid, lib_name, _lcnt, _funcid, function_name,
             _fc_self, fc_total,
         ) = row[:13]
-        if (
-            _clean_str(process_name) != process
-            or _clean_str(thread_name) != thread
-            or _clean_str(lib_name) != lib
-            or _clean_str(function_name) != function
-        ):
+        if _clean_str(function_name) != function:
+            continue
+        if process is not None and _clean_str(process_name) != process:
+            continue
+        if thread is not None and _clean_str(thread_name) != thread:
+            continue
+        if lib is not None and _clean_str(lib_name) != lib:
             continue
         value = _to_int(fc_total)
         if value is None:
@@ -267,10 +326,21 @@ def _sum_function_sheet(
 
 LEVEL_CHOICES = ("total", "process", "thread", "lib", "function")
 
-# Which name flags each level needs.  The flags above the chosen level
-# are required because they identify *where* the target lives in the
-# hierarchy, but levels below it are irrelevant.
+# Only the name that matches the chosen level is required.  Higher-tier
+# names act as optional narrowing filters — omit them to sum across
+# every value of that tier.
 _LEVEL_REQUIRED_NAMES: dict[str, tuple[str, ...]] = {
+    "total": (),
+    "process": ("process",),
+    "thread": ("thread",),
+    "lib": ("lib",),
+    "function": ("function",),
+}
+
+# All name flags that are meaningful (either required or optional
+# narrowing filter) for the chosen level.  Used for the echoed
+# ``target`` block in the result payload.
+_LEVEL_RELEVANT_NAMES: dict[str, tuple[str, ...]] = {
     "total": (),
     "process": ("process",),
     "thread": ("process", "thread"),
@@ -308,6 +378,11 @@ def _validate_target(
     if missing:
         flag_list = ", ".join(f"--{name}" for name in missing)
         raise ValueError(f"--level {level} requires {flag_list}")
+    if level == "total":
+        extra = [k for k in ("process", "thread", "lib", "function") if supplied[k]]
+        if extra:
+            flag_list = ", ".join(f"--{name}" for name in extra)
+            raise ValueError(f"--level total does not accept {flag_list}")
 
 
 def extract_target_count(
@@ -356,22 +431,21 @@ def extract_target_count(
 
         elif level == "thread":
             if THREAD_SHEET in wb.sheetnames:
-                assert process is not None and thread is not None
-                value, found = _sum_thread_sheet(wb[THREAD_SHEET], process=process, thread=thread)
+                assert thread is not None  # required by _validate_target
+                value, found = _sum_thread_sheet(
+                    wb[THREAD_SHEET], process=process, thread=thread,
+                )
 
         elif level == "lib":
             if LIB_SHEET in wb.sheetnames:
-                assert process is not None and thread is not None and lib is not None
+                assert lib is not None
                 value, found = _sum_lib_sheet(
                     wb[LIB_SHEET], process=process, thread=thread, lib=lib,
                 )
 
         elif level == "function":
             if FUNCTION_SHEET in wb.sheetnames:
-                assert (
-                    process is not None and thread is not None
-                    and lib is not None and function is not None
-                )
+                assert function is not None
                 value, found = _sum_function_sheet(
                     wb[FUNCTION_SHEET],
                     process=process,
@@ -413,10 +487,15 @@ def _build_target_dict(
     lib: str | None,
     function: str | None,
 ) -> dict[str, str | None]:
-    """Return the subset of target names relevant to the chosen level."""
-    required = _LEVEL_REQUIRED_NAMES[level]
+    """Return the subset of target names relevant to the chosen level.
+
+    Echoes every name at or above the chosen level, using ``None`` for
+    optional filters the caller did not supply so downstream readers
+    can distinguish "pinned" from "wildcard" tiers.
+    """
+    relevant = _LEVEL_RELEVANT_NAMES[level]
     lookup = {"process": process, "thread": thread, "lib": lib, "function": function}
-    return {name: lookup[name] for name in required}
+    return {name: lookup[name] for name in relevant}
 
 
 def compare_reports(
@@ -548,10 +627,11 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=LEVEL_CHOICES,
         default="total",
         help=(
-            "Granularity of comparison (default: total). "
-            "Each level requires the names at and above it: "
-            "process -> --process; thread -> --process --thread; "
-            "lib -> --process --thread --lib; function -> all four."
+            "Granularity of comparison (default: total).  Each level "
+            "requires only the name that matches the level itself "
+            "(process -> --process, thread -> --thread, lib -> --lib, "
+            "function -> --function).  Higher-tier names are optional "
+            "filters that narrow the match."
         ),
     )
     parser.add_argument("--process", default=None, help="Target processName.")

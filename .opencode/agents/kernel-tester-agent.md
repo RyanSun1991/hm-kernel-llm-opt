@@ -25,13 +25,17 @@ Before starting, read:
 
 1. the approved plan at `.opencode/plans/<artifact>_plan.md`
 2. the code review at `.opencode/reviews/<artifact>_code_review.md`
-3. the coder handoff and after-patch summary
+3. the coder handoff and after-patch summary at `.opencode/bench/after_patch.md`
+4. the patch at `.opencode/patches/<artifact>.patch` (if present) OR the diff inside the coder handoff
+
+Use (3) + (4) to extract the **modified-function list** — every function whose body the patch changed.  A C-patch convention: look at each hunk's `@@ ... @@ <function-signature>` header and at the edited function declarations inside the hunks.  Build the set once, deduplicate, then carry it through Steps 5–6.  If the patch only touches macros / Kconfig / headers with no function body, the list may be empty — note that in the validation report.
 
 The handoff from the manager / code reviewer MUST include:
 
 - device (charlotte / nashville / changsha) and `device_serial`
 - stock image path (already in `HMOPT_FLASH_STOCK_IMAGE_DIR` by default)
-- the comparison granularity — `compare_level` in {`total`, `process`, `thread`, `lib`, `function`} plus target names at and above that level.  If missing, default to `total` and flag it.
+- the primary comparison granularity — `compare_level` in {`total`, `process`, `thread`, `lib`, `function`} plus optional target names.  Only the name matching the chosen level is required; higher-tier names are optional narrowing filters.  If `compare_level` is missing, default to `total` and flag it.
+- (optional but preferred) an explicit `modified_functions` list from the coder handoff — if provided, use it directly instead of re-parsing the patch
 
 ## Reference Skills — Already in Your Context, Do NOT Read Them Again
 
@@ -183,14 +187,33 @@ compare_result = status["result"]["compare"]["result"]
 #     candidate_report=status["result"]["report_path"],
 #     level=<same level>, process=..., thread=..., lib=..., function=...,
 # )
+
+# Per-modified-function compares (mandatory when modified_functions is non-empty).
+# The primary compare above uses the plan's chosen level; these extras always
+# use level="function" and sum every row whose functionName matches.  The
+# optional process/thread/lib narrow the search when you already know where
+# the function lives; pass None (the default) to sum globally.
+per_function_compares = []
+for fn in modified_functions:
+    cmp = compare_reports(
+        baseline_report=baseline_report,
+        candidate_report=status["result"]["report_path"],
+        level="function",
+        function=fn,
+        # Pass process/thread/lib only if the plan pins them — otherwise
+        # leave them None so report_compare sums across every owner.
+    )
+    per_function_compares.append({"function": fn, "result": cmp})
 ```
 
-The `compare_result.aggregate` is what drives the verdict:
+The `compare_result.aggregate` is what drives the primary verdict:
 - `aggregate.baseline`, `aggregate.candidate`, `aggregate.delta`, `aggregate.delta_pct`
 - `aggregate.pairs_compared`, `aggregate.pairs_missing_baseline`, `aggregate.pairs_missing_candidate`
 - `aggregate.baseline_found`, `aggregate.candidate_found` (for non-`total` levels)
 
-Deeper reference: `.opencode/skills/ab-test-comparison.md` (Phase B + C + decision criteria).
+Each per-modified-function compare carries the same `aggregate` shape.  Use them as corroborating evidence — see the decision criteria in Step 6.
+
+Deeper reference: `.opencode/skills/ab-test-comparison.md` (Phase B + C + decision criteria + Per-Modified-Function Comparison).
 
 ### Step 6 — Decision + Report
 
@@ -208,6 +231,7 @@ Apply these rules to `compare_result`:
 - targeted process/thread/lib/function disappears on the feature side
 - functional regression (crash / hang / test failure) in stderr tails
 - Step 4 (feature flash) failed when Step 2 (stock flash) succeeded
+- Step 1 Build or Sign failed (reported as FAIL rather than SKIPPED because the cause is a broken patch, not infrastructure)
 
 **INCONCLUSIVE**:
 - `abs(aggregate.delta_pct)` within noise margin (< 1 %)
@@ -215,7 +239,25 @@ Apply these rules to `compare_result`:
 - 180-min ceiling hit on either phase
 
 **SKIPPED**:
-- Infrastructure failure (relay unreachable, device not visible, stock flash/test failed, build or sign failed upstream)
+- Infrastructure failure (relay unreachable, device not visible, stock flash/test failed upstream)
+
+### Recommended Next Route — Which Agent the Manager Should Bounce to
+
+You MUST include `recommended_next_route` in your handoff so the manager can take the correct back-edge without re-deriving it.  Pick from this table — it mirrors `os-opt-manager.md` → **Feedback Routing Table**.
+
+| Which step failed | Verdict | `recommended_next_route` | Why |
+|---|---|---|---|
+| Step 1 build failed | fail | `kernel-code-agent` | patch doesn't compile |
+| Step 1 sign failed | fail | `kernel-code-agent` | patch broke the signed layout |
+| Step 4 feature flash failed (stock flashed fine) | fail | `kernel-code-agent` | patch made the image un-bootable |
+| Step 5 `aggregate.delta > 0` at chosen level | fail | `kernel-source-research` (or the active research specialist) | instruction-count thesis is disproven |
+| Step 5 target process/thread/lib/function disappears on feature side | fail | `kernel-source-research` | plan's scope/assumption was wrong |
+| Step 5 delta within ±1% noise | inconclusive | `kernel-source-research` if exhausted, else `kernel-code-agent` for a larger patch | the plan couldn't move the needle |
+| Step 5 `pairs_missing_*` > 0 | inconclusive | no bounce by default; note gap in report | incomplete coverage, not patch-fault |
+| Stock relay / flash / test infra failure | skipped | (no bounce) | not a patch or plan issue |
+| 180-min ceiling on either phase | inconclusive | (no bounce; ask user to re-run) | timing, not correctness |
+
+On a **pass**, `recommended_next_route` is `accept`.
 
 Write `.opencode/bench/<artifact>_validation.md` with sections corresponding to each step:
 
@@ -223,8 +265,8 @@ Write `.opencode/bench/<artifact>_validation.md` with sections corresponding to 
 - **Step 2 (Flash Stock + Settle)**: flash result, settle duration, hdc liveness
 - **Step 3 (Stock Test)**: async task_id, wait time, terminal status, report_path, notable stderr lines
 - **Step 4 (Flash Feature + Settle)**: same fields as Step 2
-- **Step 5 (Feature Test + Compare)**: async task_id, wait time, report_path, compare_result.aggregate
-- **Step 6 (Decision)**: verdict, confidence, recommended next route, rationale (one paragraph that cites `aggregate.delta_pct` and notable per-pair entries)
+- **Step 5 (Feature Test + Compare)**: async task_id, wait time, report_path, primary `compare_result.aggregate`, then a **per-modified-function table** with one row per function (name, baseline, candidate, delta, delta_pct, baseline_found, candidate_found) — empty only when the patch touched no function bodies
+- **Step 6 (Decision)**: verdict, confidence, recommended next route (cite the exact back-edge agent from the "Recommended Next Route" table), rationale (one paragraph that cites primary `aggregate.delta_pct`, the worst per-function delta_pct, and notable per-pair entries)
 
 ## Validation Checklist
 
