@@ -15,6 +15,7 @@ from hmopt.agents import (
     CoderAgent,
     ConductorAgent,
     ProfilerAgent,
+    ReviewerAgent,
     SafetyGuard,
     TraceAnalystAgent,
     VerifierAgent,
@@ -29,11 +30,13 @@ from hmopt.analysis.runtime.traces import (
     parse_hitrace,
     parse_sysfs_trace,
 )
+from hmopt.indexing import lookup_code_symbols
 from hmopt.analysis.static import build_psg, index_repo
 from hmopt.analysis.static.psg import PsgEdge, PsgGraph, PsgNode
 from hmopt.core.config import AppConfig
 from hmopt.core.llm import LLMClient
 from hmopt.core.run_context import RunContext, build_context, register_run
+from hmopt.datasets import export_dataset
 from hmopt.orchestration.state import RunState, initial_state
 from hmopt.storage.db import models
 from hmopt.storage.vector.store import VectorRecord
@@ -58,6 +61,7 @@ class PipelineServices:
     conductor: ConductorAgent
     coder: CoderAgent
     trace_analyst: TraceAnalystAgent
+    reviewer: ReviewerAgent
     verifier: VerifierAgent
     profiler: ProfilerAgent
     psg: object | None = None
@@ -84,15 +88,9 @@ def _hotspots_from_symbol_counts(
     symbol_stacks: dict[str, list[dict]] = {}
     if call_stacks:
         for stack in call_stacks:
-            if not isinstance(stack, dict):
-                continue
-            stack_symbols = stack.get("stack") or []
-            if not isinstance(stack_symbols, list) or not stack_symbols:
-                continue
-            for symbol in stack_symbols:
-                if not symbol:
-                    continue
-                symbol_stacks.setdefault(symbol, []).append(stack)
+            leaf = stack.get("leaf_symbol")
+            if leaf:
+                symbol_stacks.setdefault(leaf, []).append(stack)
 
     return [
         HotspotCandidate(
@@ -115,24 +113,18 @@ def _expand_symbol_call_stacks(symbol: str, stacks: list[dict]) -> list[dict]:
     seen: set[tuple[str, tuple[str, ...], str | None]] = set()
     for stack in stacks:
         path = stack.get("stack") or []
+        frames = stack.get("frames") or []
         if not isinstance(path, list) or symbol not in path:
             continue
         direction = stack.get("direction") or "call"
-        try:
-            symbol_idx = path.index(symbol)
-        except ValueError:
-            continue
-        if direction == "called":
-            trimmed = path[symbol_idx:]
-        else:
-            trimmed = path[: symbol_idx + 1]
-        key = (direction, tuple(trimmed), stack.get("thread_id"))
+        key = (direction, tuple(path), stack.get("thread_id"))
         if key in seen:
             continue
         seen.add(key)
         normalized.append(
             {
-                "stack": trimmed,
+                "stack": path,
+                "frames": frames if isinstance(frames, list) else [],
                 "direction": direction,
                 "thread_id": stack.get("thread_id"),
                 "self_events": stack.get("self_events"),
@@ -140,7 +132,6 @@ def _expand_symbol_call_stacks(symbol: str, stacks: list[dict]) -> list[dict]:
             }
         )
     return normalized
-
 
 def _top_weighted_items(weights: dict[str, float], *, top_n: int, total: float | None = None) -> list[dict[str, float]]:
     if not weights:
@@ -505,6 +496,25 @@ def _filter_hotspots_by_symbol(
     return [hs for hs in hotspots if hs.symbol == focus_symbol]
 
 
+def _align_hotspots_to_kernel_index(
+    config: AppConfig, hotspots: list[HotspotCandidate]
+) -> list[HotspotCandidate]:
+    if not hotspots:
+        return hotspots
+    symbol_lookup = lookup_code_symbols(config, [hs.symbol for hs in hotspots])
+    for hs in hotspots:
+        info = symbol_lookup.get(hs.symbol)
+        if not info:
+            continue
+        if info.get("path"):
+            hs.file_path = info.get("path")
+        if info.get("start_line") is not None:
+            hs.line_start = info.get("start_line")
+        if info.get("end_line") is not None:
+            hs.line_end = info.get("end_line")
+    return hotspots
+
+
 def _store_flamegraph_maps(services: PipelineServices, run_id: str, result, source_path: Path | None) -> None:
     source_value = source_path or getattr(result, "source_path", None)
     metadata = {"source": str(source_value)} if source_value else {}
@@ -752,6 +762,7 @@ def make_services(config: AppConfig) -> PipelineServices:
     conductor = ConductorAgent(llm, safety)
     coder = CoderAgent(llm, safety)
     trace_analyst = TraceAnalystAgent(llm, safety)
+    reviewer = ReviewerAgent(llm, safety)
 
     return PipelineServices(
         config=config,
@@ -761,6 +772,7 @@ def make_services(config: AppConfig) -> PipelineServices:
         conductor=conductor,
         coder=coder,
         trace_analyst=trace_analyst,
+        reviewer=reviewer,
         verifier=verifier,
         profiler=profiler,
     )
@@ -888,6 +900,64 @@ def _build_evidence(services: PipelineServices, state: RunState) -> RunState:
     return state
 
 
+def _build_evidence_simple(
+    services: PipelineServices,
+    run_id: str,
+    metrics: list[Metric],
+    hotspots: list[HotspotCandidate],
+    trace_insights: list[dict[str, Any]],
+) -> dict[str, Any]:
+    metrics_map = _metrics_to_map(metrics)
+    focus_symbol = services.config.indexing.hotspot_focus_symbol
+    filtered_hotspots = _filter_hotspots_by_symbol(hotspots, focus_symbol)
+    ordered = sorted(filtered_hotspots, key=lambda h: h.score or 0.0, reverse=True)
+    top_hotspots = ordered[:5]
+    summary_lines = []
+    if top_hotspots:
+        summary_lines.append("Top hotspots:")
+        for hs in top_hotspots:
+            summary_lines.append(f"- {hs.symbol} score={hs.score:.2f}")
+    if metrics_map:
+        summary_lines.append("Key metrics:")
+        for key, value in list(metrics_map.items())[:10]:
+            summary_lines.append(f"- {key}: {value}")
+    summary = "\n".join(summary_lines) or "No summary available."
+    pack = {
+        "iteration": 0,
+        "metrics": metrics_map,
+        "hotspots": [_hotspot_to_dict(h) for h in filtered_hotspots],
+        "summary": summary,
+        "trace_insights": trace_insights,
+        "hotspot_focus_symbol": focus_symbol,
+        "source": "simple_runtime_ingest",
+    }
+    artifact = services.ctx.artifact_store.store_json(
+        pack, kind="evidence_pack", run_id=run_id, session=services.ctx.session
+    )
+    report_text = _format_evidence_report(
+        run_id,
+        0,
+        metrics_map,
+        filtered_hotspots,
+        trace_insights,
+        summary,
+        hotspot_focus_symbol=focus_symbol,
+    )
+    report_artifact = services.ctx.artifact_store.store_text(
+        report_text,
+        kind="evidence_report",
+        run_id=run_id,
+        extension=".md",
+        session=services.ctx.session,
+    )
+    logger.info(
+        "Simple evidence pack stored: artifact=%s report_artifact=%s",
+        artifact.artifact_id,
+        report_artifact.artifact_id,
+    )
+    return pack
+
+
 def _conductor_decide(services: PipelineServices, state: RunState) -> RunState:
     metrics = state.get("candidate_metrics", {})
     best_summary = f"best fps {state.get('best_metrics', {}).get('fps_avg', 0):.2f}"
@@ -937,6 +1007,29 @@ def _coder_generate_patch(services: PipelineServices, state: RunState) -> RunSta
     services.ctx.session.commit()
     logger.info("Patch generated: artifact=%s", art.artifact_id)
     return state
+
+
+def _read_artifact_text(
+    services: PipelineServices,
+    artifact_id: str | None,
+    *,
+    max_chars: int = 4000,
+) -> str:
+    if not artifact_id:
+        return ""
+    artifact = (
+        services.ctx.session.query(models.Artifact)
+        .filter(models.Artifact.artifact_id == artifact_id)
+        .one_or_none()
+    )
+    if artifact is None:
+        return ""
+    try:
+        text = Path(artifact.path).read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Failed reading artifact %s: %s", artifact_id, exc)
+        return ""
+    return text[:max_chars]
 
 
 def _apply_patch(services: PipelineServices, state: RunState) -> RunState:
@@ -992,6 +1085,8 @@ def _verify(services: PipelineServices, state: RunState) -> RunState:
         result.tests.log, kind="test_log", run_id=state["run_id"], session=services.ctx.session
     )
     services.ctx.session.commit()
+    state["build_success"] = result.build.success
+    state["test_success"] = result.tests.success
     state["verification_success"] = result.success
     state["build_log_artifact_id"] = build_log.artifact_id
     state["test_log_artifact_id"] = test_log.artifact_id
@@ -999,6 +1094,59 @@ def _verify(services: PipelineServices, state: RunState) -> RunState:
         state["force_stop"] = True
         state["stop_reason"] = "verification_failed"
     logger.info("Verification done: success=%s", result.success)
+    return state
+
+
+def _review_candidate(services: PipelineServices, state: RunState) -> RunState:
+    if not state.get("patch_artifact_id"):
+        state["reviewer_decision"] = "not_applicable"
+        return state
+
+    logger.info("Reviewer evaluating iteration=%s", state.get("iteration"))
+    evidence_summary = _read_artifact_text(
+        services,
+        state.get("evidence_report_artifact_id"),
+        max_chars=5000,
+    )
+    patch_summary = _read_artifact_text(services, state.get("patch_artifact_id"), max_chars=5000)
+    build_log_excerpt = _read_artifact_text(services, state.get("build_log_artifact_id"), max_chars=2000)
+    test_log_excerpt = _read_artifact_text(services, state.get("test_log_artifact_id"), max_chars=2000)
+    decision = services.reviewer.review(
+        evidence_summary=evidence_summary or json.dumps(state.get("candidate_metrics", {}), indent=2),
+        patch_summary=patch_summary or state.get("next_action", ""),
+        build_success=bool(state.get("build_success", state.get("verification_success", True))),
+        test_success=bool(state.get("test_success", state.get("verification_success", True))),
+        build_log_excerpt=build_log_excerpt,
+        test_log_excerpt=test_log_excerpt,
+        iteration=state.get("iteration", 0),
+    )
+    review_text = "\n".join(
+        [
+            f"Decision: {decision['decision'].upper()}",
+            f"Risks: {decision['risk_summary']}",
+            "",
+            decision["rationale"],
+        ]
+    )
+    art = services.ctx.artifact_store.store_text(
+        review_text,
+        kind="review_report",
+        run_id=state["run_id"],
+        extension=".md",
+        session=services.ctx.session,
+    )
+    services.ctx.session.commit()
+    state["review_artifact_id"] = art.artifact_id
+    state["reviewer_decision"] = decision["decision"]
+    state.setdefault("logs", []).append(decision["rationale"])
+    if decision["decision"] != "approve":
+        state["force_stop"] = True
+        state["stop_reason"] = state.get("stop_reason") or "review_rejected"
+    logger.info(
+        "Reviewer finished: decision=%s artifact=%s",
+        state["reviewer_decision"],
+        art.artifact_id,
+    )
     return state
 
 
@@ -1038,6 +1186,7 @@ def _report(services: PipelineServices, state: RunState) -> RunState:
         f"# HMOPT run {state['run_id']}",
         f"Status: {state.get('stop_reason') or 'completed'}",
         f"Iterations: {state.get('iteration', 0)}",
+        f"Reviewer decision: {state.get('reviewer_decision') or 'n/a'}",
         "## Metrics",
     ]
     for k, v in metrics.items():
@@ -1119,6 +1268,7 @@ def build_graph(services: PipelineServices, max_iterations: int) -> StateGraph:
     graph.add_node("coder_generate_patch", lambda s: _coder_generate_patch(services, s))
     graph.add_node("apply_patch", lambda s: _apply_patch(services, s))
     graph.add_node("verify_build_test", lambda s: _verify(services, s))
+    graph.add_node("review_candidate", lambda s: _review_candidate(services, s))
     graph.add_node("profile_candidate", lambda s: _profile_and_analyze(services, s, f"iter_{s.get('iteration', 0)}"))
     graph.add_node("evaluate", lambda s: _evaluate(services, s))
     graph.add_node("stop_or_continue", lambda s: s)
@@ -1132,7 +1282,12 @@ def build_graph(services: PipelineServices, max_iterations: int) -> StateGraph:
     graph.add_conditional_edges("conductor_decide", _conductor_branch, {"continue": "coder_generate_patch", "stop": "generate_report"})
     graph.add_edge("coder_generate_patch", "apply_patch")
     graph.add_edge("apply_patch", "verify_build_test")
-    graph.add_edge("verify_build_test", "profile_candidate")
+    graph.add_edge("verify_build_test", "review_candidate")
+    graph.add_conditional_edges(
+        "review_candidate",
+        lambda s: "stop" if s.get("force_stop") else "continue",
+        {"continue": "profile_candidate", "stop": "generate_report"},
+    )
     graph.add_edge("profile_candidate", "evaluate")
     graph.add_conditional_edges(
         "evaluate",
@@ -1162,6 +1317,7 @@ def run_artifact_analysis(
     run_conductor: bool = True,
     run_coder: bool = True,
     run_verify: bool = False,
+    run_review: bool = True,
     run_profile: bool = False,
 ) -> str:
     """Run a shortened pipeline that ingests existing artifacts and optionally drives LLM suggestions."""
@@ -1335,6 +1491,8 @@ def run_artifact_analysis(
         state = _apply_patch(services, state)
         if run_verify:
             state = _verify(services, state)
+        if run_review:
+            state = _review_candidate(services, state)
         if run_profile and not state.get("force_stop"):
             state = _profile_and_analyze(services, state, f"iter_{state.get('iteration', 0)}")
             state = _evaluate(services, state)
@@ -1344,4 +1502,134 @@ def run_artifact_analysis(
     services.ctx.session.commit()
     services.ctx.session.close()
     logger.info("Artifact analysis finished: run_id=%s", state["run_id"])
+    return state["run_id"]
+
+
+def run_runtime_ingest(
+    config: AppConfig,
+    artifacts: list[dict],
+) -> str:
+    """Parse runtime artifacts (flamegraph/hitrace/hiperf) without LLM steps."""
+    services = make_services(config)
+    state: RunState = initial_state(services.ctx.run_id, max_iterations=1)
+
+    register_run(services.ctx, workload_id=config.project.workload)
+    run_row = (
+        services.ctx.session.query(models.Run).filter(models.Run.run_id == state["run_id"]).one()
+    )
+    repo_path = config.project.repo_path
+    if repo_path and Path(repo_path).exists():
+        repo_state = get_repo_state(repo_path)
+        snapshot = snapshot_files(repo_path)
+        snapshot_art = services.ctx.artifact_store.store_json(
+            snapshot, kind="repo_snapshot", run_id=state["run_id"], session=services.ctx.session
+        )
+        run_row.repo_rev = repo_state.get("commit")
+        run_row.repo_uri = repo_state.get("remote")
+        run_row.repo_dirty = bool(repo_state.get("dirty"))
+        state["snapshot_artifact_id"] = snapshot_art.artifact_id
+    else:
+        logger.info("Skipping repo snapshot (repo_path missing or invalid).")
+    run_row.status = "running"
+    services.ctx.session.commit()
+
+    metrics: list[Metric] = []
+    hotspots: list[HotspotCandidate] = []
+    trace_insights: list[dict[str, Any]] = []
+
+    for item in artifacts:
+        kind = item.get("kind")
+        if kind == "framegraph":
+            kind = "flamegraph"
+        path = Path(item.get("path"))
+        if path.is_dir() and kind != "flamegraph":
+            logger.warning("Skipping directory artifact (unsupported kind=%s): %s", kind, path)
+            continue
+        if kind == "flamegraph":
+            if path.is_dir():
+                html_files = sorted(path.rglob("*__sysmgr_hiperfReport.html"))
+                if html_files:
+                    for html_file in html_files:
+                        services.ctx.artifact_store.store_file(
+                            html_file,
+                            kind=kind,
+                            run_id=state["run_id"],
+                            session=services.ctx.session,
+                            metadata={"source_dir": str(path)},
+                        )
+                else:
+                    logger.warning("Flamegraph directory had no report HTML: %s", path)
+            else:
+                services.ctx.artifact_store.store_file(
+                    path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+                )
+            fg_results = parse_flamegraph(path)
+            fg_hotspots_all: list[HotspotCandidate] = []
+            for fg in fg_results:
+                metrics.extend(fg.to_metrics())
+                _store_flamegraph_maps(services, state["run_id"], fg, path)
+                if fg.symbol_counts:
+                    fg_hotspots = _hotspots_from_symbol_counts(
+                        fg.symbol_counts,
+                        top_n=services.config.indexing.hotspot_top_k,
+                        min_ratio=services.config.indexing.hotspot_min_ratio,
+                        min_abs=services.config.indexing.hotspot_min_abs,
+                        total=fg.event_count_total,
+                        call_stacks=fg.call_stacks,
+                    )
+                    fg_hotspots_all.extend(fg_hotspots)
+                trace_insights.append(_flamegraph_trace_insight(fg, top_n=20, source_path=path))
+            comparison = _flamegraph_comparison_insight(fg_results, top_n=10)
+            if comparison:
+                trace_insights.append(comparison)
+            hotspots.extend(fg_hotspots_all)
+        elif kind == "hitrace":
+            services.ctx.artifact_store.store_file(
+                path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+            )
+            ht = parse_hitrace(path)
+            metrics.extend(ht.to_metrics())
+        elif kind == "sysfs":
+            services.ctx.artifact_store.store_file(
+                path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+            )
+            st = parse_sysfs_trace(path)
+            metrics.extend(st.to_metrics())
+        elif kind == "hiperf":
+            services.ctx.artifact_store.store_file(
+                path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+            )
+            hp = parse_hiperf(path)
+            hs = rank_hotspots(hp.hotspot_costs, hp.edge_costs, top_n=15)
+            hotspots.extend(hs)
+        else:
+            services.ctx.artifact_store.store_file(
+                path, kind=kind or "unknown", run_id=state["run_id"], session=services.ctx.session
+            )
+            logger.info("Stored artifact with no parser: %s", kind)
+
+    if hotspots:
+        metrics_map = {m.metric_name: m.value for m in metrics}
+        hotspots = rank_correlated(hotspots, metrics_map, limit=20)
+        hotspots = _align_hotspots_to_kernel_index(services.config, hotspots)
+
+    record_metrics(services.ctx.session, state["run_id"], metrics)
+    persist_hotspots(services.ctx.session, state["run_id"], hotspots)
+    services.ctx.session.commit()
+
+    _build_evidence_simple(services, state["run_id"], metrics, hotspots, trace_insights)
+    export_dataset(services.ctx.session, [state["run_id"]], services.ctx.run_dir / "dataset.json")
+    metrics_payload = _metrics_to_map(metrics)
+    metrics_artifact = services.ctx.artifact_store.store_json(
+        metrics_payload,
+        kind="metrics_summary",
+        run_id=state["run_id"],
+        session=services.ctx.session,
+    )
+    logger.info("Stored metrics summary: artifact=%s", metrics_artifact.artifact_id)
+
+    run_row.status = "succeeded"
+    services.ctx.session.commit()
+    services.ctx.session.close()
+    logger.info("Runtime ingest finished: run_id=%s", state["run_id"])
     return state["run_id"]

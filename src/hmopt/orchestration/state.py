@@ -11,13 +11,17 @@ class RunState(TypedDict, total=False):
     max_iterations: int
     decision: str
     stop_reason: Optional[str]
+    build_success: Optional[bool]
+    test_success: Optional[bool]
     baseline_metrics: Dict[str, float]
     candidate_metrics: Dict[str, float]
     best_metrics: Dict[str, float]
     evidence_artifact_id: Optional[str]
     evidence_report_artifact_id: Optional[str]
     patch_artifact_id: Optional[str]
+    review_artifact_id: Optional[str]
     best_run_id: Optional[str]
+    reviewer_decision: Optional[str]
     hotspots: List[dict]
     logs: List[str]
     trace_insights: List[dict]
@@ -30,13 +34,17 @@ def initial_state(run_id: str, max_iterations: int) -> RunState:
         "max_iterations": max_iterations,
         "decision": "continue",
         "stop_reason": None,
+        "build_success": None,
+        "test_success": None,
         "baseline_metrics": {},
         "candidate_metrics": {},
         "best_metrics": {},
         "evidence_artifact_id": None,
         "evidence_report_artifact_id": None,
         "patch_artifact_id": None,
+        "review_artifact_id": None,
         "best_run_id": run_id,
+        "reviewer_decision": None,
         "hotspots": [],
         "logs": [],
         "trace_insights": [],

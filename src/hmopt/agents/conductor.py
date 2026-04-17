@@ -8,6 +8,7 @@ import logging
 
 from hmopt.core.llm import ChatMessage, LLMClient
 
+from .prompting import render_prompt_template
 from .safety import SafetyGuard
 
 logger = logging.getLogger(__name__)
@@ -40,16 +41,26 @@ class ConductorAgent:
                 next_action="report",
             )
 
-        prompt = (
-            "You are the Conductor agent coordinating an optimization loop.\n"
-            f"Iteration: {iteration}/{max_iterations}\n"
-            f"Best run summary: {best_summary}\n"
-            f"Current evidence:\n{evidence_summary}\n"
-            "Decide whether to continue optimizing or stop. "
-            "If continuing, propose a concise next action for the coder."
+        prompt = render_prompt_template(
+            "conductor.md",
+            (
+                "# Conductor Prompt\n\n"
+                "You are the Conductor agent coordinating an optimization loop.\n\n"
+                "Iteration: {iteration}/{max_iterations}\n"
+                "Best run summary: {best_summary}\n\n"
+                "Current evidence:\n"
+                "{evidence_summary}\n\n"
+                "Decide whether to continue optimizing or stop.\n"
+                "If continuing, propose a concise next action for the coder.\n"
+                "Keep the answer short and operational.\n"
+            ),
+            iteration=iteration,
+            max_iterations=max_iterations,
+            best_summary=best_summary,
+            evidence_summary=evidence_summary,
         )
         messages = [
-            ChatMessage(role="system", content="Conductor focusing on perf + correctness."),
+            ChatMessage(role="system", content="Conductor focusing on perf, correctness, and disciplined iteration."),
             ChatMessage(role="user", content=self.safety.redact(prompt)),
         ]
         reply = self.llm.chat(messages)

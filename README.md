@@ -30,7 +30,61 @@ python3 -m hmopt.cli run --config configs/app.yaml
 bash scripts/run_api.sh
 ```
 
+- Launch the MCP server for OpenCode/other MCP clients (`/mcp` + legacy `/tools/call`):
+
+```bash
+bash scripts/run_mcp_server.sh
+```
+
+- Launch the Git MCP server (standalone streamable-http endpoint):
+
+```bash
+bash scripts/run_git_mcp_server.sh
+```
+
+默认可通过 `HMOPT_GIT_MCP_REPOSITORY` 设置仓库根路径，这样调用 Git MCP 工具时可不显式传 `repo_path`；也可继续在每次 tool 调用中传入 `repo_path` 覆盖。
+
+- Launch the Build MCP server (default `0.0.0.0:7335`):
+
+```bash
+bash scripts/run_build_mcp_server.sh
+```
+
+Build MCP can trigger kernel build/sign commands in another Docker container via `docker exec/run`. Configure with `HMOPT_BUILD_MCP_*` environment variables.
+
+- Launch the Sequential Thinking MCP server (default `0.0.0.0:7333`):
+
+```bash
+bash scripts/run_seq_mcp_server.sh
+```
+
+- Launch the Auto-Test MCP server for running phone test scripts through `hdc` (default `0.0.0.0:7336`):
+
+```bash
+bash scripts/run_auto_test_mcp_server.sh
+```
+
+Auto-Test MCP exposes tool `phone_test_run` by default, supports per-test parameters from MCP client, runs `hdc shell`, and pulls result files via `hdc file recv`. Recommended Docker setup: configure `HMOPT_AUTO_TEST_TARGET` in `.env.docker` and use direct `hdc -t <target> ...` without connect.
+Built-in case: set `test_case=basic_swipe` to auto-push and run `scripts/phone_tests/basic_swipe.sh` on device (`remote_script` may be empty). The script performs swipe workload and aligns with legacy flow by running `hiperf record/report`; optional `extra_args=[duration_s, swipe_count]`; default result path is `/data/local/tmp/basic_swipe.result`.
+Connect is disabled by default (`connect_before_shell=false`, `HMOPT_AUTO_TEST_HDC_CONNECT_MODE=none`). If needed, you can still enable connect/tconn explicitly.
+If the device tunnel endpoint is on host (e.g. `ssh -R 8710:localhost:8710 ...`), pass `target=host.docker.internal:8710` in MCP tool arguments when calling from containerized server.
+
+For direct local debugging without starting MCP service, run:
+`PYTHONPATH=src python -m hmopt.api.auto_test_mcp_service --test-case basic_swipe --remote-script ""` (uses `HMOPT_AUTO_TEST_TARGET` by default).
+
 Outputs (DB + artifacts + reports) are stored under `data/`.
+
+For OpenCode MCP integration details, see `docs/OpenCode_MCP_Integration_Guide.md`.
+
+For the OpenCode multi-agent workflow and the repo-backed `.opencode/` workspace, see `docs/OpenCode_JKernel_Multi_Agent_Optimization_Workflow.md` and `.opencode/README.md`.
+
+For the one-click OpenCode pipeline entry flow, use `python3 -m hmopt.cli start-pipeline ...`, `python3 -m hmopt.cli list-pipeline-profiles`, or `bash scripts/run_opencode_pipeline.sh ...`.
+
+For the staged one-click workflow guide, see `docs/OpenCode_One_Click_Pipeline_Guide.md`.
+
+For Docker one-click local indexing + OpenCode integration (works with docker compose and docker-only fallback), see `docs/Docker_OneClick_Delivery.md`.
+
+For local runnable Build MCP test and parameter examples, see `docs/Build_MCP_Local_Test.md`.
 
 ## Repository Layout
 

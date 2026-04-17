@@ -5,12 +5,19 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+import shutil
+import subprocess
 from typing import Optional
 
 import typer
 
 from hmopt.core.config import AppConfig
-from hmopt.orchestration import run_artifact_analysis, run_pipeline
+from hmopt.opencode import (
+    initialize_pipeline_session,
+    load_pipeline_profiles,
+    resume_pipeline_session,
+)
+from hmopt.orchestration import run_artifact_analysis, run_pipeline, run_runtime_ingest
 from hmopt.indexing import build_kernel_index, build_runtime_index, route_query
 from hmopt.storage.artifact_store import ArtifactStore
 from hmopt.storage.db.engine import init_engine
@@ -118,10 +125,16 @@ def analyze_artifacts(
         help="Artifact spec kind:path (e.g., flamegraph:outputs/flamegraph.json). Repeatable.",
     ),
     config: str = typer.Option("configs/app.yaml", help="Config YAML"),
-    repo_path: Optional[str] = typer.Option(None, help="Override repo path for this run"),
-    with_patch: bool = typer.Option(True, help="Run Conductor+Coder to suggest patches"),
+    repo_path: Optional[str] = typer.Option(
+        None, help="Override repo path (legacy pipeline only)"
+    ),
+    with_patch: bool = typer.Option(False, help="Run Conductor+Coder to suggest patches (legacy)"),
     with_verify: bool = typer.Option(False, help="Run build/test verification after patch"),
     with_profile: bool = typer.Option(False, help="Re-profile candidate after patch"),
+    legacy_pipeline: bool = typer.Option(
+        False,
+        help="Use legacy analyze_artifacts pipeline (PSG + LLM evidence/patch).",
+    ),
 ) -> None:
     # Demo: python -m hmopt.cli analyze-artifacts \
     #          --artifact flamegraph:outputs/flamegraph.json \
@@ -131,8 +144,12 @@ def analyze_artifacts(
     # Purpose: ingest existing traces (no live profiling), run analysis -> hotspots/report.
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
-    if repo_path:
+    if repo_path and (legacy_pipeline or with_patch):
         cfg.project.repo_path = repo_path
+    elif repo_path:
+        logging.getLogger(__name__).info(
+            "Ignoring repo_path override for lightweight runtime ingest."
+        )
     artifacts = []
     for spec in artifact:
         if ":" not in spec:
@@ -140,14 +157,17 @@ def analyze_artifacts(
             raise typer.Exit(code=1)
         kind, path = spec.split(":", 1)
         artifacts.append({"kind": kind, "path": path})
-    run_id = run_artifact_analysis(
-        cfg,
-        artifacts,
-        run_conductor=with_patch,
-        run_coder=with_patch,
-        run_verify=with_verify,
-        run_profile=with_profile,
-    )
+    if legacy_pipeline or with_patch:
+        run_id = run_artifact_analysis(
+            cfg,
+            artifacts,
+            run_conductor=with_patch,
+            run_coder=with_patch,
+            run_verify=with_verify,
+            run_profile=with_profile,
+        )
+    else:
+        run_id = run_runtime_ingest(cfg, artifacts)
     typer.echo(f"Artifact analysis complete. run_id={run_id}")
 
 
@@ -195,6 +215,12 @@ def query(
         ..., help="Query text or @/path to a prompt file"
     ),
     mode: str = typer.Option("auto", help="auto|code|runtime|runtime_code|graph"),
+    symbols: Optional[str] = typer.Option(
+        None, "--symbols", help="Comma-separated symbol list to analyze"
+    ),
+    hotspot_top_k: Optional[int] = typer.Option(
+        None, "--hotspot-top-k", help="Top-K hotspots to analyze"
+    ),
     run_id: Optional[str] = typer.Option(
         None, "--run-id", help="Run ID for selecting runtime index"
     ),
@@ -213,9 +239,179 @@ def query(
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
     prompt_path = Path(prompt_file) if prompt_file else None
-    response = route_query(cfg, query_str, mode=mode, prompt_file=prompt_path, run_id=run_id)
+    symbol_list = [s.strip() for s in symbols.split(",")] if symbols else None
+    response = route_query(
+        cfg,
+        query_str,
+        mode=mode,
+        prompt_file=prompt_path,
+        run_id=run_id,
+        focus_symbols=symbol_list,
+        hotspot_top_k=hotspot_top_k,
+    )
     typer.echo(response)
 
+
+
+@app.command()
+def serve_mcp(
+    host: str = typer.Option("0.0.0.0", help="Bind host"),
+    port: int = typer.Option(7331, help="Bind port"),
+    reload: bool = typer.Option(False, help="Enable auto-reload"),
+) -> None:
+    # Demo: python -m hmopt.cli serve-mcp --host 0.0.0.0 --port 7331
+    # Purpose: run MCP streamable-http server (+ legacy /tools/call).
+    import uvicorn
+
+    uvicorn.run("hmopt.api.mcp_server:app", host=host, port=port, reload=reload)
+
+
+@app.command()
+def list_pipeline_profiles(
+    profiles_path: str = typer.Option(
+        "configs/pipeline_profiles.yaml",
+        help="Path to pipeline profiles YAML",
+    ),
+    as_json: bool = typer.Option(False, help="Print JSON instead of plain text"),
+) -> None:
+    profiles = load_pipeline_profiles(profiles_path)
+    if as_json:
+        payload = {
+            name: {
+                "title": profile.title,
+                "description": profile.description,
+                "specialist_hint": profile.specialist_hint,
+                "pipeline_card": profile.pipeline_card,
+                "primary_goal": profile.primary_goal,
+                "plan_reviewer_agent": profile.plan_reviewer_agent,
+                "code_reviewer_agent": profile.code_reviewer_agent,
+                "tester_agent": profile.tester_agent,
+                "validation_mode": profile.validation_mode,
+            }
+            for name, profile in profiles.items()
+        }
+        typer.echo(json.dumps(payload, indent=2))
+        return
+
+    for name, profile in profiles.items():
+        typer.echo(f"{name}: {profile.title}")
+        typer.echo(f"  description: {profile.description}")
+        typer.echo(f"  specialist_hint: {profile.specialist_hint or 'auto'}")
+        typer.echo(f"  pipeline_card: {profile.pipeline_card or '-'}")
+        typer.echo(f"  primary_goal: {profile.primary_goal}")
+        typer.echo(f"  plan_reviewer_agent: {profile.plan_reviewer_agent}")
+        typer.echo(f"  code_reviewer_agent: {profile.code_reviewer_agent}")
+        typer.echo(f"  tester_agent: {profile.tester_agent}")
+        typer.echo(f"  validation_mode: {profile.validation_mode}")
+
+
+@app.command()
+def start_pipeline(
+    profile: str = typer.Option(..., help="Pipeline profile name"),
+    target: str = typer.Option(..., help="Target file, symbol, or subsystem"),
+    objective: Optional[str] = typer.Option(None, help="Override the profile objective"),
+    artifact: list[str] = typer.Option(
+        [],
+        "--artifact",
+        help="Artifact spec kind:path. Repeatable.",
+    ),
+    config: str = typer.Option("configs/app.yaml", help="Path to config YAML"),
+    profiles_path: str = typer.Option(
+        "configs/pipeline_profiles.yaml",
+        help="Path to pipeline profiles YAML",
+    ),
+    launch_opencode: bool = typer.Option(
+        False,
+        help="Launch opencode in the repo root after staging the prompt if the binary exists.",
+    ),
+    open_cmd: Optional[str] = typer.Option(
+        None,
+        help="Custom command to launch OpenCode or a wrapper in the repo root.",
+    ),
+    as_json: bool = typer.Option(False, help="Print JSON instead of prose"),
+) -> None:
+    cfg = _load_config(config)
+    repo_root = Path.cwd()
+    profiles = load_pipeline_profiles(profiles_path)
+    chosen = profiles.get(profile)
+    if chosen is None:
+        typer.echo(f"Unknown pipeline profile: {profile}")
+        raise typer.Exit(code=1)
+
+    session = initialize_pipeline_session(
+        repo_root=repo_root,
+        profile=chosen,
+        target=target,
+        objective=objective,
+        artifact_specs=artifact,
+    )
+    task = session["task"]
+
+    if as_json:
+        typer.echo(
+            json.dumps(
+                {
+                    "config_repo_path": cfg.project.repo_path,
+                    "state_path": session["state_path"],
+                    "prompt_path": session["prompt_path"],
+                    "task": task,
+                    "prompt_text": session["prompt_text"],
+                },
+                indent=2,
+            )
+        )
+    else:
+        typer.echo(f"Pipeline staged: {task['task_id']}")
+        typer.echo(f"Profile: {task['profile']}")
+        typer.echo(f"Target: {task['target']}")
+        typer.echo(f"State file: {session['state_path']}")
+        typer.echo(f"Prompt file: {session['prompt_path']}")
+        typer.echo("")
+        typer.echo("Paste this into OpenCode if you are not auto-launching:")
+        typer.echo("")
+        typer.echo(session["prompt_text"])
+
+    if open_cmd:
+        subprocess.run(open_cmd, shell=True, cwd=repo_root, check=False)
+    elif launch_opencode:
+        if shutil.which("opencode") is None:
+            typer.echo("OpenCode binary not found in PATH; prompt has been staged on disk.")
+            raise typer.Exit(code=1)
+        subprocess.run(["opencode"], cwd=repo_root, check=False)
+
+
+@app.command()
+def resume_pipeline(
+    state_path: str = typer.Option(
+        ".opencode/state/current_task.json",
+        help="Path to staged current task state",
+    ),
+    as_json: bool = typer.Option(False, help="Print JSON instead of prose"),
+) -> None:
+    session = resume_pipeline_session(repo_root=Path.cwd(), state_path=state_path)
+    if as_json:
+        typer.echo(json.dumps(session, indent=2))
+        return
+
+    task = session["task"]
+    typer.echo(f"Current task: {task.get('task_id', '')}")
+    typer.echo(f"Profile: {task.get('profile', '')}")
+    typer.echo(f"Target: {task.get('target', '')}")
+    typer.echo(f"Status: {task.get('status', '')}")
+    typer.echo(f"State file: {session['state_path']}")
+    typer.echo(f"Prompt file: {session['prompt_path']}")
+    if session["prompt_text"]:
+        typer.echo("")
+        typer.echo(session["prompt_text"])
+
+
+@app.command("mcp-stdio")
+def mcp_stdio() -> None:
+    # Demo: python -m hmopt.cli mcp-stdio
+    # Purpose: run MCP server over stdio for OpenCode local MCP mode.
+    from hmopt.api.mcp_stdio import main as run_mcp_stdio
+
+    run_mcp_stdio()
 
 
 if __name__ == "__main__":

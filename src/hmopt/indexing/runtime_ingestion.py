@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
+from pathlib import Path
 from typing import Any, List, Optional
 
 from llama_index.core.schema import TextNode
@@ -32,6 +34,24 @@ def _normalize_metadata_value(value: Any) -> Any:
         return json.dumps(value, ensure_ascii=False)
     except TypeError:
         return str(value)
+
+def _load_artifacts_payloads(session: Session, run_id: str, kind: str) -> list[dict | list]:
+    artifacts = (
+        session.query(models.Artifact)
+        .filter(models.Artifact.run_id == run_id, models.Artifact.kind == kind)
+        .order_by(models.Artifact.bytes.desc())
+        .all()
+    )
+    payloads: list[dict | list] = []
+    for art in artifacts:
+        try:
+            raw = Path(art.path).read_text(encoding="utf-8")
+            payload = json.loads(raw)
+            if isinstance(payload, (dict, list)):
+                payloads.append(payload)
+        except (OSError, json.JSONDecodeError):
+            continue
+    return payloads
 
 
 def build_runtime_nodes(
@@ -93,6 +113,70 @@ def build_runtime_nodes(
                     "line_end": _normalize_metadata_value(hotspot.line_end),
                     "score": _normalize_metadata_value(hotspot.score),
                     "call_stacks": _normalize_metadata_value(call_stacks),
+                },
+            )
+        )
+
+
+    symbol_counts_payloads = _load_artifacts_payloads(
+        session, run_id, "flamegraph_symbol_counts"
+    )
+    if not symbol_counts_payloads:
+        symbol_counts_payloads = _load_artifacts_payloads(
+            session, run_id, "flamegraph_symbol_counts_raw"
+        )
+    symbol_scores: dict[str, float] = {}
+    for payload in symbol_counts_payloads:
+        if not isinstance(payload, dict):
+            continue
+        for symbol, score in payload.items():
+            try:
+                value = float(score)
+            except (TypeError, ValueError):
+                continue
+            symbol_scores[symbol] = symbol_scores.get(symbol, 0.0) + value
+
+    call_stack_payloads = _load_artifacts_payloads(
+        session, run_id, "flamegraph_call_stacks"
+    )
+    call_stacks: list[dict] = []
+    for payload in call_stack_payloads:
+        if isinstance(payload, list):
+            call_stacks.extend([item for item in payload if isinstance(item, dict)])
+    symbol_stacks: dict[str, list[dict]] = defaultdict(list)
+    for stack in call_stacks:
+        leaf = stack.get("leaf_symbol")
+        if not leaf:
+            path = stack.get("stack") or []
+            if isinstance(path, list) and path:
+                leaf = path[-1]
+        if leaf:
+            symbol_stacks[leaf].append(stack)
+
+    for symbol in sorted(set(symbol_scores) | set(symbol_stacks)):
+        score = symbol_scores.get(symbol)
+        stacks = symbol_stacks.get(symbol, [])
+        stack_lines = []
+        for idx, stack in enumerate(stacks[:3]):
+            if isinstance(stack, dict):
+                path = " -> ".join(stack.get("stack", []))
+                events = stack.get("self_events", 0)
+                direction = stack.get("direction", "call")
+                stack_lines.append(
+                    f"  [{idx+1}] ({direction}) {path} (events: {events:.0f})"
+                )
+        stack_text = "\nCall stacks:\n" + "\n".join(stack_lines) if stack_lines else ""
+        score_text = f"{score:.4f}" if isinstance(score, float) else ""
+        text = f"symbol {symbol} score {score_text}{stack_text}".strip()
+        nodes.append(
+            TextNode(
+                text=text,
+                metadata={
+                    "type": "runtime_symbol",
+                    "run_id": run_id,
+                    "symbol": symbol,
+                    "score": _normalize_metadata_value(score),
+                    "call_stacks": _normalize_metadata_value(stacks),
                 },
             )
         )

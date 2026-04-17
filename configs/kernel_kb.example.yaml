@@ -1,0 +1,30 @@
+kernel_kb:
+  enabled: true
+  repo_id: hm-verif-kernel
+  source:
+    mode: hybrid
+    central_repo_path: /work/hm-kernel-kb
+    local_overlay_path: .opencode/kb_overlay
+    cache_dir: data/kernel_kb_cache
+  resolver:
+    max_entries: 8
+    enable_path_match: true
+    enable_symbol_match: true
+    enable_subsystem_match: true
+    enable_vector_fallback: false
+    include_global_entries: true
+  retrieval:
+    preload_for_pipeline: true
+    expose_mcp_tool: true
+    include_summary_in_prompt: true
+    max_summary_chars: 4000
+  ranking:
+    exact_file_weight: 120
+    deep_path_prefix_weight: 100
+    exact_symbol_weight: 95
+    subsystem_weight: 70
+    cross_cutting_weight: 50
+    global_weight: 20
+  limits:
+    max_prompt_files: 6
+    max_total_prompt_chars: 12000

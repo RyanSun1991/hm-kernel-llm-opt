@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import ast
+import hashlib
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Iterable
 
 from llama_index.core import (
     PropertyGraphIndex,
@@ -26,7 +29,9 @@ from hmopt.core.config import AppConfig
 from hmopt.indexing.clangd_client import ClangdConfig as LspClangdConfig
 from hmopt.indexing.clangd_indexer import CodeIndex, CodeChunk, index_kernel_code
 from hmopt.indexing.runtime_ingestion import build_runtime_nodes
+from hmopt.indexing.mcp_agent import MCPToolAgent, MCPToolAgentConfig
 from hmopt.storage.db.engine import init_engine, session_scope
+from hmopt.storage.db import models
 
 
 from llama_index.graph_stores.neo4j.neo4j_property_graph import Neo4jPropertyGraphStore
@@ -81,26 +86,19 @@ def _load_prompt_file(path: Optional[Path]) -> Optional[str]:
 
 
 def _load_query_text(query: str) -> str:
-    """Load query content from a file path or @path shorthand."""
     if not query:
-        return query
-    raw = query.strip()
-    if raw.startswith("@"):
-        candidate = raw[1:].strip()
-        if candidate:
-            path = Path(candidate)
-            if path.exists() and path.is_file():
-                try:
-                    return path.read_text(encoding="utf-8", errors="ignore").strip()
-                except OSError as exc:
-                    logger.warning("Failed to read query file %s: %s", path, exc)
-                    return query
-    path = Path(raw)
+        return ""
+    candidate = query[1:] if query.startswith("@") else query
+    path = Path(candidate)
     if path.exists() and path.is_file():
+        content = _load_prompt_file(path)
+        if content:
+            return content
         try:
-            return path.read_text(encoding="utf-8", errors="ignore").strip()
+            return path.read_text(encoding="utf-8").strip()
         except OSError as exc:
             logger.warning("Failed to read query file %s: %s", path, exc)
+            return query
     return query
 
 
@@ -148,7 +146,7 @@ def _build_llama_models(config: AppConfig) -> tuple[OpenAILike, OpenAIEmbeddingL
                     api_key=config.llm.api_key,
                     api_base=config.llm.base_url,
                     timeout = 120,
-                    max_tokens=2048,
+                    max_tokens= 8192,
                     temperature=0)
     embed = OpenAIEmbeddingLike(
         model=config.llm.embedding_model,
@@ -156,6 +154,31 @@ def _build_llama_models(config: AppConfig) -> tuple[OpenAILike, OpenAIEmbeddingL
         api_key=config.llm.api_key,
     )
     return llm, embed
+
+
+def _build_mcp_agent(config: AppConfig) -> MCPToolAgent | None:
+    mcp_cfg = getattr(config.indexing, "mcp", None)
+    if not mcp_cfg or not mcp_cfg.enabled:
+        return None
+    return MCPToolAgent(
+        MCPToolAgentConfig(
+            base_url=mcp_cfg.base_url,
+            api_key=mcp_cfg.api_key,
+            model=mcp_cfg.model,
+            timeout_sec=mcp_cfg.timeout_sec,
+            tool_name=mcp_cfg.tool_name,
+            top_k=mcp_cfg.top_k,
+            mcp_base_url=mcp_cfg.mcp_base_url,
+            mcp_api_key=mcp_cfg.mcp_api_key,
+            graph_tool_name=mcp_cfg.graph_tool_name,
+            hotspot_tool_name=mcp_cfg.hotspot_tool_name,
+            default_scenario=mcp_cfg.default_scenario,
+            graph_depth=mcp_cfg.graph_depth,
+            max_snippets=mcp_cfg.max_snippets,
+            max_chars=mcp_cfg.max_chars,
+            response_format=mcp_cfg.response_format,
+        )
+    )
 
 def _embedding_metadata_path(persist_dir: Path) -> Path:
     return persist_dir / "embedding_meta.json"
@@ -179,10 +202,13 @@ def _persist_embedding_metadata(
     }
     if index_id:
         metadata["index_id"] = index_id
-    metadata_path.write_text(
-        json.dumps(metadata, indent=2)
-        + "\n"
-    )
+    try:
+        metadata_path.write_text(
+            json.dumps(metadata, indent=2)
+            + "\n"
+        )
+    except PermissionError as exc:
+        logger.warning("Failed to persist embedding metadata at %s: %s", metadata_path, exc)
 
 
 def _load_embedding_metadata(persist_dir: Path) -> Optional[dict]:
@@ -194,6 +220,102 @@ def _load_embedding_metadata(persist_dir: Path) -> Optional[dict]:
     except json.JSONDecodeError:
         logger.warning("Failed to parse embedding metadata at %s", metadata_path)
         return None
+
+def _safe_storage_persist(storage: StorageContext, persist_dir: Path) -> bool:
+    try:
+        persist_dir.mkdir(parents=True, exist_ok=True)
+        storage.persist(persist_dir=str(persist_dir))
+        return True
+    except PermissionError as exc:
+        logger.warning("Skipping local index persistence due to permission error at %s: %s", persist_dir, exc)
+        return False
+    except OSError as exc:
+        logger.warning("Skipping local index persistence due to OS error at %s: %s", persist_dir, exc)
+        return False
+
+
+def _symbol_manifest_path(persist_dir: Path) -> Path:
+    return persist_dir / "symbol_manifest.json"
+
+
+def _load_symbol_manifest(persist_dir: Path) -> dict[str, str]:
+    path = _symbol_manifest_path(persist_dir)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse symbol manifest at %s", path)
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(key): str(value) for key, value in data.items()}
+
+
+def _persist_symbol_manifest(persist_dir: Path, manifest: dict[str, str]) -> None:
+    _symbol_manifest_path(persist_dir).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+
+def _node_fingerprint(node: TextNode) -> str:
+    metadata = dict(node.metadata or {})
+    metadata.pop("content_hash", None)
+    payload = {
+        "text": node.text,
+        "metadata": metadata,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _delete_code_symbol_nodes(vector_store: Neo4jVectorStore, node_label: str, symbol_ids: Iterable[str]) -> None:
+    symbol_ids = [sid for sid in symbol_ids if sid]
+    if not symbol_ids:
+        return
+    vector_store.database_query(
+        f"MATCH (n:`{node_label}`) WHERE n.symbol_id IN $symbol_ids DETACH DELETE n",
+        {"symbol_ids": symbol_ids},
+    )
+    vector_store.database_query(
+        "MATCH (s:symbol) WHERE s.name IN $symbol_ids DETACH DELETE s",
+        {"symbol_ids": symbol_ids},
+    )
+
+
+def _delete_code_summary_nodes(vector_store: Neo4jVectorStore, node_label: str) -> None:
+    vector_store.database_query(
+        f"MATCH (n:`{node_label}`) WHERE n.type IN ['file_summary', 'symbol_relations'] DETACH DELETE n"
+    )
+
+
+def _prepare_incremental_code_nodes(
+    nodes: list[TextNode],
+    previous_manifest: dict[str, str],
+) -> tuple[list[TextNode], list[str], list[str], list[str], list[TextNode], dict[str, str]]:
+    symbol_nodes: list[TextNode] = []
+    summary_nodes: list[TextNode] = []
+    unchanged_symbol_ids: list[str] = []
+    changed_symbol_ids: list[str] = []
+    current_manifest: dict[str, str] = {}
+
+    for node in nodes:
+        node_type = (node.metadata or {}).get("type")
+        if node_type != "code":
+            summary_nodes.append(node)
+            continue
+        symbol_id = str((node.metadata or {}).get("symbol_id") or node.node_id or "")
+        if not symbol_id:
+            symbol_nodes.append(node)
+            continue
+        fingerprint = _node_fingerprint(node)
+        current_manifest[symbol_id] = fingerprint
+        if previous_manifest.get(symbol_id) == fingerprint:
+            unchanged_symbol_ids.append(symbol_id)
+            continue
+        changed_symbol_ids.append(symbol_id)
+        symbol_nodes.append(node)
+
+    removed_symbol_ids = [symbol_id for symbol_id in previous_manifest if symbol_id not in current_manifest]
+    return symbol_nodes, removed_symbol_ids, unchanged_symbol_ids, changed_symbol_ids, summary_nodes, current_manifest
 
 
 def _infer_embedding_dimension(embed: OpenAIEmbeddingLike) -> int:
@@ -266,6 +388,9 @@ def _storage_context(
     if config.indexing.neo4j.enabled and Neo4jPropertyGraphStore and Neo4jVectorStore:
         if embedding_dimension is None:
             raise RuntimeError("Embedding dimension is required for Neo4j vector store usage.")
+        print(config.indexing.neo4j.uri)
+        print(config.indexing.neo4j.user)
+        print(config.indexing.neo4j.password)
         property_graph_store = Neo4jPropertyGraphStore(
             url=config.indexing.neo4j.uri,
             username=config.indexing.neo4j.user,
@@ -333,6 +458,18 @@ def _reset_neo4j_vector_index(
         logger.warning("Failed to delete Neo4j nodes for %s: %s", node_label, exc)
 
 
+def _stable_text_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _normalized_chunk_text(chunk: CodeChunk, *, max_lines: int = 120) -> str:
+    lines = chunk.text.splitlines()
+    if max_lines and len(lines) > max_lines:
+        lines = lines[:max_lines]
+    normalized = "\n".join(line.rstrip() for line in lines).strip()
+    return normalized
+
+
 def _code_header(chunk: CodeChunk) -> str:
     detail = f" {chunk.detail}" if chunk.detail else ""
     return (
@@ -340,14 +477,18 @@ def _code_header(chunk: CodeChunk) -> str:
         f"({chunk.path}:{chunk.start_line}-{chunk.end_line}){detail}"
     )
 
-
 def _index_to_nodes(index: CodeIndex) -> list[TextNode]:
     nodes: list[TextNode] = []
+    print("len(index.chunks) : " + str(len(index.chunks)))
+    print("len(index.file_summaries) : " + str(len(index.file_summaries)))
+    print("len(index.relation_summaries) : " + str(len(index.relation_summaries)))
     for chunk in index.chunks:
+        normalized_text = _normalized_chunk_text(chunk)
+        body = f"{_code_header(chunk)}\n{normalized_text}"
         nodes.append(
             TextNode(
                 id_=chunk.symbol_id,
-                text=f"{_code_header(chunk)}\n{chunk.text}",
+                text=body,
                 metadata={
                     "type": "code",
                     "symbol_name": chunk.symbol_name,
@@ -360,30 +501,92 @@ def _index_to_nodes(index: CodeIndex) -> list[TextNode]:
                     "parser": chunk.parser,
                     "container": chunk.container,
                     "detail": chunk.detail,
+                    "content_hash": _stable_text_hash(body),
                 },
             )
         )
     for summary in index.file_summaries:
+        file_summary_id = f"file_summary::{summary.path}"
+        text = summary.text.strip()
         nodes.append(
             TextNode(
-                text=summary.text,
-                metadata={"type": "file_summary", "path": str(summary.path)},
+                id_=file_summary_id,
+                text=text,
+                metadata={
+                    "type": "file_summary",
+                    "path": str(summary.path),
+                    "symbol_id": file_summary_id,
+                    "symbol_name": str(summary.path),
+                    "symbol_kind": "file_summary",
+                    "content_hash": _stable_text_hash(text),
+                },
             )
         )
     for summary in index.relation_summaries:
+        relation_id = f"symbol_relations::{summary.symbol_id}"
+        text = summary.text.strip()
         nodes.append(
             TextNode(
-                text=summary.text,
+                id_=relation_id,
+                text=text,
                 metadata={
                     "type": "symbol_relations",
                     "symbol_id": summary.symbol_id,
                     "symbol_name": summary.symbol_name,
                     "symbol_kind": summary.symbol_kind,
                     "path": summary.path,
+                    "content_hash": _stable_text_hash(text),
                 },
             )
         )
     return nodes
+
+
+def _filter_unchanged_nodes_by_hash(
+    storage: StorageContext,
+    nodes: list[TextNode],
+    *,
+    node_label: str,
+    batch_size: int = 500,
+) -> tuple[list[TextNode], int]:
+    vector_store = getattr(storage, "vector_store", None)
+    if not vector_store or not nodes:
+        return nodes, 0
+
+    known_hashes: dict[str, str] = {}
+    node_ids = [node.node_id for node in nodes if node.node_id]
+    for offset in range(0, len(node_ids), batch_size):
+        batch = node_ids[offset : offset + batch_size]
+        if not batch:
+            continue
+        rows = vector_store.database_query(
+            (
+                f"MATCH (c:`{node_label}`) "
+                "WHERE c.id IN $ids "
+                "RETURN c.id AS id, properties(c) AS props"
+            ),
+            params={"ids": batch},
+        )
+        for row in rows or []:
+            row_id = row.get("id")
+            if not row_id:
+                continue
+            props = row.get("props") or {}
+            known_hashes[str(row_id)] = str(props.get("content_hash") or "")
+
+    upsert_nodes: list[TextNode] = []
+    skipped = 0
+    for node in nodes:
+        node_id = node.node_id
+        node_hash = str((getattr(node, "metadata", {}) or {}).get("content_hash") or "")
+        if not node_hash:
+            upsert_nodes.append(node)
+            continue
+        if known_hashes.get(node_id) == node_hash:
+            skipped += 1
+            continue
+        upsert_nodes.append(node)
+    return upsert_nodes, skipped
 
 def _build_graph_entities(index: CodeIndex) -> tuple[list[EntityNode], list[Relation]]:
     nodes: dict[str, EntityNode] = {}
@@ -480,14 +683,13 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
     paths = _index_paths(config)
     paths.code_dir.mkdir(parents=True, exist_ok=True)
     llm, embed = _build_llama_models(config)
-    embed_dim = _infer_embedding_dimension(embed)
     neo4j_cfg = _neo4j_index_config("code")
-    _reset_neo4j_vector_index(
-        config,
-        embedding_dimension=embed_dim,
-        index_name=neo4j_cfg.index_name,
-        node_label=neo4j_cfg.node_label,
-    )
+    # _reset_neo4j_vector_index(
+    #     config,
+    #     embedding_dimension=embed_dim,
+    #     index_name=neo4j_cfg.index_name,
+    #     node_label=neo4j_cfg.node_label,
+    # )
 
     clangd_cfg = LspClangdConfig(
         binary=config.indexing.clangd.binary,
@@ -521,6 +723,18 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
             summary = llm.complete(f"Summarize the following kernel code:\n\n{node.text}")
             node.text = f"// [LLM SUMMARY]\n{summary.text}\n\n{node.text}"
 
+    previous_manifest = _load_symbol_manifest(paths.code_dir)
+    (
+        symbol_nodes_to_upsert,
+        removed_symbol_ids,
+        unchanged_symbol_ids,
+        changed_symbol_ids,
+        summary_nodes,
+        current_manifest,
+    ) = _prepare_incremental_code_nodes(nodes, previous_manifest)
+
+    embed_dim = _infer_embedding_dimension(embed)
+
     storage = _storage_context(
         config,
         paths.code_dir,
@@ -528,19 +742,86 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
         index_name=neo4j_cfg.index_name,
         node_label=neo4j_cfg.node_label,
     )
-    vector_index = VectorStoreIndex(nodes, storage_context=storage, embed_model=embed)
+    # vector_index = VectorStoreIndex(nodes, storage_context=storage, embed_model=embed)
+    vector_store = storage.vector_store if isinstance(storage.vector_store, Neo4jVectorStore) else None
+    if vector_store:
+        _delete_code_symbol_nodes(
+            vector_store,
+            neo4j_cfg.node_label,
+            [*changed_symbol_ids, *removed_symbol_ids],
+        )
+
+    nodes_to_insert = [*symbol_nodes_to_upsert, *summary_nodes]
+    vector_index: VectorStoreIndex | None = None
+    if nodes_to_insert:
+        # vector_index = VectorStoreIndex(nodes_to_insert, storage_context=storage, embed_model=embed)
+        nodes_to_upsert, skipped_unchanged = _filter_unchanged_nodes_by_hash(
+            storage,
+            nodes_to_insert,
+            node_label=neo4j_cfg.node_label,
+        )
+        if skipped_unchanged:
+            logger.info(
+                "Skipping unchanged nodes by content_hash: skipped=%d upsert=%d total=%d",
+                skipped_unchanged,
+                len(nodes_to_upsert),
+                len(nodes_to_insert),
+            )
+        if nodes_to_upsert:
+            vector_index = VectorStoreIndex(nodes_to_upsert, storage_context=storage, embed_model=embed)
+        else:
+            vector_index = _load_index(
+                config,
+                paths.code_dir,
+                embedding_dimension=embed_dim,
+                index_name=neo4j_cfg.index_name,
+                node_label=neo4j_cfg.node_label,
+                embed_model=embed,
+            )
+
+    affected_symbol_ids = {str((node.metadata or {}).get("symbol_id") or "") for node in symbol_nodes_to_upsert}
+    affected_symbol_ids.discard("")
+
     if config.indexing.neo4j.enabled:
-        _upsert_clangd_graph(storage, code_index, nodes)
-    storage.persist(persist_dir=str(paths.code_dir))
+        # _upsert_clangd_graph(storage, code_index, nodes)
+        graph_index = CodeIndex(
+            chunks=[chunk for chunk in code_index.chunks if chunk.symbol_id in affected_symbol_ids],
+            relations=[
+                rel
+                for rel in code_index.relations
+                if rel.src_id in affected_symbol_ids or rel.dst_id in affected_symbol_ids
+            ],
+            file_summaries=code_index.file_summaries,
+            relation_summaries=code_index.relation_summaries,
+        )
+        _upsert_clangd_graph(storage, graph_index, nodes_to_insert)
+
+    _safe_storage_persist(storage, paths.code_dir)
+    _persist_symbol_manifest(paths.code_dir, current_manifest)
+    previous_embedding_meta = _load_embedding_metadata(paths.code_dir) or {}
     _persist_embedding_metadata(
         paths.code_dir,
         model=config.llm.embedding_model,
         dimension=embed_dim,
         index_name=neo4j_cfg.index_name,
         node_label=neo4j_cfg.node_label,
-        index_id=vector_index.index_id,
+        index_id=(vector_index.index_id if vector_index else previous_embedding_meta.get("index_id")),
     )
-    logger.info("Kernel code index built: nodes=%d", len(nodes))
+    summary_total = len(summary_nodes)
+    symbol_total = len(nodes) - summary_total
+    symbol_inserted = len(nodes_to_upsert) - summary_total if nodes_to_insert else 0
+    symbol_inserted = max(symbol_inserted, 0)
+    logger.info(
+        "Kernel code index built incrementally: total=%d symbols(total=%d inserted=%d unchanged=%d changed=%d removed=%d) summaries(total=%d)",
+        len(nodes),
+        symbol_total,
+        symbol_inserted,
+        len(unchanged_symbol_ids),
+        len(changed_symbol_ids),
+        len(removed_symbol_ids),
+        summary_total,
+    )
+    # logger.info("Kernel code index built: nodes=%d", len(nodes))
     return paths
 
 
@@ -550,12 +831,12 @@ def build_runtime_index(config: AppConfig, run_id: str) -> IndexPaths:
     llm, embed = _build_llama_models(config)
     embed_dim = _infer_embedding_dimension(embed)
     neo4j_cfg = _neo4j_index_config("runtime")
-    _reset_neo4j_vector_index(
-        config,
-        embedding_dimension=embed_dim,
-        index_name=neo4j_cfg.index_name,
-        node_label=neo4j_cfg.node_label,
-    )
+    # _reset_neo4j_vector_index(
+    #     config,
+    #     embedding_dimension=embed_dim,
+    #     index_name=neo4j_cfg.index_name,
+    #     node_label=neo4j_cfg.node_label,
+    # )
     engine = init_engine(config.storage.db_url, schema_path=Path("src/hmopt/storage/db/schema.sql"))
     with session_scope(engine) as session:
         nodes = build_runtime_nodes(
@@ -576,7 +857,8 @@ def build_runtime_index(config: AppConfig, run_id: str) -> IndexPaths:
         embed_model=embed,
         store_nodes_override=True,
     )
-    storage.persist(persist_dir=str(paths.runtime_dir))
+    # storage.persist(persist_dir=str(paths.runtime_dir))
+    _safe_storage_persist(storage, paths.runtime_dir)
     _persist_embedding_metadata(
         paths.runtime_dir,
         model=config.llm.embedding_model,
@@ -648,15 +930,109 @@ def _docstore_has_nodes(storage: StorageContext) -> bool:
         return False
 
 
+def lookup_code_symbols(config: AppConfig, symbols: Iterable[str]) -> dict[str, dict]:
+    """Lookup symbol metadata (path/lines) from the persisted code index."""
+    symbol_list = [s for s in symbols if s]
+    if not symbol_list:
+        return {}
+    paths = _index_paths(config)
+    if not paths.code_dir.exists():
+        logger.warning("Code index not found at %s", paths.code_dir)
+        return {}
+    targets = set(symbol_list)
+    best: dict[str, dict] = {}
+    scores: dict[str, int] = {}
+
+    def _update(symbol: str, score: int, metadata: dict) -> None:
+        if score < scores.get(symbol, -1):
+            return
+        scores[symbol] = score
+        best[symbol] = {
+            "symbol_name": metadata.get("symbol_name"),
+            "symbol_qualname": metadata.get("symbol_qualname"),
+            "path": metadata.get("path"),
+            "start_line": metadata.get("start_line"),
+            "end_line": metadata.get("end_line"),
+        }
+
+    try:
+        storage = StorageContext.from_defaults(persist_dir=str(paths.code_dir))
+        docs = getattr(storage.docstore, "docs", {}) or {}
+        remaining = set(targets)
+        for node in docs.values():
+            metadata = getattr(node, "metadata", {}) if node else {}
+            if metadata.get("type") != "code":
+                continue
+            name = metadata.get("symbol_name")
+            qual = metadata.get("symbol_qualname")
+            if name in remaining:
+                _update(name, 2, metadata)
+            if qual in remaining:
+                _update(qual, 3, metadata)
+            if remaining:
+                for sym in list(remaining):
+                    if not sym or not qual:
+                        continue
+                    if sym in qual:
+                        _update(sym, 1, metadata)
+            if len(best) >= len(targets):
+                break
+    except Exception as exc:
+        logger.warning("Failed to scan local code index: %s", exc)
+
+    missing = [sym for sym in targets if sym not in best]
+    if missing and config.indexing.neo4j.enabled:
+        try:
+            code_index_cfg = _neo4j_index_config("code")
+            metadata = _load_embedding_metadata(paths.code_dir) or {}
+            embed_dim = metadata.get("dimension")
+            if embed_dim:
+                vector_store = Neo4jVectorStore(
+                    username=config.indexing.neo4j.user,
+                    password=config.indexing.neo4j.password,
+                    url=config.indexing.neo4j.uri,
+                    database=config.indexing.neo4j.database,
+                    embedding_dimension=int(embed_dim),
+                    index_name=code_index_cfg.index_name,
+                    node_label=code_index_cfg.node_label,
+                )
+                cypher = (
+                    "MATCH (s:symbol) "
+                    "WHERE s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols "
+                    "RETURN s.symbol_name as symbol_name, s.symbol_qualname as symbol_qualname, "
+                    "s.path as path, s.start_line as start_line, s.end_line as end_line "
+                    "LIMIT $limit"
+                )
+                records = vector_store.database_query(
+                    cypher,
+                    {"symbols": missing, "limit": max(10, len(missing) * 2)},
+                )
+                for rec in records or []:
+                    name = rec.get("symbol_name")
+                    qual = rec.get("symbol_qualname")
+                    if name and name in missing:
+                        _update(name, 2, rec)
+                    if qual and qual in missing:
+                        _update(qual, 3, rec)
+        except Exception as exc:
+            logger.warning("Neo4j symbol lookup failed: %s", exc)
+
+    return best
+
+
 def route_query(
     config: AppConfig,
     query: str,
     mode: str = "auto",
     prompt_file: Optional[Path] = None,
     run_id: Optional[str] = None,
+    focus_symbols: Optional[list[str]] = None,
+    hotspot_top_k: Optional[int] = None,
 ) -> str:
+    query_text = _load_query_text(query)
     paths = _index_paths(config, run_id=run_id)
     llm, embed = _build_llama_models(config)
+    mcp_agent = _build_mcp_agent(config)
     code_index_cfg = _neo4j_index_config("code")
     runtime_index_cfg = _neo4j_index_config("runtime")
     code_embed_dim = _embedding_dimension_for_query(paths.code_dir, embed)
@@ -664,102 +1040,160 @@ def route_query(
 
     prompt_path = prompt_file or config.indexing.query_prompt_file
     prompt_template = _load_prompt_file(prompt_path)
-    query_text = _load_query_text(query)
     max_code_snippets = 3
     max_code_chars = 1600
-    max_runtime_chars = 6000
-    max_graph_lines = config.indexing.query_graph_expand_limit
+    max_runtime_chars = 60000
 
-    def _escape_cypher_value(value: str) -> str:
-        return value.replace("\\", "\\\\").replace("'", "\\'")
+    max_query_chars = max(0, (llm.metadata.context_window - max(llm.metadata.num_output, 0) - 256) * 4)
 
-    def _cypher_list(values: Sequence[str]) -> str:
-        return "[" + ", ".join(f"'{_escape_cypher_value(v)}'" for v in values) + "]"
-
-    def _expand_graph_context(symbols: list[str]) -> str:
-        if not config.indexing.neo4j.enabled or not Neo4jVectorStore:
+    def _truncate_text(text: str, max_chars: int) -> str:
+        if max_chars <= 0 or not text:
             return ""
-        if not symbols:
-            return ""
-        max_symbols = config.indexing.query_graph_expand_symbols
-        depth = max(1, config.indexing.query_graph_expand_depth)
-        rel_types = config.indexing.query_graph_relation_types or []
-        limited_symbols = symbols[:max_symbols]
-        symbol_list = _cypher_list(limited_symbols)
-        rel_filter = ""
-        if rel_types:
-            rel_list = _cypher_list(rel_types)
-            rel_filter = f"WHERE all(rel in r WHERE type(rel) IN {rel_list})"
+        if len(text) <= max_chars:
+            return text
+        return f"{text[:max_chars]}\n...[truncated {len(text) - max_chars} chars]"
 
-        vector_store = Neo4jVectorStore(
-            username=config.indexing.neo4j.user,
-            password=config.indexing.neo4j.password,
-            url=config.indexing.neo4j.uri,
-            database=config.indexing.neo4j.database,
-            embedding_dimension=code_embed_dim,
-            index_name=code_index_cfg.index_name,
-            node_label=code_index_cfg.node_label,
-        )
-        lines: list[str] = []
-        try:
-            outgoing_query = (
-                "MATCH (s) "
-                f"WHERE s.symbol_name IN {symbol_list} OR s.symbol_qualname IN {symbol_list} "
-                f"MATCH p=(s)-[r*1..{depth}]->(t) "
-                f"{rel_filter} "
-                "RETURN s.symbol_name AS src, [rel IN r | type(rel)] AS rels, "
-                "t.symbol_name AS dst, t.symbol_kind AS dst_kind, t.path AS dst_path "
-                f"LIMIT {max_graph_lines}"
+    def _trim_contexts(runtime_context: str, code_context: str) -> tuple[str, str]:
+        if max_query_chars <= 0:
+            return "", ""
+        if prompt_template:
+            base_prompt = _format_query_with_prompt(
+                query=query_text,
+                prompt_template=prompt_template,
+                runtime_context="",
+                code_context="",
             )
-            outgoing = vector_store.database_query(outgoing_query)
-            for row in outgoing or []:
-                rels = "->".join(row.get("rels", [])) if isinstance(row, dict) else ""
-                src = row.get("src") if isinstance(row, dict) else None
-                dst = row.get("dst") if isinstance(row, dict) else None
-                dst_kind = row.get("dst_kind") if isinstance(row, dict) else None
-                dst_path = row.get("dst_path") if isinstance(row, dict) else None
-                if src and dst:
-                    lines.append(f"- {src} -[{rels}]-> {dst} ({dst_kind}) {dst_path or ''}".strip())
-
-            incoming_query = (
-                "MATCH (t) "
-                f"WHERE t.symbol_name IN {symbol_list} OR t.symbol_qualname IN {symbol_list} "
-                f"MATCH p=(s)-[r*1..{depth}]->(t) "
-                f"{rel_filter} "
-                "RETURN s.symbol_name AS src, [rel IN r | type(rel)] AS rels, "
-                "t.symbol_name AS dst, t.symbol_kind AS dst_kind, t.path AS dst_path "
-                f"LIMIT {max_graph_lines}"
+        else:
+            base_prompt = (
+                "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
+                "Runtime findings:\n\n\n\n"
+                f"Question: {query_text}"
             )
-            incoming = vector_store.database_query(incoming_query)
-            for row in incoming or []:
-                rels = "->".join(row.get("rels", [])) if isinstance(row, dict) else ""
-                src = row.get("src") if isinstance(row, dict) else None
-                dst = row.get("dst") if isinstance(row, dict) else None
-                dst_kind = row.get("dst_kind") if isinstance(row, dict) else None
-                dst_path = row.get("dst_path") if isinstance(row, dict) else None
-                if src and dst:
-                    line = f"- {src} -[{rels}]-> {dst} ({dst_kind}) {dst_path or ''}".strip()
-                    if line not in lines:
-                        lines.append(line)
-        except Exception as exc:
-            logger.warning("Graph expansion failed: %s", exc)
-            return ""
-        if not lines:
-            return ""
-        return "Graph relations:\n" + "\n".join(lines[:max_graph_lines])
+        remaining = max_query_chars - len(base_prompt)
+        if remaining <= 0:
+            return "", ""
+        if runtime_context and code_context:
+            runtime_budget = int(remaining * 0.6)
+            code_budget = remaining - runtime_budget
+        elif runtime_context:
+            runtime_budget = remaining
+            code_budget = 0
+        else:
+            runtime_budget = 0
+            code_budget = remaining
+        return _truncate_text(runtime_context, runtime_budget), _truncate_text(code_context, code_budget)
 
-    def _parse_evidence_pack(text: str) -> Optional[dict]:
-        if not text:
+    def _load_evidence_pack_from_path(metadata: Optional[dict]) -> Optional[dict]:
+        if not metadata:
             return None
+        path = metadata.get("path")
+        if not path or not isinstance(path, str):
+            return None
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+                payload = handle.read().strip()
+        except OSError:
+            return None
+        if not payload:
+            return None
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+
+    def _parse_evidence_pack(text: str, *, metadata: Optional[dict] = None) -> Optional[dict]:
+        if not text:
+            return _load_evidence_pack_from_path(metadata)
         prefix = "evidence_pack"
+        payload = text
         if text.startswith(prefix):
             payload = text[len(prefix):].strip()
-            if payload:
-                try:
-                    return json.loads(payload)
-                except json.JSONDecodeError:
-                    return None
-        return None
+        if payload:
+            try:
+                return json.loads(payload)
+            except json.JSONDecodeError:
+                truncated_marker = "\n\n...[truncated"
+                if truncated_marker in payload:
+                    payload = payload.split(truncated_marker, 1)[0].strip()
+                    if payload:
+                        try:
+                            return json.loads(payload)
+                        except json.JSONDecodeError:
+                            pass
+        return _load_evidence_pack_from_path(metadata)
+
+    def _format_call_stack_line(stack: dict) -> str:
+        direction = stack.get("direction", "call")
+        frames = stack.get("frames")
+        total_events = stack.get("total_events")
+        thread_id = stack.get("thread_id")
+        if isinstance(frames, list) and frames:
+            frame_parts = []
+            for frame in frames:
+                if not isinstance(frame, dict):
+                    continue
+                symbol = frame.get("symbol")
+                if not symbol:
+                    continue
+                details = []
+                self_events = frame.get("self_events")
+                if self_events is not None:
+                    details.append(f"self={self_events}")
+                sub_events = frame.get("sub_events")
+                if sub_events is not None:
+                    details.append(f"sub={sub_events}")
+                frame_thread_id = frame.get("thread_id", thread_id)
+                # if frame_thread_id is not None:
+                #     details.append(f"thread_id={frame_thread_id}")
+                details_text = f" ({', '.join(details)})" if details else ""
+                frame_parts.append(f"{symbol}{details_text}")
+            frames_text = " -> ".join(frame_parts)
+            stack_details = []
+            if total_events is not None:
+                stack_details.append(f"total_events={total_events}")
+            if thread_id is not None:
+                stack_details.append(f"thread_id={thread_id}")
+            stack_text = f" ({', '.join(stack_details)})" if stack_details else ""
+            return f"    ({direction}) {frames_text}{stack_text}"
+        path = " -> ".join(stack.get("stack", []))
+        details = []
+        if stack.get("self_events") is not None:
+            details.append(f"self_events={stack.get('self_events')}")
+        if total_events is not None:
+            details.append(f"total_events={total_events}")
+        if thread_id is not None:
+            details.append(f"thread_id={thread_id}")
+        details_text = f" ({', '.join(details)})" if details else ""
+        return f"    ({direction}) {path}{details_text}"
+
+    def _merge_call_stacks(primary: list[dict], secondary: list[dict]) -> list[dict]:
+        if not secondary:
+            return primary
+        merged = list(primary)
+        seen: set[tuple[str, tuple[str, ...], str | None]] = set()
+        for stack in primary:
+            if not isinstance(stack, dict):
+                continue
+            path = stack.get("stack") or []
+            if not isinstance(path, list):
+                continue
+            key = (stack.get("direction", "call"), tuple(path), stack.get("thread_id"))
+            seen.add(key)
+        for stack in secondary:
+            if not isinstance(stack, dict):
+                continue
+            path = stack.get("stack") or []
+            if not isinstance(path, list):
+                continue
+            key = (stack.get("direction", "call"), tuple(path), stack.get("thread_id"))
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(stack)
+        return merged
+
 
     def _format_evidence_hotspots(payload: dict) -> list[dict]:
         hotspots_payload = payload.get("hotspots", []) if isinstance(payload, dict) else []
@@ -802,18 +1236,34 @@ def route_query(
                 lines.append("  Call paths:")
                 for stack in call_stacks[:3]:
                     if isinstance(stack, dict):
-                        path = " -> ".join(stack.get("stack", []))
-                        direction = stack.get("direction", "call")
-                        lines.append(f"    ({direction}) {path}")
+                        lines.append(_format_call_stack_line(stack))
+                        # path = " -> ".join(stack.get("stack", []))
+                        # direction = stack.get("direction", "call")
+                        # lines.append(f"    ({direction}) {path}")
         return lines
+
 
     def _filter_runtime_hotspots(items: list[dict], focus_symbol: str | None) -> list[dict]:
         if not focus_symbol:
             return items
         return [item for item in items if item.get("symbol") == focus_symbol]
 
+    def _dedupe_hotspots(items: list[dict]) -> list[dict]:
+        by_symbol: dict[str, dict] = {}
+        for item in items:
+            symbol = item.get("symbol")
+            if not symbol:
+                continue
+            existing = by_symbol.get(symbol)
+            if not existing:
+                by_symbol[symbol] = item
+                continue
+            if not existing.get("call_stacks") and item.get("call_stacks"):
+                by_symbol[symbol] = item
+        return list(by_symbol.values())
+
     def _collect_runtime_hotspots(source_nodes: list) -> tuple[list[dict], list[dict]]:
-        hotspots = []
+        hotspots: list[dict] = []
         evidence_hotspots: list[dict] = []
         for source in source_nodes:
             node = getattr(source, "node", source)
@@ -821,7 +1271,7 @@ def route_query(
             node_type = metadata.get("type")
             text = getattr(node, "text", "")
             call_stacks: list = []
-            if node_type == "runtime_hotspot":
+            if node_type in ("runtime_hotspot", "runtime_symbol"):
                 call_stacks_raw = metadata.get("call_stacks")
                 if isinstance(call_stacks_raw, str):
                     try:
@@ -843,15 +1293,14 @@ def route_query(
                 )
             elif node_type == "evidence_pack":
                 text = getattr(node, "text", "")
-                payload = _parse_evidence_pack(text)
+                payload = _parse_evidence_pack(text, metadata=metadata)
                 if payload:
                     evidence_hotspots.extend(_format_evidence_hotspots(payload))
-        return hotspots, evidence_hotspots
+        return _dedupe_hotspots(hotspots), _dedupe_hotspots(evidence_hotspots)
 
     def _format_runtime_sources(source_nodes: list, *, focus_symbol: str | None) -> str:
         hotspots, evidence_hotspots = _collect_runtime_hotspots(source_nodes)
         metrics = []
-        evidence_lines: list[str] = []
         for source in source_nodes:
             node = getattr(source, "node", source)
             metadata = getattr(node, "metadata", {}) if node else {}
@@ -866,17 +1315,24 @@ def route_query(
                         "text": text,
                     }
                 )
-            elif node_type == "evidence_pack":
-                payload = _parse_evidence_pack(text)
-                if payload:
-                    evidence_lines.extend(_format_evidence_excerpt(payload, focus_symbol))
         lines = []
         if hotspots or evidence_hotspots:
             lines.append("Top runtime hotspots:")
             runtime_items = _filter_runtime_hotspots(hotspots, focus_symbol) or _filter_runtime_hotspots(
                 evidence_hotspots, focus_symbol
             )
-            for item in runtime_items[:1]:
+            if hotspots and evidence_hotspots:
+                evidence_map = {
+                    item.get("symbol"): item for item in _filter_runtime_hotspots(evidence_hotspots, focus_symbol)
+                }
+                for item in runtime_items:
+                    symbol = item.get("symbol")
+                    evidence_item = evidence_map.get(symbol) if symbol else None
+                    if evidence_item and evidence_item.get("call_stacks"):
+                        item["call_stacks"] = _merge_call_stacks(
+                            item.get("call_stacks", []), evidence_item.get("call_stacks", [])
+                        )
+            for item in runtime_items:
                 lines.append(
                     f"- {item.get('symbol')} score={item.get('score')} "
                     f"path={item.get('file_path')} lines={item.get('line_start')}-{item.get('line_end')}"
@@ -884,20 +1340,31 @@ def route_query(
                 call_stacks = item.get("call_stacks", [])
                 if call_stacks:
                     lines.append("  Call paths:")
-                    for stack in call_stacks[:5]:
+
+                    sorted_stacks = sorted(
+                        [stack for stack in call_stacks if isinstance(stack, dict)],
+                        key=lambda s: s.get("total_events") or 0,
+                        reverse=True,
+                    )
+                    top_stacks = sorted_stacks[:20]
+                    batch = top_stacks[:10]
+                    for stack in batch:
+                        if isinstance(stack, str):
+                            stack = ast.literal_eval(stack)
                         if isinstance(stack, dict):
-                            path = " -> ".join(stack.get("stack", []))
-                            direction = stack.get("direction", "call")
-                            lines.append(f"    ({direction}) {path}")
+                            lines.append(_format_call_stack_line(stack))
+
+                    remaining = len(top_stacks) - len(batch)
+                    if remaining > 0:
+                        lines.append(f"  ...and {remaining} more call paths (top 20 by total_events)")
+
+                    # for stack in call_stacks:
         if metrics:
             lines.append("Runtime metrics:")
             for item in metrics:
                 lines.append(
                     f"- {item.get('metric_name')} value={item.get('value')} unit={item.get('unit')}"
                 )
-        if evidence_lines:
-            lines.append("Runtime evidence excerpt:")
-            lines.extend(evidence_lines)
         runtime_text = "\n".join(lines).strip()
         if len(runtime_text) > max_runtime_chars:
             runtime_text = (
@@ -905,6 +1372,74 @@ def route_query(
                 f"...[truncated {len(runtime_text) - max_runtime_chars} chars]"
             )
         return runtime_text
+
+    def _load_artifacts_payloads(session, run_id: str, kind: str) -> list[dict]:
+        artifacts = (
+            session.query(models.Artifact)
+            .filter(models.Artifact.run_id == run_id, models.Artifact.kind == kind)
+            .order_by(models.Artifact.bytes.desc())
+            .all()
+        )
+        payloads: list[dict] = []
+        for art in artifacts:
+            try:
+                raw = Path(art.path).read_text(encoding="utf-8")
+                payload = json.loads(raw)
+                if isinstance(payload, dict) or isinstance(payload, list):
+                    payloads.append(payload)
+            except (OSError, json.JSONDecodeError):
+                continue
+        return payloads
+
+    def _format_flamegraph_symbol_context(
+        session, run_id: str, symbol: str
+    ) -> str:
+        lines: list[str] = []
+        if not symbol:
+            return ""
+        counts_payloads = _load_artifacts_payloads(
+            session, run_id, "flamegraph_symbol_counts"
+        )
+        if not counts_payloads:
+            counts_payloads = _load_artifacts_payloads(
+                session, run_id, "flamegraph_symbol_counts_raw"
+            )
+        score = None
+        for payload in counts_payloads:
+            if isinstance(payload, dict) and symbol in payload:
+                try:
+                    score = float(payload.get(symbol))
+                except (TypeError, ValueError):
+                    score = payload.get(symbol)
+                break
+        if score is not None:
+            lines.append(f"Flamegraph symbol stats: {symbol} score={score}")
+
+        call_stack_payloads = _load_artifacts_payloads(
+            session, run_id, "flamegraph_call_stacks"
+        )
+        call_stacks: list[dict] = []
+        for payload in call_stack_payloads:
+            if isinstance(payload, list):
+                call_stacks.extend([item for item in payload if isinstance(item, dict)])
+        if call_stacks:
+            matching = [
+                stack for stack in call_stacks
+                if symbol in (stack.get("stack") or [])
+                or stack.get("leaf_symbol") == symbol
+            ]
+            if matching:
+                sorted_stacks = sorted(
+                    matching,
+                    key=lambda s: s.get("total_events") or 0,
+                    reverse=True,
+                )
+                lines.append("Flamegraph call paths:")
+                for stack in sorted_stacks[:5]:
+                    lines.append(_format_call_stack_line(stack))
+                if len(sorted_stacks) > 5:
+                    lines.append(f"...and {len(sorted_stacks) - 5} more call paths")
+        return "\n".join(lines).strip()
 
     def _format_code_sources(source_nodes: list, *, include_snippets: bool) -> str:
         if not include_snippets:
@@ -925,20 +1460,6 @@ def route_query(
         if not snippets:
             return ""
         return "Relevant code snippets:\n" + "\n\n".join(snippets)
-
-    def _retrieve_code_sources(text: str) -> list:
-        if not text:
-            return []
-        index = _load_index(
-            config,
-            paths.code_dir,
-            embedding_dimension=code_embed_dim,
-            index_name=code_index_cfg.index_name,
-            node_label=code_index_cfg.node_label,
-            embed_model=embed,
-        )
-        retriever = index.as_retriever(similarity_top_k=config.indexing.query_code_top_k)
-        return retriever.retrieve(text)
 
     def _extract_runtime_symbols(source_nodes: list, *, focus_symbol: str | None) -> list[str]:
         symbols: set[str] = set()
@@ -963,7 +1484,7 @@ def route_query(
                         if stack_symbol and (not focus_symbol or stack_symbol == focus_symbol):
                             symbols.add(stack_symbol)
             text = getattr(node, "text", "")
-            payload = _parse_evidence_pack(text)
+            payload = _parse_evidence_pack(text, metadata=metadata)
             if payload:
                 for item in payload.get("hotspots", []) or []:
                     if not isinstance(item, dict):
@@ -1063,71 +1584,116 @@ def route_query(
         focus_symbol = config.indexing.hotspot_focus_symbol
         hotspots, evidence_hotspots = _collect_runtime_hotspots(source_nodes)
         runtime_items = hotspots or evidence_hotspots
-        if focus_symbol:
+        if focus_symbols:
+            symbol_queue = [s for s in focus_symbols if s]
+        elif focus_symbol:
             symbol_queue = [focus_symbol]
         else:
             seen: set[str] = set()
             symbol_queue = []
-            for item in runtime_items[:20]:
+            top_k = hotspot_top_k or config.indexing.query_hotspot_top_k or config.indexing.hotspot_top_k
+            runtime_items_sorted = sorted(
+                runtime_items, key=lambda item: item.get("score") or 0, reverse=True
+            )
+            for item in runtime_items_sorted[: max(1, int(top_k))]:
                 symbol = item.get("symbol")
                 if symbol and symbol not in seen:
                     seen.add(symbol)
                     symbol_queue.append(symbol)
         if not symbol_queue:
             runtime_context = _format_runtime_sources(source_nodes, focus_symbol=focus_symbol)
-            runtime_context = runtime_context or runtime_response_text
-            code_context = ""
-            if config.indexing.query_code_context_mode == "snippets":
-                code_sources = _retrieve_code_sources(query_text)
-                code_context = _format_code_sources(code_sources, include_snippets=True)
-            graph_context = _expand_graph_context(
-                _extract_runtime_symbols(source_nodes, focus_symbol=focus_symbol)
-            )
+            runtime_context, code_context = _trim_contexts(runtime_context, "")
             combined_query = _format_query_with_prompt(
                 query=query_text,
                 prompt_template=prompt_template,
                 runtime_context=runtime_context,
-                code_context="\n\n".join(
-                    [ctx for ctx in [code_context, graph_context] if ctx]
-                ),
+                code_context=code_context,
             ) if prompt_template else (
                 "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
                 f"Runtime findings:\n{runtime_context}\n\n"
                 f"{code_context}\n\n"
-                f"{graph_context}\n\n"
                 f"Question: {query_text}"
             )
             return str(_graph_engine(paths.code_dir).query(combined_query))
 
         engine = _graph_engine(paths.code_dir)
         responses: list[str] = []
+        code_context_mode = (config.indexing.query_code_context_mode or "snippets").lower()
         for symbol in symbol_queue:
             runtime_context = _format_runtime_sources(source_nodes, focus_symbol=symbol)
             if not runtime_context:
-                runtime_context = runtime_response_text
-            code_context_mode = config.indexing.query_code_context_mode
-            if code_context_mode == "snippets":
-                code_sources = _retrieve_code_sources(symbol or query_text)
-                code_context = _format_code_sources(code_sources, include_snippets=True)
-            else:
-                code_context = _format_code_sources([], include_snippets=False)
-            graph_symbols = _extract_runtime_symbols(source_nodes, focus_symbol=symbol)
-            graph_context = _expand_graph_context(graph_symbols)
+                if run_id:
+                    engine_db = init_engine(
+                        config.storage.db_url,
+                        schema_path=Path("src/hmopt/storage/db/schema.sql"),
+                    )
+                    with session_scope(engine_db) as session:
+                        runtime_context = _format_flamegraph_symbol_context(session, run_id, symbol)
+                if not runtime_context:
+                    runtime_context = runtime_response_text
+            print("runtime_context : ")
+            print(runtime_context)
+            # code_context = (
+            #     "Code snippets omitted to reduce context. Use MCP/RAG retrieval for specific symbols."
+            # )
+            runtime_symbols = _extract_runtime_symbols(source_nodes, focus_symbol = symbol)
+            code_context_parts: list[str] = []
+            include_snippets = code_context_mode in ("snippets", "hybrid")
+            if include_snippets and runtime_symbols:
+                symbol_query = " ".join(runtime_symbols[:30])
+                _ensure_embedding_compat(
+                    paths.code_dir,
+                    embed_model=config.llm.embedding_model,
+                    embed_dim=code_embed_dim,
+                    index_name=code_index_cfg.index_name,
+                    node_label=code_index_cfg.node_label,
+                )
+                code_index = _load_index(
+                    config,
+                    paths.code_dir,
+                    embedding_dimension=code_embed_dim,
+                    index_name=code_index_cfg.index_name,
+                    node_label=code_index_cfg.node_label,
+                    embed_model=embed,
+                )
+                code_nodes = code_index.as_retriever(
+                    similarity_top_k=config.indexing.query_code_top_k
+                ).retrieve(symbol_query)
+                snippet_context = _format_code_sources(code_nodes, include_snippets=True)
+                if snippet_context:
+                    code_context_parts.append(snippet_context)
+            if code_context_mode in ("mcp", "hybrid") and mcp_agent:
+                symbols_hint = ", ".join(runtime_symbols[:15]) if runtime_symbols else symbol
+                mcp_query = (
+                    "Fetch kernel code context for hotspot analysis. "
+                    "Include implementation snippets (function bodies) for the focus symbol and key related "
+                    "symbols. "
+                    f"Focus symbol: {symbol}. Related symbols: {symbols_hint}."
+                )
+                try:
+                    mcp_result = mcp_agent.fetch_context(mcp_query)
+                    if mcp_result.context:
+                        code_context_parts.append(
+                            "MCP retrieved context:\n" + mcp_result.context
+                        )
+                except Exception as exc:
+                    logger.warning("MCP retrieval failed: %s", exc)
+            print("code_context_parts")
+            print(code_context_parts)
+            code_context = "\n\n".join(part for part in code_context_parts if part)
+            runtime_context, code_context = _trim_contexts(runtime_context, code_context)
             if prompt_template:
                 combined_query = _format_query_with_prompt(
                     query=query_text,
                     prompt_template=prompt_template,
                     runtime_context=runtime_context,
-                    code_context="\n\n".join(
-                        [ctx for ctx in [code_context, graph_context] if ctx]
-                    ),
+                    code_context=code_context,
                 )
             else:
                 combined_query = (
                     "Use the runtime findings below to answer the question, and link to relevant code.\n\n"
                     f"Runtime findings:\n{runtime_context}\n\n"
                     f"{code_context}\n\n"
-                    f"{graph_context}\n\n"
                     f"Question: {query_text}"
                 )
             response = str(engine.query(combined_query))
@@ -1151,7 +1717,469 @@ def route_query(
     if mode == "runtime_code":
         return _runtime_to_code_query()
 
+    if run_id or focus_symbols or hotspot_top_k:
+        return _runtime_to_code_query()
+
     keywords_runtime = ["perf", "trace", "runtime", "framegraph", "instruction", "hotspot"]
     if any(k in query_text.lower() for k in keywords_runtime):
         return _runtime_to_code_query()
     return str(_graph_engine(paths.code_dir).query(query_text))
+
+
+
+def retrieve_code_context(
+    config: AppConfig,
+    query: str,
+    *,
+    top_k: Optional[int] = None,
+    max_snippets: int = 8,
+    max_chars: int = 4000,
+    output_format: str = "text",
+    focus_symbols: Optional[list[str]] = None,
+    graph_depth: Optional[int] = None,
+    scenario: str = "general",
+) -> str | dict[str, Any]:
+    """Retrieve forced kernel context (code + graph expansion + rerank)."""
+    if not query:
+        return ""
+    fmt = (output_format or "text").strip().lower()
+    scenario_name = (scenario or "general").strip().lower() or "general"
+    paths = _index_paths(config)
+    _, embed = _build_llama_models(config)
+    code_index_cfg = _neo4j_index_config("code")
+    code_embed_dim = _embedding_dimension_for_query(paths.code_dir, embed)
+    graph_edges: list[dict[str, str | int]] = []
+    relation_weights: dict[str, float] = {
+        "calls": 0.95,
+        "uses_type": 0.35,
+        "uses_macro": 0.25,
+        "contains": 0.2,
+        "related_to": 0.2,
+    }
+    scenario_relation_weights: dict[str, dict[str, float]] = {
+        "implementation": {
+            "contains": 0.4,
+            "uses_type": 0.45,
+        },
+        "call_graph": {
+            "calls": 1.35,
+            "contains": 0.35,
+        },
+        "impact_analysis": {
+            "calls": 1.15,
+            "uses_type": 0.6,
+            "contains": 0.4,
+            "related_to": 0.35,
+        },
+        "hotspot_debug": {
+            "calls": 1.2,
+            "uses_type": 0.55,
+            "uses_macro": 0.4,
+        },
+        "patch_planning": {
+            "calls": 1.2,
+            "uses_type": 0.55,
+            "contains": 0.45,
+            "related_to": 0.4,
+        },
+    }
+    relation_weights.update(scenario_relation_weights.get(scenario_name, {}))
+    graph_relation_bonus: dict[str, float] = {}
+    symbol_relation_counts: dict[str, dict[str, int]] = {}
+    _ensure_embedding_compat(
+        paths.code_dir,
+        embed_model=config.llm.embedding_model,
+        embed_dim=code_embed_dim,
+        index_name=code_index_cfg.index_name,
+        node_label=code_index_cfg.node_label,
+    )
+    index = _load_index(
+        config,
+        paths.code_dir,
+        embedding_dimension=code_embed_dim,
+        index_name=code_index_cfg.index_name,
+        node_label=code_index_cfg.node_label,
+        embed_model=embed,
+    )
+    retriever = index.as_retriever(similarity_top_k=top_k or config.indexing.query_code_top_k)
+    source_nodes = retriever.retrieve(query)
+
+    def _extract_query_symbols(text: str) -> list[str]:
+        tokens = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text)
+        seen: set[str] = set()
+        result: list[str] = []
+        for tok in tokens:
+            if tok in seen:
+                continue
+            seen.add(tok)
+            result.append(tok)
+        return result[:10]
+
+    candidate_symbols: dict[str, dict] = {}
+    vector_scores: dict[str, float] = {}
+    for source in source_nodes:
+        node = getattr(source, "node", source)
+        metadata = getattr(node, "metadata", {}) if node else {}
+        symbol_name = metadata.get("symbol_name")
+        symbol_qual = metadata.get("symbol_qualname")
+        score = getattr(source, "score", 0.0) or 0.0
+        for sym in (symbol_name, symbol_qual):
+            if not sym:
+                continue
+            if sym not in candidate_symbols:
+                candidate_symbols[sym] = {
+                    "symbol": sym,
+                    "metadata": metadata,
+                    "node": node,
+                }
+            vector_scores[sym] = max(vector_scores.get(sym, 0.0), float(score))
+
+    selected_focus_symbols: list[str] = []
+    if focus_symbols:
+        seen_focus: set[str] = set()
+        for sym in focus_symbols:
+            sym_text = (sym or "").strip()
+            if not sym_text or sym_text in seen_focus:
+                continue
+            seen_focus.add(sym_text)
+            selected_focus_symbols.append(sym_text)
+    selected_focus_symbols = selected_focus_symbols[:12]
+
+    query_tokens = _extract_query_symbols(query)
+    if not selected_focus_symbols:
+        for sym in candidate_symbols:
+            if sym in query or sym in query_tokens:
+                selected_focus_symbols.append(sym)
+        if not selected_focus_symbols:
+            selected_focus_symbols = list(candidate_symbols.keys())[:3]
+        if not selected_focus_symbols and query_tokens:
+            selected_focus_symbols = query_tokens[:1]
+
+    depth_map: dict[str, int] = {sym: 0 for sym in selected_focus_symbols}
+    used_graph_depth = graph_depth if graph_depth is not None else (config.indexing.query_graph_top_k or 2)
+    try:
+        used_graph_depth = int(used_graph_depth)
+    except (TypeError, ValueError):
+        used_graph_depth = 2
+    used_graph_depth = max(1, min(4, used_graph_depth))
+
+    if config.indexing.neo4j.enabled and selected_focus_symbols:
+        try:
+            vector_store = Neo4jVectorStore(
+                username=config.indexing.neo4j.user,
+                password=config.indexing.neo4j.password,
+                url=config.indexing.neo4j.uri,
+                database=config.indexing.neo4j.database,
+                embedding_dimension=code_embed_dim,
+                index_name=code_index_cfg.index_name,
+                node_label=code_index_cfg.node_label,
+            )
+            per_hop_limit = 80 if scenario_name in {"call_graph", "impact_analysis", "patch_planning"} else 50
+            frontier = set(selected_focus_symbols)
+            visited = set(selected_focus_symbols)
+            for depth in range(1, used_graph_depth + 1):
+                if not frontier:
+                    break
+                symbols_param = list(frontier)[:20]
+                outgoing = vector_store.database_query(
+                    (
+                        "MATCH (s:symbol)-[r]->(t) "
+                        "WHERE s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols "
+                        "RETURN s.symbol_name as src, s.symbol_qualname as src_qual, "
+                        "type(r) as rel, t.symbol_name as dst, t.symbol_qualname as dst_qual "
+                        "LIMIT $limit"
+                    ),
+                    {"symbols": symbols_param, "limit": per_hop_limit},
+                )
+                incoming = vector_store.database_query(
+                    (
+                        "MATCH (s:symbol)<-[r]-(t) "
+                        "WHERE s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols "
+                        "RETURN t.symbol_name as src, t.symbol_qualname as src_qual, "
+                        "type(r) as rel, s.symbol_name as dst, s.symbol_qualname as dst_qual "
+                        "LIMIT $limit"
+                    ),
+                    {"symbols": symbols_param, "limit": per_hop_limit},
+                )
+                new_frontier: set[str] = set()
+                for rec in (outgoing or []):
+                    src = rec.get("src") or rec.get("src_qual")
+                    dst = rec.get("dst") or rec.get("dst_qual")
+                    if src and dst:
+                        rel_name = str(rec.get("rel") or "related_to")
+                        graph_edges.append(
+                            {"src": src, "dst": dst, "rel": rel_name, "depth": depth}
+                        )
+                        dst_rel_counts = symbol_relation_counts.setdefault(dst, {})
+                        dst_rel_counts[rel_name] = dst_rel_counts.get(rel_name, 0) + 1
+                        rel_weight = relation_weights.get(rel_name, 0.2)
+                        graph_relation_bonus[dst] = (
+                            graph_relation_bonus.get(dst, 0.0) + rel_weight / (1 + depth)
+                        )
+                        if dst not in visited:
+                            visited.add(dst)
+                            depth_map[dst] = depth
+                            new_frontier.add(dst)
+                for rec in (incoming or []):
+                    src = rec.get("src") or rec.get("src_qual")
+                    dst = rec.get("dst") or rec.get("dst_qual")
+                    if src and dst:
+                        rel_name = str(rec.get("rel") or "related_to")
+                        graph_edges.append(
+                            {"src": src, "dst": dst, "rel": rel_name, "depth": depth}
+                        )
+                        src_rel_counts = symbol_relation_counts.setdefault(src, {})
+                        src_rel_counts[rel_name] = src_rel_counts.get(rel_name, 0) + 1
+                        rel_weight = relation_weights.get(rel_name, 0.2)
+                        graph_relation_bonus[src] = (
+                            graph_relation_bonus.get(src, 0.0) + rel_weight / (1 + depth)
+                        )
+                        if src not in visited:
+                            visited.add(src)
+                            depth_map[src] = depth
+                            new_frontier.add(src)
+                frontier = new_frontier
+        except Exception as exc:
+            logger.warning("Neo4j graph expansion failed: %s", exc)
+
+    target_symbols: set[str] = set(candidate_symbols.keys())
+    target_symbols.update(depth_map.keys())
+    if not target_symbols:
+        return ""
+
+    # Build a lookup for code nodes by symbol name/qualname.
+    node_lookup: dict[str, TextNode] = {}
+    docstore_nodes: dict[str, TextNode] = {}
+    storage = None
+    try:
+        storage = _storage_context(
+            config,
+            paths.code_dir,
+            embedding_dimension=code_embed_dim,
+            index_name=code_index_cfg.index_name,
+            node_label=code_index_cfg.node_label,
+        )
+        docs = getattr(storage.docstore, "docs", {}) or {}
+        if isinstance(docs, dict):
+            docstore_nodes = docs
+        for node in docs.values():
+            metadata = getattr(node, "metadata", {}) if node else {}
+            if metadata.get("type") != "code":
+                continue
+            name = metadata.get("symbol_name")
+            qual = metadata.get("symbol_qualname")
+            if name and name in target_symbols and name not in node_lookup:
+                node_lookup[name] = node
+            if qual and qual in target_symbols and qual not in node_lookup:
+                node_lookup[qual] = node
+            if len(node_lookup) >= len(target_symbols):
+                break
+    except Exception as exc:
+        logger.warning("Failed to scan docstore for symbols: %s", exc)
+
+    ranked: list[tuple[str, float]] = []
+    for sym in target_symbols:
+        base = vector_scores.get(sym, 0.0)
+        depth = depth_map.get(sym, 3)
+        exact_bonus = 1.5 if sym in selected_focus_symbols else 0.0
+        depth_bonus = 0.6 / (1 + depth)
+        relation_bonus = graph_relation_bonus.get(sym, 0.0)
+        relation_degree = sum(symbol_relation_counts.get(sym, {}).values())
+        degree_bonus = min(0.6, 0.08 * relation_degree)
+        score = base + exact_bonus + depth_bonus + relation_bonus + degree_bonus
+        ranked.append((sym, score))
+    ranked.sort(key=lambda item: item[1], reverse=True)
+
+    fallback_metadata = lookup_code_symbols(
+        config, [sym for sym in target_symbols if sym not in node_lookup]
+    )
+
+    def _load_snippet_from_metadata(symbol: str, metadata: dict | None) -> str:
+        if not metadata:
+            return ""
+        property_graph_store = storage.property_graph_store if storage else None
+        if property_graph_store:
+            symbol_id = metadata.get("symbol_id")
+            if symbol_id:
+                try:
+                    nodes = property_graph_store.get(ids=[symbol_id])
+                except Exception as exc:
+                    logger.warning("Neo4j lookup failed for %s: %s", symbol_id, exc)
+                    nodes = []
+                for node in nodes:
+                    text = getattr(node, "text", "")
+                    if text:
+                        return text
+            for key in ("symbol_name", "symbol_qualname"):
+                prop_value = metadata.get(key) or symbol
+                if not prop_value:
+                    continue
+                try:
+                    nodes = property_graph_store.get(properties={key: prop_value})
+                except Exception as exc:
+                    logger.warning("Neo4j lookup failed for %s=%s: %s", key, prop_value, exc)
+                    nodes = []
+                for node in nodes:
+                    text = getattr(node, "text", "")
+                    if text:
+                        return text
+        symbol_id = metadata.get("symbol_id")
+        if symbol_id and symbol_id in docstore_nodes:
+            text = getattr(docstore_nodes[symbol_id], "text", "")
+            if text:
+                return text
+        node = node_lookup.get(symbol)
+        if node:
+            text = getattr(node, "text", "")
+            if text:
+                return text
+        return ""
+
+    def _metadata_for_symbol(symbol: str) -> dict | None:
+        if symbol in fallback_metadata:
+            return fallback_metadata.get(symbol)
+        entry = candidate_symbols.get(symbol)
+        if entry and isinstance(entry.get("metadata"), dict):
+            return entry.get("metadata")
+        for key, entry in candidate_symbols.items():
+            if key == symbol:
+                continue
+            metadata = entry.get("metadata") if entry else None
+            if not isinstance(metadata, dict):
+                continue
+            if metadata.get("symbol_qualname") == symbol or metadata.get("symbol_name") == symbol:
+                return metadata
+        for sym_key, metadata in fallback_metadata.items():
+            if sym_key == symbol:
+                return metadata
+            if not isinstance(metadata, dict):
+                continue
+            if metadata.get("symbol_qualname") == symbol or metadata.get("symbol_name") == symbol:
+                return metadata
+        return None
+
+    selected: list[str] = []
+    for sym in selected_focus_symbols:
+        if sym in target_symbols and sym not in selected:
+            selected.append(sym)
+    for sym, _ in ranked:
+        if sym not in selected:
+            selected.append(sym)
+        if len(selected) >= max_snippets:
+            break
+
+    ranked_map = {sym: score for sym, score in ranked}
+    selected_entries: list[dict[str, Any]] = []
+    snippet_entries: list[dict[str, Any]] = []
+    for sym in selected:
+        score = ranked_map.get(sym, 0.0)
+        depth = depth_map.get(sym)
+        vec_score = vector_scores.get(sym)
+        metadata = _metadata_for_symbol(sym) or {}
+        path = metadata.get("path")
+        start_line = metadata.get("start_line")
+        end_line = metadata.get("end_line")
+        relation_breakdown = symbol_relation_counts.get(sym, {})
+        relation_degree = sum(relation_breakdown.values())
+        selected_entries.append(
+            {
+                "symbol": sym,
+                "score": round(float(score), 6),
+                "vector_score": round(float(vec_score), 6) if vec_score is not None else None,
+                "depth": depth,
+                "relation_bonus": round(float(graph_relation_bonus.get(sym, 0.0)), 6),
+                "graph_degree": relation_degree,
+                "relation_breakdown": relation_breakdown,
+                "path": path,
+                "start_line": start_line,
+                "end_line": end_line,
+            }
+        )
+        node = node_lookup.get(sym)
+        text = getattr(node, "text", "") if node else ""
+        if not text:
+            text = _load_snippet_from_metadata(sym, metadata)
+        if text:
+            truncated = False
+            if len(text) > max_chars:
+                text = f"{text[:max_chars]}\n...[truncated {len(text) - max_chars} chars]"
+                truncated = True
+            snippet_entries.append(
+                {
+                    "symbol": sym,
+                    "path": path,
+                    "start_line": start_line,
+                    "end_line": end_line,
+                    "truncated": truncated,
+                    "text": text,
+                }
+            )
+
+    relation_counts: dict[str, int] = {}
+    for edge in graph_edges:
+        rel_name = str(edge.get("rel") or "related_to")
+        relation_counts[rel_name] = relation_counts.get(rel_name, 0) + 1
+
+    payload: dict[str, Any] = {
+        "query": query,
+        "scenario": scenario_name,
+        "retrieval_mode": "vector+neo4j-graph" if config.indexing.neo4j.enabled else "vector",
+        "vector_top_k": top_k or config.indexing.query_code_top_k,
+        "graph_depth": used_graph_depth,
+        "focus_symbols": selected_focus_symbols,
+        "ranked_symbols": selected_entries,
+        "snippets": snippet_entries,
+        "graph_edges": graph_edges[:80],
+        "graph_summary": {
+            "edge_count": len(graph_edges),
+            "relation_counts": relation_counts,
+        },
+    }
+
+    if fmt in ("json", "payload", "dict"):
+        return payload
+
+    lines: list[str] = [
+        "[Kernel Index Retrieval]",
+        f"Query: {query}",
+        f"Retrieval mode: {payload['retrieval_mode']}",
+        f"Vector top_k: {payload['vector_top_k']} | Graph depth: {payload['graph_depth']}",
+    ]
+    if selected_focus_symbols:
+        lines.append("Focus symbols: " + ", ".join(selected_focus_symbols))
+    lines.append("Reranked symbols (vector + graph):")
+
+    snippet_by_symbol = {item.get("symbol"): item for item in snippet_entries}
+    for item in selected_entries:
+        sym = item.get("symbol")
+        detail = [f"score={item.get('score'):.4f}"]
+        if item.get("vector_score") is not None:
+            detail.append(f"vector={item.get('vector_score'):.4f}")
+        if item.get("relation_bonus"):
+            detail.append(f"graph_bonus={item.get('relation_bonus'):.4f}")
+        if item.get("graph_degree"):
+            detail.append(f"graph_degree={item.get('graph_degree')}")
+        if item.get("depth") is not None:
+            detail.append(f"depth={item.get('depth')}")
+        if item.get("path"):
+            detail.append(
+                f"path={item.get('path')}:{item.get('start_line')}-{item.get('end_line')}"
+            )
+        lines.append(f"- {sym} ({', '.join(detail)})")
+        snippet_item = snippet_by_symbol.get(sym)
+        if snippet_item and snippet_item.get("text"):
+            lines.append(str(snippet_item["text"]))
+
+    if graph_edges:
+        lines.append("Graph expansion edges:")
+        for edge in graph_edges[:80]:
+            lines.append(
+                f"- {edge['src']} -[{edge['rel']}]-> {edge['dst']} (depth={edge['depth']})"
+            )
+        if relation_counts:
+            rel_summary = ", ".join(
+                f"{rel}={count}" for rel, count in sorted(relation_counts.items(), key=lambda x: x[0])
+            )
+            lines.append("Graph relation summary: " + rel_summary)
+
+    return "\n\n".join(lines).strip()

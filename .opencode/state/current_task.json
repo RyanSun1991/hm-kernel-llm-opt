@@ -1,0 +1,19 @@
+{
+  "task_id": "",
+  "title": "",
+  "status": "idle",
+  "manager": "os-opt-manager",
+  "active_agent": "",
+  "approved_plan": "",
+  "review_status": "",
+  "profile": "",
+  "target": "",
+  "objective": "",
+  "pipeline_card": "",
+  "bootstrap_docs": [],
+  "skills": [],
+  "artifacts": [],
+  "prompt_file": ".opencode/state/current_prompt.md",
+  "created_at": "",
+  "notes": []
+}

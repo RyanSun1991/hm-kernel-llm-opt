@@ -11,6 +11,7 @@ dependencies = [
   "pyyaml>=6",
   "rich>=13",
   "typer>=0.12",
+  "click>=8",
   "sqlalchemy>=2",
   "alembic>=1.13",
   "fastapi>=0.110",
@@ -18,12 +19,14 @@ dependencies = [
   "openai>=1.0",
   "langchain>=0.2",
   "langgraph>=0.2",
+  "mcp[cli]>=1.16.0,<2",
   "llama-index-core>=0.14.5,<0.15",
   "llama-index-llms-openai>=0.6.13,<0.7",
   "llama-index-embeddings-openai>=0.5.1,<0.6",
   "llama-index-graph-stores-neo4j>=0.5.1,<0.6",
   "llama-index-vector-stores-neo4jvector>=0.5.2,<0.6",
   "neo4j>=5",
+  "GitPython>=3.1",
 ]
 
 [project.scripts]

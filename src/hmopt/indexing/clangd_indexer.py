@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import shutil
+import tempfile
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable, List, Optional
 
@@ -180,8 +182,104 @@ def _load_compile_commands(path: Path) -> list[Path]:
     for entry in data:
         file_path = entry.get("file")
         if file_path:
-            files.append(Path(file_path))
+            candidate = Path(file_path)
+            if not candidate.is_absolute():
+                base_dir = Path(entry.get("directory") or path.parent)
+                candidate = base_dir / candidate
+            files.append(candidate)
     return files
+
+
+def _parse_path_aliases() -> list[tuple[Path, Path]]:
+    """Parse HMOPT_PATH_ALIAS as comma-separated "from:to" pairs."""
+    raw = os.getenv("HMOPT_PATH_ALIAS", "").strip()
+    if not raw:
+        return []
+
+    aliases: list[tuple[Path, Path]] = []
+    for part in raw.split(","):
+        segment = part.strip()
+        if not segment or ":" not in segment:
+            continue
+        src, dst = segment.split(":", 1)
+        src = src.strip()
+        dst = dst.strip()
+        if not src or not dst:
+            continue
+        aliases.append((Path(src), Path(dst)))
+    return aliases
+
+
+def _remap_file_path(
+    file_path: Path,
+    *,
+    aliases: list[tuple[Path, Path]],
+) -> Path:
+    if file_path.exists():
+        return file_path
+
+    for src_prefix, dst_prefix in aliases:
+        try:
+            rel = file_path.relative_to(src_prefix)
+        except ValueError:
+            continue
+        mapped = dst_prefix / rel
+        if mapped.exists():
+            return mapped
+
+    return file_path
+
+
+def _prepare_compile_commands_dir(
+    compile_commands: Path,
+    aliases: list[tuple[Path, Path]],
+) -> tuple[Path, Optional[tempfile.TemporaryDirectory[str]]]:
+    """Create a remapped compile_commands.json for clangd file matching.
+
+    clangd matches files against entries in compile_commands.json by exact path.
+    When source paths were produced on another host, rewrite `file` and
+    `directory` fields using HMOPT_PATH_ALIAS and point clangd to the rewritten
+    compile DB directory.
+    """
+    if not aliases or not compile_commands.exists():
+        return compile_commands.parent, None
+
+    data = json.loads(compile_commands.read_text(encoding="utf-8"))
+    changed = False
+    remapped_entries: list[dict] = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            remapped_entries.append(entry)
+            continue
+        new_entry = dict(entry)
+
+        file_value = new_entry.get("file")
+        if isinstance(file_value, str) and file_value:
+            remapped_file = str(_remap_file_path(Path(file_value), aliases=aliases))
+            if remapped_file != file_value:
+                new_entry["file"] = remapped_file
+                changed = True
+
+        directory_value = new_entry.get("directory")
+        if isinstance(directory_value, str) and directory_value:
+            remapped_dir = str(_remap_file_path(Path(directory_value), aliases=aliases))
+            if remapped_dir != directory_value:
+                new_entry["directory"] = remapped_dir
+                changed = True
+
+        remapped_entries.append(new_entry)
+
+    if not changed:
+        return compile_commands.parent, None
+
+    tempdir = tempfile.TemporaryDirectory(prefix="hmopt-ccdb-")
+    remapped_path = Path(tempdir.name) / "compile_commands.json"
+    remapped_path.write_text(
+        json.dumps(remapped_entries, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    logger.info("Using remapped compile_commands.json for clangd: %s", remapped_path)
+    return remapped_path.parent, tempdir
 
 
 def _flatten_symbols(
@@ -313,8 +411,10 @@ def _build_file_summaries(
     by_file: dict[Path, list[SymbolRecord]] = defaultdict(list)
     for rec in records:
         by_file[rec.path].append(rec)
-    for path, symbols in by_file.items():
+    for path in sorted(by_file):
+        symbols = by_file[path]
         kinds = Counter(sym.kind for sym in symbols)
+        kinds_dict = {kind: kinds[kind] for kind in sorted(kinds)}
         functions = sorted({sym.name for sym in symbols if sym.kind in KIND_FUNCTIONS})
         types = sorted({sym.name for sym in symbols if sym.kind in KIND_TYPES})
         globals_ = sorted({sym.name for sym in symbols if sym.kind in KIND_VARIABLES})
@@ -322,7 +422,7 @@ def _build_file_summaries(
         fields = sorted({sym.name for sym in symbols if sym.kind in KIND_FIELDS})
         text = (
             f"file summary: {path}\n"
-            f"counts: {dict(kinds)}\n"
+            f"counts: {kinds_dict}\n"
             f"functions: {functions[:max_items]}\n"
             f"types: {types[:max_items]}\n"
             f"globals: {globals_[:max_items]}\n"
@@ -345,7 +445,8 @@ def _build_relation_summaries(
         rel_map[rel.src_id][rel.kind].append(rel.dst_name)
 
     record_map = {rec.symbol_id: rec for rec in records}
-    for sym_id, kinds in rel_map.items():
+    for sym_id in sorted(rel_map):
+        kinds = rel_map[sym_id]
         rec = record_map.get(sym_id)
         if not rec:
             continue
@@ -418,12 +519,19 @@ def index_kernel_code(
         return _fallback_index(repo_path)
 
     files = files[:max_files]
-    client = ClangdClient(clangd_config, repo_path)
+    aliases = _parse_path_aliases()
+    if aliases:
+        logger.info("Applying HMOPT_PATH_ALIAS mappings: %s", aliases)
+
+    compile_commands_dir, temp_ccdb = _prepare_compile_commands_dir(compile_commands, aliases)
+    effective_clangd_config = replace(clangd_config, compile_commands_dir=compile_commands_dir)
+    client = ClangdClient(effective_clangd_config, repo_path)
     records: list[SymbolRecord] = []
     relations: dict[tuple[str, str, str], CodeRelation] = {}
     file_texts: dict[Path, str] = {}
     try:
-        for path in files:
+        for raw_path in files:
+            path = _remap_file_path(raw_path, aliases=aliases)
             if not path.exists():
                 continue
             try:
@@ -631,3 +739,5 @@ def index_kernel_code(
         )
     finally:
         client.close()
+        if temp_ccdb is not None:
+            temp_ccdb.cleanup()

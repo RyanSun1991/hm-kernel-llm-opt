@@ -24,6 +24,31 @@ def _expand_env(text: str) -> str:
     return os.path.expandvars(text)
 
 
+def _resolve_placeholder(value: Optional[str]) -> Optional[str]:
+    """Return ``None`` when the value is an unresolved ${VAR} placeholder."""
+
+    if value is None:
+        return None
+    stripped = value.strip()
+    if stripped.startswith("${") and stripped.endswith("}"):
+        return None
+    return stripped or None
+
+
+def _normalize_base_url(llm_cfg: dict[str, Any], default: str) -> str:
+    """Pick a usable base URL and ensure it includes a scheme."""
+
+    candidate = _resolve_placeholder(llm_cfg.get("base_url")) or _resolve_placeholder(
+        llm_cfg.get("api_base")
+    )
+    candidate = candidate or default
+
+    if not candidate.startswith(("http://", "https://")):
+        candidate = f"http://{candidate}"
+
+    return candidate
+
+
 class ProjectConfig(BaseModel):
     name: str
     repo_path: str
@@ -69,7 +94,7 @@ class Neo4jConfig(BaseModel):
     enabled: bool = False
     uri: str = "bolt://localhost:7687"
     user: str = "neo4j"
-    password: Optional[str] = Field(default_factory=lambda: os.getenv("NEO4J_PASSWORD"))
+    password: Optional[str] = "@huawei2026"
     database: str = "neo4j"
 
 
@@ -109,28 +134,46 @@ class ClangdConfig(BaseModel):
     relation_summary_max_items: int = 50
 
 
+class MCPConfig(BaseModel):
+    enabled: bool = False
+    base_url: str = "http://localhost:20010/v1"
+    api_key: Optional[str] = Field(default_factory=lambda: os.getenv("HMOPT_LLM_API_KEY"))
+    model: str = "gpt-4o-mini"
+    timeout_sec: int = 30
+    tool_name: str = "kernel_index_code"
+    graph_tool_name: str = "kernel_symbol_graph"
+    hotspot_tool_name: str = "kernel_hotspot_context"
+    default_scenario: str = "general"
+    top_k: int = 6
+    graph_depth: int = 2
+    max_snippets: int = 8
+    max_chars: int = 4000
+    response_format: str = "markdown"
+    mcp_base_url: str = "http://localhost:7331"
+    mcp_api_key: Optional[str] = Field(default_factory=lambda: os.getenv("HMOPT_MCP_API_KEY"))
+
+
 class IndexingConfig(BaseModel):
     enabled: bool = True
     persist_dir: Path = Path("data/llamaindex")
     llm_enrich: bool = False
     llm_enrich_limit: int = 50
-    runtime_evidence_max_chars: int = 20000
+    runtime_evidence_max_chars: int | None = 20000
     hotspot_top_k: int = 20
     hotspot_min_ratio: float = 0.001
     hotspot_min_abs: float = 10.0
     query_code_top_k: int = 10
     query_runtime_top_k: int = 10
     query_graph_top_k: int = 3
+    query_hotspot_top_k: Optional[int] = None
+    query_code_context_mode: str = "snippets"
     query_prompt_file: Optional[Path] = None
     query_system_prompt_file: Optional[Path] = None
-    query_code_context_mode: str = "mcp"
-    query_graph_expand_depth: int = 1
-    query_graph_expand_limit: int = 40
-    query_graph_expand_symbols: int = 15
-    query_graph_relation_types: list[str] = Field(default_factory=list)
     hotspot_focus_symbol: Optional[str] = None
     neo4j: Neo4jConfig = Neo4jConfig()
     clangd: ClangdConfig = ClangdConfig()
+    mcp: MCPConfig = MCPConfig()
+
 
 
 class AppConfig(BaseModel):
@@ -302,12 +345,34 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "relation_summary_max_items": int(clangd_cfg.get("relation_summary_max_items", 50)),
     }
 
+    mcp_cfg = indexing_cfg.get("mcp", {})
+    mcp_norm = {
+        "enabled": bool(mcp_cfg.get("enabled", False)),
+        "base_url": mcp_cfg.get("base_url", "http://localhost:20010/v1"),
+        "api_key": mcp_cfg.get("api_key")
+        or (os.getenv(mcp_cfg.get("api_key_env")) if mcp_cfg.get("api_key_env") else None),
+        "model": mcp_cfg.get("model", "gpt-4o-mini"),
+        "timeout_sec": int(mcp_cfg.get("timeout_sec", 30)),
+        "tool_name": mcp_cfg.get("tool_name", "kernel_index_code"),
+        "graph_tool_name": mcp_cfg.get("graph_tool_name", "kernel_symbol_graph"),
+        "hotspot_tool_name": mcp_cfg.get("hotspot_tool_name", "kernel_hotspot_context"),
+        "default_scenario": mcp_cfg.get("default_scenario", "general"),
+        "top_k": int(mcp_cfg.get("top_k", 6)),
+        "graph_depth": int(mcp_cfg.get("graph_depth", 2)),
+        "max_snippets": int(mcp_cfg.get("max_snippets", 8)),
+        "max_chars": int(mcp_cfg.get("max_chars", 4000)),
+        "response_format": mcp_cfg.get("response_format", "markdown"),
+        "mcp_base_url": mcp_cfg.get("mcp_base_url", "http://localhost:7331"),
+        "mcp_api_key": mcp_cfg.get("mcp_api_key")
+        or (os.getenv(mcp_cfg.get("mcp_api_key_env")) if mcp_cfg.get("mcp_api_key_env") else None),
+    }
+
     indexing_norm = {
         "enabled": indexing_cfg.get("enabled", True),
         "persist_dir": Path(indexing_cfg.get("persist_dir", "data/llamaindex")),
         "llm_enrich": indexing_cfg.get("llm_enrich", False),
         "llm_enrich_limit": int(indexing_cfg.get("llm_enrich_limit", 50)),
-        "runtime_evidence_max_chars": int(indexing_cfg.get("runtime_evidence_max_chars", 20000)),
+        "runtime_evidence_max_chars": indexing_cfg.get("runtime_evidence_max_chars", 20000),
         "hotspot_top_k": int(indexing_cfg.get("hotspot_top_k", 20)),
         "hotspot_min_ratio": float(indexing_cfg.get("hotspot_min_ratio", 0.001)),
         "hotspot_min_abs": float(indexing_cfg.get("hotspot_min_abs", 10.0)),
@@ -315,17 +380,15 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "query_code_top_k": int(indexing_cfg.get("query_code_top_k", 10)),
         "query_runtime_top_k": int(indexing_cfg.get("query_runtime_top_k", 10)),
         "query_graph_top_k": int(indexing_cfg.get("query_graph_top_k", 3)),
+        "query_hotspot_top_k": indexing_cfg.get("query_hotspot_top_k"),
+        "query_code_context_mode": indexing_cfg.get("query_code_context_mode", "snippets"),
         "query_prompt_file": Path(indexing_cfg["query_prompt_file"])
             if indexing_cfg.get("query_prompt_file") else None,
         "query_system_prompt_file": Path(indexing_cfg["query_system_prompt_file"])
             if indexing_cfg.get("query_system_prompt_file") else None,
-        "query_code_context_mode": indexing_cfg.get("query_code_context_mode", "mcp"),
-        "query_graph_expand_depth": int(indexing_cfg.get("query_graph_expand_depth", 1)),
-        "query_graph_expand_limit": int(indexing_cfg.get("query_graph_expand_limit", 40)),
-        "query_graph_expand_symbols": int(indexing_cfg.get("query_graph_expand_symbols", 15)),
-        "query_graph_relation_types": indexing_cfg.get("query_graph_relation_types", []),
         "neo4j": neo4j_norm,
         "clangd": clangd_norm,
+        "mcp": mcp_norm,
     }
 
     return {

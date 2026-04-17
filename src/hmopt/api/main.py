@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from hmopt.core.config import AppConfig
 from hmopt.evaluation.reports import render_report
-from hmopt.orchestration import run_artifact_analysis, run_pipeline
+from hmopt.orchestration import run_artifact_analysis, run_pipeline, run_runtime_ingest
 from hmopt.indexing import route_query
 from hmopt.storage.db import models
 from hmopt.storage.db.engine import init_engine, session_scope
@@ -120,7 +120,7 @@ def analyze_artifacts(payload: dict, background_tasks: BackgroundTasks) -> dict:
     cfg = AppConfig.from_yaml(CONFIG_PATH)
     if repo_path:
         cfg.project.repo_path = repo_path
-    run_id = run_artifact_analysis(cfg, artifacts)
+    run_id = run_runtime_ingest(cfg, artifacts)
     return {"status": "completed", "run_id": run_id}
 
 

@@ -1,0 +1,55 @@
+"""Minimal MCP demo: hybrid MCP retrieval (forced + LLM tool calls).
+
+Usage:
+  export HMOPT_MCP_DEMO_QUERY="memcpy"
+  export HMOPT_MCP_SERVER_URL="http://localhost:7331"
+  export HMOPT_LLM_BASE_URL="http://<llm-host>:<port>/v1"
+  export HMOPT_LLM_API_KEY="..."
+  python examples/mcp_demo.py
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import asdict
+
+from hmopt.core.config import AppConfig
+from hmopt.indexing.mcp_agent import MCPToolAgent, MCPToolAgentConfig
+
+
+def main() -> None:
+    config = AppConfig.from_yaml(os.getenv("HMOPT_DEMO_CONFIG", "configs/app.yaml"))
+    query = os.getenv("HMOPT_MCP_DEMO_QUERY", "memcpy")
+    mcp_url = os.getenv("HMOPT_MCP_SERVER_URL", config.indexing.mcp.mcp_base_url)
+    llm_base_url = os.getenv("HMOPT_LLM_BASE_URL", config.indexing.mcp.base_url or config.llm.base_url)
+    llm_api_key = os.getenv("HMOPT_LLM_API_KEY", config.indexing.mcp.api_key or config.llm.api_key or "")
+    default_scenario = os.getenv("HMOPT_MCP_SCENARIO", config.indexing.mcp.default_scenario)
+    agent_cfg = MCPToolAgentConfig(
+        base_url=llm_base_url,
+        api_key=llm_api_key or None,
+        model=config.indexing.mcp.model or config.llm.model,
+        timeout_sec=30,
+        tool_name=config.indexing.mcp.tool_name,
+        graph_tool_name=config.indexing.mcp.graph_tool_name,
+        hotspot_tool_name=config.indexing.mcp.hotspot_tool_name,
+        default_scenario=default_scenario,
+        top_k=config.indexing.mcp.top_k,
+        graph_depth=config.indexing.mcp.graph_depth,
+        max_snippets=config.indexing.mcp.max_snippets,
+        max_chars=config.indexing.mcp.max_chars,
+        response_format=config.indexing.mcp.response_format,
+        mcp_base_url=mcp_url,
+    )
+    agent = MCPToolAgent(agent_cfg)
+    result = agent.fetch_context(query)
+
+    print("== MCP demo ==")
+    print(f"query: {query}")
+    print(f"tool_used: {result.tool_used}")
+    print(f"agent_config: {asdict(agent_cfg)}")
+    print("context:")
+    print(result.context or "<empty>")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,2 @@
+# Placeholder so `COPY libs ./libs` in the Dockerfile works on a clean checkout.
+# Put any .whl files to be pip-installed at image build time here.
