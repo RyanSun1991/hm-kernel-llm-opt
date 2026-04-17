@@ -55,7 +55,7 @@ Use:
 
 - patch on disk or code edits in repo
 - `.opencode/patches/[topic].patch` when an exported patch is requested
-- `.opencode/bench/after_patch.md` summarizing the intended instruction-count win, code-review focus areas, and conditional tester validation suggestions
+- `.opencode/bench/after_patch.md` summarizing the intended instruction-count win, code-review focus areas, and conditional tester validation suggestions.  This file MUST include a `## Modified functions` section listing the exact function names whose body the patch changed (one per line, bare identifiers — e.g. `sched_ind_notify_load_change`).  The tester agent consumes this list verbatim to drive per-function instruction-count comparison.  If the patch only touches macros / headers / Kconfig and no function body, write `none — no function bodies modified` instead.
 
 ## Return to Manager
 

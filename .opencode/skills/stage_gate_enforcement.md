@@ -14,6 +14,21 @@ This skill defines hard gates that no agent may bypass. Load this skill at every
 | 6. Tester Validation | `kernel-tester-agent` | Manager delegation (code review requires it) | Validation report written, **returns to manager** |
 | 7. Decision | `os-opt-manager` | All sub-agent results received | Memory updated, next cycle or done |
 
+### Back-Edges (Feedback Loops)
+
+The pipeline is primarily forward, but the manager MUST take these back-edges when a gate rejects work.  See `os-opt-manager.md` → **Feedback Routing Table** for the full rules and iteration budget.
+
+| Failing stage | Failure type | Back-edge target |
+|---|---|---|
+| Tester Step 1 (build/sign) or Step 4 (feature flash) | patch broke compile or image | `kernel-code-agent` |
+| Tester Step 5 regression (`aggregate.delta > 0`) | plan's instruction-count thesis disproven | researcher specialist → rerun plan-review |
+| Tester Step 5 inconclusive within noise | hypothesis may need resizing | researcher (bigger rework) or coder (patch too small) — manager picks from per-pair evidence |
+| Code reviewer `needs revision` / `reject` | coding mistake | `kernel-code-agent` |
+| Code reviewer `reject` citing plan flaw | plan is wrong | researcher → plan reviewer → coder |
+| Plan reviewer `needs revision` / `reject` | plan flawed | researcher; re-run plan review |
+
+Every back-edge MUST include: the full failing artifact, the failure reason, and the incremented `iteration` counter in `.opencode/state/current_task.json`.  Iteration caps: 3 for plan/code loops, 2 for tester loops.  Past the cap, surface to the user — do not loop silently.
+
 ## Hard Gates — Violations Are Forbidden
 
 ### Gate 1: Research Before Plan

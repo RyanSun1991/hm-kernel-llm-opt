@@ -91,8 +91,45 @@ If you find yourself wanting to "spawn a worker", "run a helper task", or "do th
 7. Route every implementation handoff to `kernel-code-reviewer`.
 8. Route to `kernel-tester-agent` only when code review requires executable validation and preconditions are available.
 9. If tester preconditions are missing, allow code review to mark tester as skipped-with-reason instead of blocking progress.
-10. If the tester fails or returns inconclusive instruction-count evidence, route back to the right upstream owner with a clear reason.
+10. When the tester fails or returns inconclusive instruction-count evidence, route back to the correct upstream owner per the **Feedback Routing Table** below — do not stop at the manager, do not ask the user which way to bounce it.
 11. **After preparing the delegation message, immediately use the delegate tool to hand off.** Do NOT stop and ask the user to manually open the next agent. The pipeline must flow automatically.
+
+## Feedback Routing Table — Mandatory for Failing Stages
+
+Every failing sub-agent result triggers exactly one of these routes.  Pick the route from the evidence — do not invent new ones.  Every bounce MUST carry the previous artifacts + the failure reason + a loop-counter increment (see "Iteration Budget" below).
+
+### From tester (`kernel-tester-agent`) → back-edge
+
+| Tester phase that failed | Verdict | Route back to | Reason in handoff |
+|---|---|---|---|
+| Step 1 Build or Sign failed | fail | `kernel-code-agent` | patch does not compile / sign — implementation problem; coder must diagnose stderr_tail and re-patch |
+| Step 4 Feature flash failed, but Step 2 stock flash succeeded | fail | `kernel-code-agent` | patch boots-break the device image; coder must investigate |
+| Step 5 aggregate.delta > 0 (regression at the chosen level) | fail | `kernel-source-research` (or the active research specialist) | the optimization thesis did not hold — the plan is disproven, research must re-derive a new mechanism |
+| Step 5 a targeted process/thread/lib/function disappeared on feature side | fail | `kernel-source-research` | the plan's target assumption was wrong; needs re-scoping |
+| Step 5 aggregate |Δ%| < 1% (within noise) or `pairs_missing_*` > 0 | inconclusive | `kernel-source-research` if the hypothesis looks exhausted; `kernel-code-agent` if only the patch shape was too small to move the metric — choose based on the per-pair table |
+| Step 3 stock test / relay / infra failure | skipped | no agent bounce — report to the user; this is not a patch or plan issue |
+| Step 2 stock flash failed | skipped | no agent bounce — report to the user; infra-only |
+| 180-min ceiling hit on either phase | inconclusive | no agent bounce by default; ask the user whether to re-run before touching plan or code |
+
+### From code reviewer (`kernel-code-reviewer`) → back-edge
+
+- `decision: needs revision` or `reject` → `kernel-code-agent` with the full review, to re-implement.
+- `decision: reject` citing a plan-level flaw (not a coding mistake) → `kernel-source-research` so the plan is redesigned, followed by `kernel-plan-reviewer` again before re-coding.
+
+### From plan reviewer (`kernel-plan-reviewer`) → back-edge
+
+- `decision: needs revision` → researcher specialist (same one that produced the plan) with the review notes; rerun `kernel-plan-reviewer` afterwards.
+- `decision: reject` (bad-plan-gate hit, or instruction-count thesis not credible) → researcher specialist for a fresh mechanism; rerun plan-review afterwards.  Record the rejected mechanism in `.opencode/state/bad_plans.md` (or the subsystem-specific `*-bad_plans.md`) before re-delegating, so the same idea is not re-proposed.
+
+### Iteration Budget
+
+Each optimization task carries a loop counter stored in `.opencode/state/current_task.json` under `iteration`.  The manager increments it on every back-edge.  Defaults:
+
+- plan-review ↔ research bounces: hard cap 3.  At 3 → stop and report to the user.
+- code-review ↔ code bounces: hard cap 3.
+- tester ↔ upstream bounces: hard cap 2 (tester cycles are expensive — 1–4 h each).
+
+Past the cap, stop delegating, write a `.opencode/bench/<artifact>_stall.md` summarizing every bounce and the residual hypothesis, and surface the task to the user.  Never silently loop.
 
 ## Hub-and-Spoke Orchestration — CRITICAL
 

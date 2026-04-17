@@ -88,6 +88,50 @@ task_id_feature = task_feature["task_id"]
 # B2. Poll using the same loop as Phase A.
 ```
 
+### Phase B.1 — Per-Modified-Function Comparison (Mandatory When a Function List Exists)
+
+The primary compare above covers the plan's chosen level (usually `total` or `process`).  That alone does not tell you whether the **specific functions the patch actually edited** got cheaper.  After Phase B finishes, the tester MUST also call `compare_reports` once per modified function so the validation report can show directly-targeted evidence, not just aggregate movement.
+
+#### Building the modified-function list
+
+Sources, in preference order:
+
+1. An explicit `modified_functions` field in the coder handoff.  This is authoritative when present.
+2. The patch file at `.opencode/patches/<artifact>.patch` — parse each hunk's `@@ … @@ <signature>` header and any function definitions that were edited inside hunks.  Deduplicate.
+3. The after-patch summary at `.opencode/bench/after_patch.md`, which the coder writes with "changed symbols".
+
+If all three are empty (patch only touches macros, Kconfig, or headers), skip this phase and note "no function bodies touched" in the validation report.
+
+#### Tool call shape
+
+```
+per_function_compares = []
+for fn in modified_functions:
+    cmp = compare_reports(
+        baseline_report=baseline_report,
+        candidate_report=candidate_report,        # status["result"]["report_path"]
+        level="function",
+        function=fn,
+        # process / thread / lib are optional narrowing filters.  When the plan
+        # pins any of them, pass them through; otherwise leave them None so
+        # every row in functions_instructions_info whose functionName matches
+        # is summed — regardless of which process/thread/lib owns it.
+        process=compare_process,   # or None
+        thread=compare_thread,     # or None
+        lib=compare_lib,           # or None
+    )
+    per_function_compares.append({"function": fn, "result": cmp})
+```
+
+`compare_reports` runs on Windows via the relay.  Each call returns the normal `aggregate` dict (`baseline`, `candidate`, `delta`, `delta_pct`, `baseline_found`, `candidate_found`, `pairs_*`).
+
+#### Using the results
+
+- `delta <= 0` on every modified function → strong confirmation the patch improved what it claimed to touch.
+- `delta > 0` on any modified function even when the primary aggregate is flat or improved → the optimization may be winning somewhere else by accident; flag as inconclusive and report the per-function detail.
+- `baseline_found == False` AND `candidate_found == False` for a function → sample never captured it; this is a coverage gap, not a patch fault.  Note it but do not fail the verdict on it alone.
+- `baseline_found == True`, `candidate_found == False` → the function disappeared after the patch (inlined, renamed, dead-code-eliminated).  Flag it — this is usually intentional and great, but confirm it matches the plan.
+
 ### Phase C — Extract Comparison
 
 When `task_feature` reaches `succeeded`, the pipeline has already invoked `report_compare.py` on Windows and embedded the result:
@@ -191,6 +235,15 @@ The tester's validation artifact `.opencode/bench/<artifact>_validation.md` incl
 - Aggregate delta: {signed int} ({signed pct}%)
 - Per-pair table: case/round/step → baseline / candidate / delta / delta_pct
 - Missing targets: {list or "none"}
+
+### Per-Modified-Function Delta (Phase B.1)
+
+| function | baseline | candidate | delta | delta_pct | baseline_found | candidate_found | note |
+|---|---|---|---|---|---|---|---|
+| {fn_a} | {int} | {int} | {signed} | {signed pct} | y/n | y/n | {"—" or "disappeared", "never sampled", etc} |
+| {fn_b} | ... | ... | ... | ... | ... | ... | ... |
+
+If the patch touched no function bodies, print "no function bodies modified — per-function phase skipped" instead of the table.
 
 ### Verdict: pass | fail | inconclusive | skipped
 ### Confidence: high | medium | low

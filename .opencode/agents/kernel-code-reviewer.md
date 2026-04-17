@@ -59,6 +59,7 @@ Write `.opencode/reviews/[artifact]_code_review.md` with:
 - risk summary
 - tester decision: required, recommended, or skipped (with reason)
 - tester focus points and scope (if tester is required/recommended)
+- **modified functions (forwarded)**: copy the list verbatim from the coder's `## Modified functions` section in `.opencode/bench/after_patch.md`.  The tester relies on this list to drive per-function instruction-count compares.  If the section is missing or empty, call it out in the review — that is a handoff-contract violation the coder must fix before tester runs.
 - required follow-up before final decision
 
 Do not own build or auto-test execution.
