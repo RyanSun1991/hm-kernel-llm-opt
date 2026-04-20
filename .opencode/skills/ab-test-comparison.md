@@ -162,14 +162,20 @@ status["result"]["compare"] = {
 }
 ```
 
-If the embedded compare is missing or errored, fall back to an explicit call:
+If the embedded compare is missing or errored, fall back to an explicit call.
+**Use the same `compare_*` parameter names as `run_instruction_test_async`** —
+`compare_reports` accepts them natively (short aliases `level`/`process`/... are
+also accepted but don't mix the two styles in one call):
 
 ```
 compare_reports(
     baseline_report=baseline_report,
     candidate_report=status["result"]["report_path"],
-    level=<same level as B1>,
-    process=..., thread=..., lib=..., function=...,
+    compare_level=<same level as B1>,        # e.g. "function"
+    compare_process=<same as B1>,
+    compare_thread=<same as B1>,
+    compare_lib=<same as B1>,
+    compare_function=<same as B1>,
 )
 ```
 

@@ -181,11 +181,18 @@ loop:
 # embedded the result at status["result"]["compare"]["result"].
 compare_result = status["result"]["compare"]["result"]
 
-# If the embedded compare is missing or errored (rare), fall back:
+# If the embedded compare is missing or errored (rare), fall back.
+# IMPORTANT: use the same `compare_*` parameter names as Step 5 — do NOT
+# switch to the short `level=`/`function=` aliases.  Both are accepted by
+# `compare_reports`, but mixing styles in one call is a common mistake.
 # compare_reports(
 #     baseline_report=baseline_report,
 #     candidate_report=status["result"]["report_path"],
-#     level=<same level>, process=..., thread=..., lib=..., function=...,
+#     compare_level=<same level as Step 5>,
+#     compare_process=<same as Step 5>,
+#     compare_thread=<same as Step 5>,
+#     compare_lib=<same as Step 5>,
+#     compare_function=<same as Step 5>,
 # )
 
 # Per-modified-function compares (mandatory when modified_functions is non-empty).

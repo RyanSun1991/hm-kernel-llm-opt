@@ -585,11 +585,16 @@ def compare_reports(
     baseline_report: str,
     candidate_report: str,
     compare_script: str | None = None,
-    level: str = "total",
+    level: str | None = None,
     process: str | None = None,
     thread: str | None = None,
     lib: str | None = None,
     function: str | None = None,
+    compare_level: str | None = None,
+    compare_process: str | None = None,
+    compare_thread: str | None = None,
+    compare_lib: str | None = None,
+    compare_function: str | None = None,
     timeout_s: int = DEFAULT_COMPARE_TIMEOUT_S,
     cwd: str | None = None,
 ) -> dict[str, Any]:
@@ -606,25 +611,37 @@ def compare_reports(
       - ``thread``:   *process*, *thread*
       - ``lib``:      *process*, *thread*, *lib*
       - ``function``: *process*, *thread*, *lib*, *function*
+
+    Both naming conventions are accepted — ``level``/``process``/``thread``
+    /``lib``/``function`` and the ``compare_``-prefixed forms used by
+    ``run_instruction_test_async``.  The prefixed names win on conflict.
     """
     if not baseline_report or not candidate_report:
         raise ValueError("baseline_report and candidate_report are both required")
+
+    effective_level = compare_level if compare_level is not None else level
+    if effective_level is None:
+        effective_level = "total"
+    effective_process = compare_process if compare_process is not None else process
+    effective_thread = compare_thread if compare_thread is not None else thread
+    effective_lib = compare_lib if compare_lib is not None else lib
+    effective_function = compare_function if compare_function is not None else function
 
     script = (compare_script or _default_compare_script()).strip()
     argv: list[str] = [
         script,
         "--baseline", baseline_report,
         "--candidate", candidate_report,
-        "--level", level,
+        "--level", effective_level,
     ]
-    if process:
-        argv.extend(["--process", process])
-    if thread:
-        argv.extend(["--thread", thread])
-    if lib:
-        argv.extend(["--lib", lib])
-    if function:
-        argv.extend(["--function", function])
+    if effective_process:
+        argv.extend(["--process", effective_process])
+    if effective_thread:
+        argv.extend(["--thread", effective_thread])
+    if effective_lib:
+        argv.extend(["--lib", effective_lib])
+    if effective_function:
+        argv.extend(["--function", effective_function])
 
     relay_result = _relay_exec("python", argv, timeout_s=int(timeout_s), cwd=cwd)
     compare_result, parse_error = _parse_pipeline_stdout(relay_result.get("stdout", ""))
@@ -894,14 +911,22 @@ def build_auto_test_fastmcp_server() -> Any | None:
         description=(
             "Invoke report_compare.py on the Windows host against two existing "
             "report_YYYYMMDDHHMMSS directories and return the instruction-count diff. "
-            "Useful to re-run comparison with a different baseline without re-running the test."
+            "Useful to re-run comparison with a different baseline without re-running the test. "
+            "Accepts the same compare_level/compare_process/compare_thread/compare_lib/"
+            "compare_function names as run_instruction_test_async; short aliases "
+            "level/process/thread/lib/function are also accepted."
         ),
     )
     def mcp_compare_reports(
         baseline_report: str,
         candidate_report: str,
         compare_script: str | None = None,
-        level: str = "total",
+        compare_level: str = "total",
+        compare_process: str | None = None,
+        compare_thread: str | None = None,
+        compare_lib: str | None = None,
+        compare_function: str | None = None,
+        level: str | None = None,
         process: str | None = None,
         thread: str | None = None,
         lib: str | None = None,
@@ -912,6 +937,11 @@ def build_auto_test_fastmcp_server() -> Any | None:
             baseline_report=baseline_report,
             candidate_report=candidate_report,
             compare_script=compare_script,
+            compare_level=compare_level,
+            compare_process=compare_process,
+            compare_thread=compare_thread,
+            compare_lib=compare_lib,
+            compare_function=compare_function,
             level=level,
             process=process,
             thread=thread,

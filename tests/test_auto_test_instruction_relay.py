@@ -286,6 +286,66 @@ def test_compare_reports_forwards_level_and_names(fake_relay):
     assert "--function" not in argv
 
 
+def test_compare_reports_accepts_compare_prefixed_kwargs(fake_relay):
+    """The async tool uses `compare_level` / `compare_function` / etc. — the
+    fallback `compare_reports` must accept the identical names, otherwise the
+    tester agent ends up silently comparing at `total` when it re-uses the
+    parameters it already has in hand from Phase B."""
+    server, _ = fake_relay
+    server.response["stdout"] = json.dumps({
+        "success": True,
+        "level": "function",
+        "aggregate": {
+            "baseline": 100, "candidate": 90, "delta": -10, "delta_pct": -10.0,
+            "baseline_found": True, "candidate_found": True,
+        },
+        "reports": [],
+    })
+
+    svc.compare_reports(
+        baseline_report=r"D:\a",
+        candidate_report=r"D:\b",
+        compare_level="function",
+        compare_process="init",
+        compare_thread="/bin/init",
+        compare_lib="/system/lib/ld-musl-aarch64.so.1",
+        compare_function="strlen",
+    )
+    argv = server.last_request["args"]
+    assert "--level" in argv
+    assert "function" in argv
+    assert "--process" in argv and "init" in argv
+    assert "--thread" in argv and "/bin/init" in argv
+    assert "--lib" in argv and "/system/lib/ld-musl-aarch64.so.1" in argv
+    assert "--function" in argv and "strlen" in argv
+
+
+def test_compare_reports_prefers_prefixed_over_short_alias(fake_relay):
+    """When both styles are passed the `compare_*` form wins — matches the
+    convention used by run_instruction_test_async."""
+    server, _ = fake_relay
+    server.response["stdout"] = json.dumps({
+        "success": True, "level": "process",
+        "aggregate": {"baseline": 1, "candidate": 1, "delta": 0, "delta_pct": 0.0},
+        "reports": [],
+    })
+
+    svc.compare_reports(
+        baseline_report=r"D:\a",
+        candidate_report=r"D:\b",
+        level="total",
+        process="ignored",
+        compare_level="process",
+        compare_process="samgr",
+    )
+    argv = server.last_request["args"]
+    assert "--level" in argv
+    assert "process" in argv
+    assert "total" not in argv
+    assert "samgr" in argv
+    assert "ignored" not in argv
+
+
 def test_run_instruction_test_forwards_venv_flags(fake_relay):
     server, _ = fake_relay
     server.response["stdout"] = json.dumps({"success": True, "phase": "complete", "report_path": "x", "report_name": "x"})
