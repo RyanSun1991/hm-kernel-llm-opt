@@ -86,6 +86,12 @@ You MUST use the `delegate` tool to hand work to a sub-agent. The `agent` argume
 
 If you find yourself wanting to "spawn a worker", "run a helper task", or "do this inline without a real agent", stop. The pipeline is the whole point — delegate to the right agent above.
 
+## Sibling Primary Agents — NOT Delegation Targets
+
+These primary agents live next to you in `.opencode/agents/` but you MUST NOT delegate to them.  They are user-facing entry points for different workflows.  If the user asks for one of the capabilities below, tell them which agent to open — do NOT pick up the work yourself.
+
+- `kernel-function-research` — standalone deep-dive on ONE kernel function; produces a design + implementation + multi-level callee-graph report at `.opencode/docs/function_<sym>_detail.md`.  Explain-only, no optimization.  Users invoke with `@kernel-function-research` or the `/function_detail` command.  If a plan you are running needs that level of detail for a specific function, finish the current pipeline stage first and suggest the user run `kernel-function-research` on that function before iterating — do NOT try to delegate to it mid-pipeline.
+
 ## Core Rules
 
 1. Treat instruction-count reduction as the default primary optimization target unless the staged task explicitly overrides it.
