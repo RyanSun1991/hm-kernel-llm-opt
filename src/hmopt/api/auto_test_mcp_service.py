@@ -47,7 +47,11 @@ DEFAULT_INSTRUCTION_TEST_PIPELINE_SCRIPT = "instruction_test_pipeline.py"
 DEFAULT_REPORT_COMPARE_SCRIPT = "report_compare.py"
 DEFAULT_INSTRUCTION_MAIN_SCRIPT = "main.py"
 DEFAULT_INSTRUCTION_RUN_TIMEOUT_S = 3600 * 2  # 2h, matches pipeline default
-DEFAULT_COMPARE_TIMEOUT_S = 300
+# Windows-side report_compare.py typically runs 60–120 s on a real modelCase
+# report tree; bumped to 600 s so a noisy run (large xlsx, slow disk, antivirus
+# re-scan) still fits comfortably inside the subprocess ceiling and the MCP
+# client doesn't see a silent kill mid-compare.
+DEFAULT_COMPARE_TIMEOUT_S = 600
 
 _INSTRUCTION_TASKS: dict[str, dict[str, Any]] = {}
 _INSTRUCTION_TASKS_LOCK = threading.Lock()
@@ -348,7 +352,10 @@ def _relay_exec(
     for attempt in range(retries):
         try:
             req = Request(url, data=payload, headers=headers, method="POST")
-            http_timeout = timeout_s + 30
+            # Give the HTTP read 60 s of slack over the subprocess timeout so
+            # the relay has room to finish its own JSON encoding + flush after
+            # a long compare run before urlopen trips its own read timeout.
+            http_timeout = timeout_s + 60
             with urlopen(req, timeout=http_timeout) as resp:
                 return json.loads(resp.read())
         except (URLError, OSError, json.JSONDecodeError) as exc:
@@ -446,6 +453,7 @@ def run_instruction_test(
     compare_thread: str | None = None,
     compare_lib: str | None = None,
     compare_function: str | None = None,
+    compare_timeout_s: int = DEFAULT_COMPARE_TIMEOUT_S,
     python_exe: str | None = None,
     use_venv: bool = True,
     venv_dir: str | None = None,
@@ -483,6 +491,13 @@ def run_instruction_test(
             Target names needed at and above the chosen level (e.g.
             ``compare_level="thread"`` requires both ``compare_process``
             and ``compare_thread``).
+        compare_timeout_s: Subprocess timeout (seconds) on the embedded
+            ``report_compare.py`` call that the Windows pipeline issues
+            when ``compare=True``.  Threaded through
+            ``instruction_test_pipeline.py --compare-timeout``.  Defaults
+            to :data:`DEFAULT_COMPARE_TIMEOUT_S` (600 s) which comfortably
+            covers the typical 60–120 s Windows-side compare plus any
+            disk / antivirus noise.
         python_exe: Override the python interpreter on Windows. Takes
             precedence over venv auto-detection.
         use_venv: When True (default) the pipeline probes
@@ -531,6 +546,7 @@ def run_instruction_test(
         argv.extend(["--baseline-report", baseline_report or ""])
         argv.extend(["--compare-script", compare_name])
         argv.extend(["--compare-level", compare_level])
+        argv.extend(["--compare-timeout", str(int(compare_timeout_s))])
         if compare_process:
             argv.extend(["--compare-process", compare_process])
         if compare_thread:
@@ -543,8 +559,10 @@ def run_instruction_test(
         argv.extend(["--extra-arg", str(extra)])
 
     # Allow the relay a little more headroom than the pipeline itself so it can
-    # return the partial structured output on timeout.
-    relay_timeout = int(run_timeout_s) + DEFAULT_COMPARE_TIMEOUT_S + 120
+    # return the partial structured output on timeout — use the effective
+    # compare_timeout (not the module default) so a caller who bumped the
+    # compare budget also bumps the outer ceiling proportionally.
+    relay_timeout = int(run_timeout_s) + int(compare_timeout_s) + 120
 
     relay_result = _relay_exec("python", argv, timeout_s=relay_timeout, cwd=None)
 
@@ -669,16 +687,19 @@ def compare_reports(
 
 
 # ---------------------------------------------------------------------------
-# Async task management for the long-running instruction test
+# Async task management — shared between the instruction-test pipeline (30–
+# 120 min) and the report-compare flow (1–2 min on Windows, but still long
+# enough that a sync MCP tool call can be torn down by the client before
+# the subprocess returns).
 # ---------------------------------------------------------------------------
 
-def _register_instruction_task(payload: dict[str, Any]) -> str:
+def _register_async_task(payload: dict[str, Any], *, kind: str) -> str:
     task_id = str(uuid.uuid4())
     now = time.time()
     with _INSTRUCTION_TASKS_LOCK:
         _INSTRUCTION_TASKS[task_id] = {
             "task_id": task_id,
-            "kind": "run_instruction_test",
+            "kind": kind,
             "status": "pending",
             "created_at": now,
             "updated_at": now,
@@ -689,7 +710,7 @@ def _register_instruction_task(payload: dict[str, Any]) -> str:
     return task_id
 
 
-def _set_instruction_task_running(task_id: str) -> None:
+def _set_async_task_running(task_id: str) -> None:
     with _INSTRUCTION_TASKS_LOCK:
         task = _INSTRUCTION_TASKS.get(task_id)
         if task is None:
@@ -698,7 +719,7 @@ def _set_instruction_task_running(task_id: str) -> None:
         task["updated_at"] = time.time()
 
 
-def _set_instruction_task_result(
+def _set_async_task_result(
     task_id: str,
     *,
     result: dict[str, Any] | None = None,
@@ -714,31 +735,84 @@ def _set_instruction_task_result(
         task["updated_at"] = time.time()
 
 
-def _run_instruction_task(task_id: str, runner: Callable[[], dict[str, Any]]) -> None:
-    _set_instruction_task_running(task_id)
+def _run_async_task(task_id: str, runner: Callable[[], dict[str, Any]], *, kind: str) -> None:
+    _set_async_task_running(task_id)
     try:
         result = runner()
-        _set_instruction_task_result(task_id, result=result)
+        _set_async_task_result(task_id, result=result)
     except Exception as exc:  # noqa: BLE001 — propagate to task status
-        logger.exception("instruction test async task failed: task_id=%s", task_id)
-        _set_instruction_task_result(task_id, error=str(exc))
+        logger.exception("%s async task failed: task_id=%s", kind, task_id)
+        _set_async_task_result(task_id, error=str(exc))
+
+
+# Back-compat aliases — older unit tests and in-repo callers imported the
+# instruction-test-specific names directly.  Keep them as thin shims so
+# nothing outside this module has to know we generalized the infra.
+def _register_instruction_task(payload: dict[str, Any]) -> str:
+    return _register_async_task(payload, kind="run_instruction_test")
+
+
+def _set_instruction_task_running(task_id: str) -> None:
+    _set_async_task_running(task_id)
+
+
+def _set_instruction_task_result(
+    task_id: str,
+    *,
+    result: dict[str, Any] | None = None,
+    error: str | None = None,
+) -> None:
+    _set_async_task_result(task_id, result=result, error=error)
+
+
+def _run_instruction_task(task_id: str, runner: Callable[[], dict[str, Any]]) -> None:
+    _run_async_task(task_id, runner, kind="run_instruction_test")
 
 
 def run_instruction_test_async(**kwargs: Any) -> dict[str, Any]:
     """Submit ``run_instruction_test`` on a background thread and return immediately."""
     payload = {k: v for k, v in kwargs.items() if k != "python_exe"}
-    task_id = _register_instruction_task(payload)
+    task_id = _register_async_task(payload, kind="run_instruction_test")
     thread = threading.Thread(
-        target=_run_instruction_task,
+        target=_run_async_task,
         args=(task_id, lambda: run_instruction_test(**kwargs)),
+        kwargs={"kind": "run_instruction_test"},
         daemon=True,
     )
     thread.start()
     return {"task_id": task_id, "status": "pending", "kind": "run_instruction_test"}
 
 
-def get_instruction_task_status(task_id: str) -> dict[str, Any]:
-    """Query an async instruction-test task by id."""
+def compare_reports_async(**kwargs: Any) -> dict[str, Any]:
+    """Submit ``compare_reports`` on a background thread and return immediately.
+
+    Use this when a tester needs to run many compares back-to-back (e.g.
+    the per-modified-function loop) and the MCP client's synchronous
+    per-tool-call timeout is shorter than the 1–2 min each Windows-side
+    ``report_compare.py`` actually takes.  Poll with
+    :func:`get_async_task_status` / the ``instruction_test_status`` MCP
+    tool — task ids are shared between both async flows.
+    """
+    # Scrub only what we never want echoed back; keep the rest for introspection.
+    payload = {k: v for k, v in kwargs.items()}
+    task_id = _register_async_task(payload, kind="compare_reports")
+    thread = threading.Thread(
+        target=_run_async_task,
+        args=(task_id, lambda: compare_reports(**kwargs)),
+        kwargs={"kind": "compare_reports"},
+        daemon=True,
+    )
+    thread.start()
+    return {"task_id": task_id, "status": "pending", "kind": "compare_reports"}
+
+
+def get_async_task_status(task_id: str) -> dict[str, Any]:
+    """Query any async task (instruction-test or compare_reports) by id.
+
+    The stored record includes ``kind`` so callers can branch on the
+    task type after polling.  Historically named
+    ``get_instruction_task_status`` — keep that symbol as an alias.
+    """
     with _INSTRUCTION_TASKS_LOCK:
         task = _INSTRUCTION_TASKS.get(task_id)
         if task is None:
@@ -746,6 +820,10 @@ def get_instruction_task_status(task_id: str) -> dict[str, Any]:
         snapshot = deepcopy(task)
     snapshot["duration_s"] = round(snapshot["updated_at"] - snapshot["created_at"], 3)
     return snapshot
+
+
+# Alias retained for existing tests and external imports.
+get_instruction_task_status = get_async_task_status
 
 
 @lru_cache(maxsize=1)
@@ -827,6 +905,7 @@ def build_auto_test_fastmcp_server() -> Any | None:
         compare_thread: str | None = None,
         compare_lib: str | None = None,
         compare_function: str | None = None,
+        compare_timeout_s: int = DEFAULT_COMPARE_TIMEOUT_S,
         python_exe: str | None = None,
         use_venv: bool = True,
         venv_dir: str | None = None,
@@ -846,6 +925,7 @@ def build_auto_test_fastmcp_server() -> Any | None:
             compare_thread=compare_thread,
             compare_lib=compare_lib,
             compare_function=compare_function,
+            compare_timeout_s=compare_timeout_s,
             python_exe=python_exe,
             use_venv=use_venv,
             venv_dir=venv_dir,
@@ -874,6 +954,7 @@ def build_auto_test_fastmcp_server() -> Any | None:
         compare_thread: str | None = None,
         compare_lib: str | None = None,
         compare_function: str | None = None,
+        compare_timeout_s: int = DEFAULT_COMPARE_TIMEOUT_S,
         python_exe: str | None = None,
         use_venv: bool = True,
         venv_dir: str | None = None,
@@ -893,6 +974,7 @@ def build_auto_test_fastmcp_server() -> Any | None:
             compare_thread=compare_thread,
             compare_lib=compare_lib,
             compare_function=compare_function,
+            compare_timeout_s=compare_timeout_s,
             python_exe=python_exe,
             use_venv=use_venv,
             venv_dir=venv_dir,
@@ -901,10 +983,25 @@ def build_auto_test_fastmcp_server() -> Any | None:
 
     @mcp.tool(
         name="instruction_test_status",
-        description="Query an async instruction-test task by task_id.",
+        description=(
+            "Query an async task by task_id. Accepts task_ids returned by both "
+            "run_instruction_test_async and compare_reports_async — the returned "
+            "`kind` field tells you which one."
+        ),
     )
     def mcp_instruction_test_status(task_id: str) -> dict[str, Any]:
-        return get_instruction_task_status(task_id=task_id)
+        return get_async_task_status(task_id=task_id)
+
+    @mcp.tool(
+        name="async_task_status",
+        description=(
+            "Alias for instruction_test_status.  Kept under a neutral name so "
+            "callers who only use compare_reports_async don't have to reason "
+            "about the historical naming."
+        ),
+    )
+    def mcp_async_task_status(task_id: str) -> dict[str, Any]:
+        return get_async_task_status(task_id=task_id)
 
     @mcp.tool(
         name="compare_reports",
@@ -934,6 +1031,52 @@ def build_auto_test_fastmcp_server() -> Any | None:
         timeout_s: int = DEFAULT_COMPARE_TIMEOUT_S,
     ) -> dict[str, Any]:
         return compare_reports(
+            baseline_report=baseline_report,
+            candidate_report=candidate_report,
+            compare_script=compare_script,
+            compare_level=compare_level,
+            compare_process=compare_process,
+            compare_thread=compare_thread,
+            compare_lib=compare_lib,
+            compare_function=compare_function,
+            level=level,
+            process=process,
+            thread=thread,
+            lib=lib,
+            function=function,
+            timeout_s=timeout_s,
+        )
+
+    @mcp.tool(
+        name="compare_reports_async",
+        description=(
+            "Submit report_compare.py on the Windows host as an async task and "
+            "return a task_id immediately.  Poll with instruction_test_status "
+            "(or async_task_status) — the returned record carries kind="
+            "\"compare_reports\" so callers can distinguish it from instruction-"
+            "test tasks.  Use this in the per-modified-function validation loop "
+            "where N serial synchronous compares would exceed the MCP client's "
+            "per-tool-call timeout even though each Windows-side run is only "
+            "1–2 minutes."
+        ),
+    )
+    def mcp_compare_reports_async(
+        baseline_report: str,
+        candidate_report: str,
+        compare_script: str | None = None,
+        compare_level: str = "total",
+        compare_process: str | None = None,
+        compare_thread: str | None = None,
+        compare_lib: str | None = None,
+        compare_function: str | None = None,
+        level: str | None = None,
+        process: str | None = None,
+        thread: str | None = None,
+        lib: str | None = None,
+        function: str | None = None,
+        timeout_s: int = DEFAULT_COMPARE_TIMEOUT_S,
+    ) -> dict[str, Any]:
+        return compare_reports_async(
             baseline_report=baseline_report,
             candidate_report=candidate_report,
             compare_script=compare_script,

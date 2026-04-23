@@ -402,4 +402,106 @@ def test_build_auto_test_fastmcp_server_registers_new_tools():
     if tool_names:
         assert "run_instruction_test" in tool_names
         assert "compare_reports" in tool_names
+        assert "compare_reports_async" in tool_names
+        assert "async_task_status" in tool_names
         assert "auto_test_relay_health" in tool_names
+
+
+def test_default_compare_timeout_has_headroom_for_windows_runs():
+    # report_compare.py on Windows is 60–120s on a real modelCase report
+    # tree; DEFAULT_COMPARE_TIMEOUT_S must leave clear headroom so a noisy
+    # run (AV re-scan, slow disk) doesn't get killed mid-compare.  Guard
+    # against a regression that silently shrinks it back to 300s.
+    assert svc.DEFAULT_COMPARE_TIMEOUT_S >= 600
+
+
+def test_run_instruction_test_forwards_compare_timeout(fake_relay):
+    server, _ = fake_relay
+    server.response["stdout"] = json.dumps({
+        "success": True, "phase": "complete", "report_path": "x", "report_name": "x",
+    })
+
+    # Default: --compare-timeout equal to DEFAULT_COMPARE_TIMEOUT_S is on the
+    # wire whenever compare=True.
+    svc.run_instruction_test(compare=True, baseline_report=r"D:\stock")
+    argv = server.last_request["args"]
+    assert "--compare-timeout" in argv
+    assert str(svc.DEFAULT_COMPARE_TIMEOUT_S) in argv
+
+    # Explicit override wins.
+    svc.run_instruction_test(
+        compare=True, baseline_report=r"D:\stock", compare_timeout_s=900,
+    )
+    argv = server.last_request["args"]
+    assert "--compare-timeout" in argv
+    assert "900" in argv
+
+
+def test_compare_reports_async_returns_task_id_and_polls_to_success(fake_relay):
+    """compare_reports_async must hand back a task_id that instruction_test_status
+    can poll through to a successful result — the whole point of this path is
+    that the MCP call itself finishes in milliseconds while the Windows
+    subprocess can take 1–2 minutes."""
+    server, _ = fake_relay
+    server.response["stdout"] = json.dumps({
+        "success": True,
+        "baseline_dir": r"D:\a",
+        "candidate_dir": r"D:\b",
+        "level": "function",
+        "aggregate": {
+            "baseline": 100, "candidate": 90, "delta": -10, "delta_pct": -10.0,
+            "baseline_found": True, "candidate_found": True,
+        },
+        "reports": [],
+    })
+
+    task_info = svc.compare_reports_async(
+        baseline_report=r"D:\a",
+        candidate_report=r"D:\b",
+        compare_level="function",
+        compare_function="strlen",
+    )
+    assert task_info["kind"] == "compare_reports"
+    assert task_info["status"] == "pending"
+    assert "task_id" in task_info
+
+    for _ in range(200):
+        status = svc.get_instruction_task_status(task_info["task_id"])
+        if status["status"] in ("succeeded", "failed"):
+            break
+        time.sleep(0.05)
+
+    assert status["status"] == "succeeded"
+    assert status["kind"] == "compare_reports"
+    assert status["result"]["aggregate"]["delta"] == -10
+
+    # Confirm the underlying relay call carried the compare_* names through.
+    argv = server.last_request["args"]
+    assert argv[0] == svc.DEFAULT_REPORT_COMPARE_SCRIPT
+    assert "--level" in argv and "function" in argv
+    assert "--function" in argv and "strlen" in argv
+
+
+def test_async_task_status_shared_between_kinds(fake_relay):
+    """instruction_test_status / get_instruction_task_status should accept a
+    task_id from either run_instruction_test_async OR compare_reports_async —
+    they share one task table keyed by id."""
+    server, _ = fake_relay
+    server.response["stdout"] = json.dumps({
+        "success": True,
+        "aggregate": {
+            "baseline": 1, "candidate": 1, "delta": 0, "delta_pct": 0.0,
+            "baseline_found": True, "candidate_found": True,
+        },
+        "reports": [],
+        "level": "total",
+    })
+
+    task = svc.compare_reports_async(baseline_report="a", candidate_report="b")
+    for _ in range(200):
+        status = svc.get_async_task_status(task["task_id"])
+        if status["status"] in ("succeeded", "failed"):
+            break
+        time.sleep(0.05)
+    assert status["kind"] == "compare_reports"
+    assert status["status"] == "succeeded"

@@ -197,20 +197,52 @@ compare_result = status["result"]["compare"]["result"]
 
 # Per-modified-function compares (mandatory when modified_functions is non-empty).
 # The primary compare above uses the plan's chosen level; these extras always
-# use level="function" and sum every row whose functionName matches.  The
-# optional process/thread/lib narrow the search when you already know where
-# the function lives; pass None (the default) to sum globally.
+# use compare_level="function" and sum every row whose functionName matches.
+# The optional compare_process/thread/lib narrow the search when you already
+# know where the function lives; pass None (the default) to sum globally.
+#
+# IMPORTANT — use compare_reports_async, NOT the sync compare_reports, for
+# the per-function loop:
+#   * each Windows-side compare takes 1–2 minutes
+#   * N synchronous calls in a row regularly exceed the MCP client's
+#     per-tool-call timeout, leaving the agent stuck even though the
+#     Windows subprocess has actually finished
+#   * the async variant returns a task_id immediately and you poll with
+#     instruction_test_status (same tool as run_instruction_test_async;
+#     record.kind == "compare_reports" distinguishes the two kinds)
+# Stick to the compare_*-prefixed parameter names everywhere here so you do
+# not silently fall back to level="total" when callers mix conventions.
 per_function_compares = []
 for fn in modified_functions:
-    cmp = compare_reports(
+    cmp_task = compare_reports_async(
         baseline_report=baseline_report,
         candidate_report=status["result"]["report_path"],
-        level="function",
-        function=fn,
-        # Pass process/thread/lib only if the plan pins them — otherwise
-        # leave them None so report_compare sums across every owner.
+        compare_level="function",
+        compare_function=fn,
+        # Pass compare_process/thread/lib only if the plan pins them —
+        # otherwise leave them None so report_compare sums across every owner.
     )
-    per_function_compares.append({"function": fn, "result": cmp})
+    cmp_task_id = cmp_task["task_id"]
+
+    # Poll every 20s, ceiling 15 min (Windows compare is 1–2 min nominal;
+    # the ceiling absorbs antivirus re-scans and slow disks).
+    loop:
+        cmp_status = instruction_test_status(task_id=cmp_task_id)
+        if cmp_status["status"] in ("succeeded", "failed"): break
+        sleep 20
+
+    if cmp_status["status"] != "succeeded":
+        # Record the failure but continue — one flaky compare should not
+        # gate the rest of the per-function loop.  Surface it in the
+        # validation report so the reviewer can see which function lacks
+        # evidence.
+        per_function_compares.append({
+            "function": fn,
+            "error": cmp_status.get("error") or "compare task did not succeed",
+        })
+        continue
+
+    per_function_compares.append({"function": fn, "result": cmp_status["result"]})
 ```
 
 The `compare_result.aggregate` is what drives the primary verdict:
