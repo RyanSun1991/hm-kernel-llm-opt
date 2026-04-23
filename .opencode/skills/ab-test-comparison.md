@@ -13,10 +13,13 @@ This skill defines the Auto-Test MCP workflow the tester runs **after** stock / 
 |---|---|
 | Auto-Test MCP `auto_test_relay_health` | Confirm the Windows relay used for instruction tests is reachable |
 | Auto-Test MCP `run_instruction_test_async` | Submit modelCase `main.py` as an async task; returns `task_id` |
-| Auto-Test MCP `instruction_test_status` | Poll a submitted task by `task_id` |
-| Auto-Test MCP `compare_reports` | Fallback — re-compare two existing report dirs without re-running the test |
+| Auto-Test MCP `instruction_test_status` | Poll either async task kind (instruction test OR compare) by `task_id` |
+| Auto-Test MCP `compare_reports_async` | Submit `report_compare.py` as an async task; returns `task_id`.  Poll with `instruction_test_status`.  Use for the per-modified-function loop |
+| Auto-Test MCP `compare_reports` | Sync fallback — only for a single one-off re-compare.  Do NOT use it inside a loop |
 
 **Only `run_instruction_test_async` is acceptable** for the test step.  A single instruction-count run is 30–120 minutes on device; the sync `run_instruction_test` will tear the MCP session down before it finishes.  Always go async and poll.
+
+**Prefer `compare_reports_async`** for any per-function / per-target compare loop.  Each Windows-side `report_compare.py` takes 60–120 s on a real modelCase tree; N serial synchronous calls will blow past the MCP client's per-tool-call timeout even though the subprocesses actually finish.  The sync `compare_reports` is fine for a single one-off re-compare when the embedded compare is missing, but not for a loop.
 
 ## Preconditions
 
@@ -102,28 +105,50 @@ Sources, in preference order:
 
 If all three are empty (patch only touches macros, Kconfig, or headers), skip this phase and note "no function bodies touched" in the validation report.
 
-#### Tool call shape
+#### Tool call shape — async compare + poll (mandatory for the loop)
+
+Use `compare_reports_async` so each compare (1–2 min Windows-side) returns a `task_id` immediately and you poll it the same way you poll `run_instruction_test_async`.  Stick with the `compare_*`-prefixed names end-to-end so the parameter set matches what Phase B already put on the wire.
 
 ```
 per_function_compares = []
 for fn in modified_functions:
-    cmp = compare_reports(
+    cmp_task = compare_reports_async(
         baseline_report=baseline_report,
         candidate_report=candidate_report,        # status["result"]["report_path"]
-        level="function",
-        function=fn,
-        # process / thread / lib are optional narrowing filters.  When the plan
-        # pins any of them, pass them through; otherwise leave them None so
-        # every row in functions_instructions_info whose functionName matches
-        # is summed — regardless of which process/thread/lib owns it.
-        process=compare_process,   # or None
-        thread=compare_thread,     # or None
-        lib=compare_lib,           # or None
+        compare_level="function",
+        compare_function=fn,
+        # compare_process / _thread / _lib are optional narrowing filters.
+        # When the plan pins any of them, pass them through; otherwise
+        # leave them None so every row in functions_instructions_info
+        # whose functionName matches is summed — regardless of which
+        # process/thread/lib owns it.
+        compare_process=compare_process,   # or None
+        compare_thread=compare_thread,     # or None
+        compare_lib=compare_lib,           # or None
     )
-    per_function_compares.append({"function": fn, "result": cmp})
+    cmp_task_id = cmp_task["task_id"]
+
+    # Poll every 20 s, ceiling 15 min per compare.  The nominal Windows-side
+    # run is 60–120 s — the ceiling is noise tolerance (slow disk, antivirus
+    # re-scan), not a typical wait.  Do NOT leave the poll mid-flight.
+    loop:
+        cmp_status = instruction_test_status(task_id=cmp_task_id)
+        if cmp_status["status"] in ("succeeded", "failed"): break
+        sleep 20
+
+    if cmp_status["status"] != "succeeded":
+        # Record the failure and move on — one flaky compare should not
+        # block the rest of the per-function evidence.
+        per_function_compares.append({
+            "function": fn,
+            "error": cmp_status.get("error") or "compare task did not succeed",
+        })
+        continue
+
+    per_function_compares.append({"function": fn, "result": cmp_status["result"]})
 ```
 
-`compare_reports` runs on Windows via the relay.  Each call returns the normal `aggregate` dict (`baseline`, `candidate`, `delta`, `delta_pct`, `baseline_found`, `candidate_found`, `pairs_*`).
+Both `compare_reports` and `compare_reports_async` run `report_compare.py` on Windows via the relay.  The async variant just does it on a background thread and hands you a `task_id`, so the MCP tool call itself returns in milliseconds instead of blocking for 60–120 s.  Each successful result carries the normal `aggregate` dict (`baseline`, `candidate`, `delta`, `delta_pct`, `baseline_found`, `candidate_found`, `pairs_*`).
 
 #### Using the results
 
@@ -260,8 +285,9 @@ If the patch touched no function bodies, print "no function bodies modified — 
 ## Hard Rules (recap)
 
 1. NEVER use `run_instruction_test` (sync).  Only `run_instruction_test_async` + `instruction_test_status` polling.
-2. NEVER return to the manager, delegate, or end the session while an async test is still `pending` or `running`.
+2. NEVER return to the manager, delegate, or end the session while an async task (either instruction-test OR compare) is still `pending` or `running`.
 3. NEVER start the test before the image is flashed AND settled.  This skill assumes `flash-device-operations.md` already ran.
 4. Both phases MUST use identical test workspace + parameters — the only legitimate delta is the flashed image.
 5. If stock phase fails, report infrastructure failure — not a patch failure.
 6. The `compare_level` in Phase B MUST match the metric named in the plan.
+7. For the per-modified-function loop, use `compare_reports_async` + `instruction_test_status`, NOT synchronous `compare_reports`.  A loop of N sync compares will time out the MCP client even though each Windows-side run completes.

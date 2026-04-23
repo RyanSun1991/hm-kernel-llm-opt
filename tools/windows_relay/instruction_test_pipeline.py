@@ -70,6 +70,10 @@ REPORT_DIR_NAME = "reports"
 REPORT_NAME_PATTERN = re.compile(r"^report_(\d{14})$")
 DEFAULT_MAIN_SCRIPT = "main.py"
 DEFAULT_RUN_TIMEOUT_S = 3600 * 2  # 2 hours to allow long instruction runs
+# report_compare.py on a real modelCase tree normally takes 60–120 s.  The
+# 600 s ceiling absorbs disk / antivirus noise without being so large that a
+# genuinely stuck compare silently eats into the relay budget.
+DEFAULT_COMPARE_TIMEOUT_S = 600
 DEFAULT_TEST_DIR = r"D:\modelCase_OH_single"
 
 # Candidate venv directories to probe under ``test_dir`` when ``--venv-dir``
@@ -361,6 +365,7 @@ def run_instruction_test(
     compare_thread: str | None = None,
     compare_lib: str | None = None,
     compare_function: str | None = None,
+    compare_timeout_s: int = DEFAULT_COMPARE_TIMEOUT_S,
     use_venv: bool = True,
     venv_dir: str | None = None,
     force_utf8: bool = True,
@@ -545,8 +550,12 @@ def run_instruction_test(
         if compare_function:
             cmp_argv.extend(["--function", compare_function])
 
-        _log(f"comparing: {subprocess.list2cmdline(cmp_argv)}")
-        cmp_result = _run(cmp_argv, cwd=None, timeout_s=300)
+        cmp_timeout = max(int(compare_timeout_s), 1)
+        _log(
+            f"comparing: {subprocess.list2cmdline(cmp_argv)} "
+            f"(timeout={cmp_timeout}s)"
+        )
+        cmp_result = _run(cmp_argv, cwd=None, timeout_s=cmp_timeout)
 
         compare_payload: dict[str, Any] = {
             "ok": cmp_result["ok"],
@@ -644,6 +653,16 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--compare-thread", default=None, help="Target threadName for --compare.")
     parser.add_argument("--compare-lib", default=None, help="Target libName for --compare.")
     parser.add_argument("--compare-function", default=None, help="Target functionName for --compare.")
+    parser.add_argument(
+        "--compare-timeout",
+        type=int,
+        default=DEFAULT_COMPARE_TIMEOUT_S,
+        help=(
+            "Seconds to allow report_compare.py to finish (default "
+            f"{DEFAULT_COMPARE_TIMEOUT_S}s). Raise when running on slow "
+            "disks or very large report trees."
+        ),
+    )
     return parser
 
 
@@ -664,6 +683,7 @@ def main(argv: list[str] | None = None) -> int:
         compare_thread=args.compare_thread,
         compare_lib=args.compare_lib,
         compare_function=args.compare_function,
+        compare_timeout_s=args.compare_timeout,
         use_venv=not args.no_venv,
         venv_dir=args.venv_dir,
         force_utf8=not args.no_utf8,

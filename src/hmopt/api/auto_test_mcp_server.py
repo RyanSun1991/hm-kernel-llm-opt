@@ -14,7 +14,8 @@ from hmopt.api.auto_test_mcp_service import (
     auto_test_relay_health_check,
     build_auto_test_fastmcp_server,
     compare_reports,
-    get_instruction_task_status,
+    compare_reports_async,
+    get_async_task_status,
     run_instruction_test,
     run_instruction_test_async,
     run_phone_test,
@@ -83,8 +84,10 @@ def health() -> dict[str, Any]:
 _TOOL_DISPATCH: dict[str, Any] = {
     "run_instruction_test": run_instruction_test,
     "run_instruction_test_async": run_instruction_test_async,
-    "instruction_test_status": get_instruction_task_status,
+    "instruction_test_status": get_async_task_status,
+    "async_task_status": get_async_task_status,
     "compare_reports": compare_reports,
+    "compare_reports_async": compare_reports_async,
     "auto_test_relay_health": auto_test_relay_health_check,
 }
 
