@@ -54,7 +54,8 @@ Issue these in order.  **Cache every response inline in the final artifact** und
 5. **Referenced data structures** — structs, unions, and globals the function touches.  Record field-level access if the index exposes it.
 6. **Concurrency primitives** — every lock acquire / release, RCU section, atomic op, seqlock, preempt-disable, and memory barrier in the body.
 7. **Error paths** — every early return, `goto` label, and `ERR_PTR` / `IS_ERR` style usage.
-8. **Hotspot context** — if runtime evidence exists for the target (hiperf / flamegraph / perf under `outputs/` or a run-id the user attached), correlate which callees dominate.  Optional — say so explicitly when absent.
+8. **Per-callee hot-path classification** — for EVERY node in the callee graph (root + every expanded callee up to the requested depth), decide `[HOT]` / `[SLOW]` / `[COLD]` / `[UNKNOWN]` against the criteria in the Callee Graph Contract.  The deciding evidence for each classification MUST be cited with `file:line` of the call-site (branch header, loop header, `likely()` / `unlikely()` macro, error-goto label, fast-path / slow-path comment in the source).  Do this as a deliberate pass over the graph — it is not a by-product of the callee-graph query.  Record the rationale in the indented-tree form and summarize it in the Hot-Path Analysis section.
+9. **Hotspot runtime corroboration** — if runtime evidence exists for the target (hiperf / flamegraph / perf under `outputs/` or a run-id the user attached), match each `[HOT]` / `[SLOW]` node against the observed sample fractions.  Flag any node whose static class disagrees with the runtime signal (e.g. a `[COLD]` node that took 30% of samples) as a classification-revision candidate in Open Questions.  Optional — say so explicitly when runtime evidence is absent; do NOT promote a classification because "it feels hot".
 
 ## Callee Graph Contract (non-negotiable)
 
@@ -69,13 +70,20 @@ The callee graph is the centerpiece of the deliverable.  It MUST satisfy:
 - **Stubs** — forward declarations with no body in scope get `[stub]` and no children.
 - **Edge condition** — when a call is guarded, annotate the edge with the condition in five words or fewer (e.g. `if !PageLRU`, `on error`, `fast path`, `slow path`, `locked only`, `retry only`).
 - **Cross-module hops** — append `[module:<name>]` (e.g. `[module:memmgr]`, `[module:sched]`) so the reader can see TU / subsystem boundaries at a glance.
+- **Hot-path class** — EVERY node in the callee graph (including the root) carries exactly one of the tags below.  Classification is a static analysis task: the agent examines each callee's call-site context in the body of its parent and picks the tightest class that the static evidence supports.  When runtime evidence exists it only corroborates — it never replaces the static classification.
+  - `[HOT]` — reached on the function's mainline / fast path: unconditional from the root, or inside a branch the code marks or documents as the common case (e.g. `likely()`-hinted, fast-path comment, loop body that processes normal data).  Also any callee inside a loop whose iteration count scales with the workload.
+  - `[SLOW]` — reached only when the fast path loses: lock-contention fallback, allocator slow-path, retry loop, refill, resize, rebalance.  Still exercised under normal load but off the 1st-order mainline.
+  - `[COLD]` — error handlers reached via `goto err_*` / `goto out_*`, `unlikely()`-hinted branches, init-only / shutdown-only code, debug / tracing / stat-dump helpers, `BUG()` / `WARN()` paths.
+  - `[UNKNOWN]` — static evidence is genuinely insufficient (e.g. the call sits behind an indirect jump whose target set is also `[unknown]`, or behind a runtime-configurable policy the index cannot resolve).  List every `[UNKNOWN]` node in Open Questions with what would resolve it.
+  - Attach a **one-phrase rationale** to every classified node in the indented tree, cited with `file:line` of the deciding evidence (loop header, branch predicate, `likely()` macro, error-goto label, comment that names the path).  A bare `[HOT]` with no rationale is unreviewable and fails the quality bar.
 
-Emit the graph **twice** in the artifact:
+Emit the graph **three** times in the artifact:
 
-1. **Mermaid** `flowchart TD` for human reading — collapsed to depth 2 with a short note pointing readers at the full tree below.  Keep node labels short; put the annotations in edge labels or a legend.
-2. **Plain indented tree** (2-space indent, one line per edge, all annotation tags appended to the callee name) for grep / AI-tool consumption.  Any downstream automation will parse this form, not the Mermaid.
+1. **Mermaid — Full** — `flowchart TD` of the whole tree collapsed to depth 2, for human reading.  Keep node labels short; encode annotations in edge labels or a legend.  Style `[HOT]` nodes one way (e.g. filled), `[SLOW]` another (e.g. thick border), `[COLD]` another (e.g. dashed), `[UNKNOWN]` another (e.g. greyed) so the reader sees the hot-path shape at a glance.
+2. **Mermaid — Hot-Path-Only** — same `flowchart TD` but pruned to only `[HOT]` and `[SLOW]` nodes (drop every `[COLD]` / `[UNKNOWN]` subtree, or elide them behind a single "... (cold)" summary node per branch).  This is the instruction-count-dominating subgraph and is the view most callers of this report actually want.
+3. **Plain indented tree** (2-space indent, one line per edge, all annotation tags + hot-path class + rationale + file:line appended to the callee name) for grep / AI-tool consumption.  Any downstream automation will parse this form, not the Mermaid.
 
-Both views MUST show the same set of nodes and edges — if they diverge, the indented tree is authoritative.
+All three views MUST agree on the node set and the classification tags — if they diverge, the indented tree is authoritative.
 
 ## Deliverable — One Artifact, Written Once
 
@@ -102,13 +110,17 @@ where `<sym>` is the target function's canonical name (lowercase, `_` separators
 4. **Implementation Walkthrough** — block-by-block, NOT line-by-line.  Cite `file:line` for each block.  Surface non-obvious control flow (gotos, jump labels, fallthroughs, early returns) and any macro-expanded cleverness.
 5. **Concurrency & Locking** — locks held on entry, locks taken inside the body, locks released before return, blocking vs non-blocking behavior, atomic-context requirements, RCU-section boundaries, and memory barriers.  One line per primitive is enough; this is a reference table, not prose.
 6. **Error Paths** — every failure return with the corresponding caller-side reaction, each with a `file:line` citation.
-7. **Callee Graph — Mermaid** — collapsed-depth-2 view of the full tree.
-8. **Callee Graph — Indented Tree** — the full tree at the requested depth with every annotation from the Callee Graph Contract.
-9. **Caller Graph (depth 1)** — brief table of direct callers with one-line context (hot-path / error-handler / init-only / etc.).
-10. **Referenced Data Structures** — structs / globals / ops tables the function touches, each with a one-line purpose note and field access pattern (`R` / `W` / `RMW`).
-11. **Hot-Path Hints** — if runtime evidence correlates, cite which callees dominate and what fraction of instruction count they accounted for.  If no runtime evidence exists, say so explicitly ("no runtime evidence available on this pass") rather than hand-waving.
-12. **Open Questions** — anything MCP queries left ambiguous (indirect target sets, stub definitions, macro differences between build configs).  Be specific — "unknown" by itself is not useful; state what would resolve it.
-13. **Evidence Appendix** — for every MCP query issued, the query text and the raw (trimmed) result it returned.  Reader should be able to audit the callee graph from this section alone.
+7. **Callee Graph — Mermaid (Full)** — whole tree collapsed to depth 2, with `[HOT]` / `[SLOW]` / `[COLD]` / `[UNKNOWN]` styled differently (fill / border / dashed / grey) so the hot-path shape jumps out.
+8. **Callee Graph — Mermaid (Hot-Path Only)** — same graph pruned to `[HOT]` + `[SLOW]` nodes; `[COLD]` and `[UNKNOWN]` subtrees collapsed behind one summary node per branch.  This is the instruction-count-dominating subgraph and is what most downstream readers will actually consume.
+9. **Callee Graph — Indented Tree** — full tree at the requested depth, each line carrying: callee symbol → annotation tags (`(*)` / `[ext]` / `[inline]` / `[stub]` / `[module:*]` / `↺`) → hot-path class (`[HOT]` / `[SLOW]` / `[COLD]` / `[UNKNOWN]`) → one-phrase rationale → `file:line` of the call-site.  Authoritative view — automation parses this form, not the Mermaid.
+10. **Hot-Path Analysis** — the deliberate per-callee pass:
+    - Classification table: `node | depth | class | rationale | call-site file:line | runtime-corroborated?`.  One row per node in the callee graph (root + every callee expanded above).  `runtime-corroborated?` is `y` / `n` / `n/a` — `n/a` when no runtime evidence exists.
+    - Hot-path narrative: one short paragraph walking the root → leaf chain(s) that carry the bulk of instruction count.  Name the dominating callees explicitly.
+    - Discrepancies: any node whose static class disagrees with runtime signal, flagged here and echoed in Open Questions.  Omit the subsection only when runtime evidence is absent — state that explicitly instead of deleting the heading.
+11. **Caller Graph (depth 1)** — brief table of direct callers with one-line context (hot-path / error-handler / init-only / etc.).
+12. **Referenced Data Structures** — structs / globals / ops tables the function touches, each with a one-line purpose note and field access pattern (`R` / `W` / `RMW`).
+13. **Open Questions** — anything MCP queries left ambiguous (indirect target sets, stub definitions, macro differences between build configs, `[UNKNOWN]` hot-path classes, static-vs-runtime disagreements).  Be specific — "unknown" by itself is not useful; state what would resolve it.
+14. **Evidence Appendix** — for every MCP query issued, the query text and the raw (trimmed) result it returned.  Reader should be able to audit the callee graph and hot-path classification from this section alone.
 
 ### File Writing Rule
 
@@ -133,7 +145,13 @@ You DO NOT:
 - [ ] every recursive edge marked `↺`
 - [ ] every external boundary marked `[ext]`
 - [ ] every cross-module hop marked `[module:<name>]`
-- [ ] both Mermaid and indented-tree renderings present and agree on the node set
+- [ ] every node (root + all expanded callees) carries exactly one of `[HOT]` / `[SLOW]` / `[COLD]` / `[UNKNOWN]`
+- [ ] every hot-path class has a one-phrase rationale and `file:line` of the deciding evidence
+- [ ] Hot-Path Analysis section includes the classification table with one row per node
+- [ ] Hot-Path Analysis section includes the hot-path narrative paragraph naming the dominating chain
+- [ ] runtime-corroboration column filled for every row (`y` / `n` / `n/a`); any static-vs-runtime disagreement is flagged both in the table and in Open Questions
+- [ ] Mermaid-Full, Mermaid-Hot-Path-Only, and indented-tree renderings all present and agree on the node set + classification
+- [ ] every `[UNKNOWN]` node is listed in Open Questions with what would resolve it
 - [ ] Concurrency & Locking section lists every lock acquire / release in the body
 - [ ] every factual claim carries a `file:line` citation
 - [ ] Evidence Appendix contains every MCP query used
