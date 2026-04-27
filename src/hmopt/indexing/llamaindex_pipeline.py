@@ -659,6 +659,8 @@ def _build_graph_entities(index: CodeIndex) -> tuple[list[EntityNode], list[Rela
                     "dst_kind": rel.dst_kind,
                     "src_path": rel.src_path,
                     "dst_path": rel.dst_path,
+                    "call_site_path": rel.call_site_path,
+                    "call_site_line": rel.call_site_line,
                 },
             )
         )
@@ -1886,7 +1888,8 @@ def retrieve_code_context(
                         "MATCH (s:symbol)-[r]->(t) "
                         "WHERE s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols "
                         "RETURN s.symbol_name as src, s.symbol_qualname as src_qual, "
-                        "type(r) as rel, t.symbol_name as dst, t.symbol_qualname as dst_qual "
+                        "type(r) as rel, t.symbol_name as dst, t.symbol_qualname as dst_qual, "
+                        "r.call_site_path as call_site_path, r.call_site_line as call_site_line "
                         "LIMIT $limit"
                     ),
                     {"symbols": symbols_param, "limit": per_hop_limit},
@@ -1896,7 +1899,8 @@ def retrieve_code_context(
                         "MATCH (s:symbol)<-[r]-(t) "
                         "WHERE s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols "
                         "RETURN t.symbol_name as src, t.symbol_qualname as src_qual, "
-                        "type(r) as rel, s.symbol_name as dst, s.symbol_qualname as dst_qual "
+                        "type(r) as rel, s.symbol_name as dst, s.symbol_qualname as dst_qual, "
+                        "r.call_site_path as call_site_path, r.call_site_line as call_site_line "
                         "LIMIT $limit"
                     ),
                     {"symbols": symbols_param, "limit": per_hop_limit},
@@ -1908,7 +1912,14 @@ def retrieve_code_context(
                     if src and dst:
                         rel_name = str(rec.get("rel") or "related_to")
                         graph_edges.append(
-                            {"src": src, "dst": dst, "rel": rel_name, "depth": depth}
+                            {
+                                "src": src,
+                                "dst": dst,
+                                "rel": rel_name,
+                                "depth": depth,
+                                "call_site_path": rec.get("call_site_path"),
+                                "call_site_line": rec.get("call_site_line"),
+                            }
                         )
                         dst_rel_counts = symbol_relation_counts.setdefault(dst, {})
                         dst_rel_counts[rel_name] = dst_rel_counts.get(rel_name, 0) + 1
@@ -1926,7 +1937,14 @@ def retrieve_code_context(
                     if src and dst:
                         rel_name = str(rec.get("rel") or "related_to")
                         graph_edges.append(
-                            {"src": src, "dst": dst, "rel": rel_name, "depth": depth}
+                            {
+                                "src": src,
+                                "dst": dst,
+                                "rel": rel_name,
+                                "depth": depth,
+                                "call_site_path": rec.get("call_site_path"),
+                                "call_site_line": rec.get("call_site_line"),
+                            }
                         )
                         src_rel_counts = symbol_relation_counts.setdefault(src, {})
                         src_rel_counts[rel_name] = src_rel_counts.get(rel_name, 0) + 1
@@ -2307,7 +2325,8 @@ def retrieve_call_chain(
         "type(r) as rel, "
         "t.symbol_name as dst, t.symbol_qualname as dst_qual, "
         "t.path as dst_path, t.start_line as dst_start, t.end_line as dst_end, "
-        "t.symbol_kind as dst_kind "
+        "t.symbol_kind as dst_kind, "
+        "r.call_site_path as call_site_path, r.call_site_line as call_site_line "
         "LIMIT $limit"
     )
     in_cypher = (
@@ -2318,7 +2337,8 @@ def retrieve_call_chain(
         "type(r) as rel, "
         "s.symbol_name as dst, s.symbol_qualname as dst_qual, "
         "t.path as src_path, t.start_line as src_start, t.end_line as src_end, "
-        "t.symbol_kind as src_kind "
+        "t.symbol_kind as src_kind, "
+        "r.call_site_path as call_site_path, r.call_site_line as call_site_line "
         "LIMIT $limit"
     )
 
@@ -2384,6 +2404,8 @@ def retrieve_call_chain(
                         "rel": str(rec.get("rel") or "calls"),
                         "depth": current_depth,
                         "direction": "callee",
+                        "call_site_path": rec.get("call_site_path"),
+                        "call_site_line": rec.get("call_site_line"),
                     }
                 )
                 _record_node(src_key, rec.get("src"))
@@ -2424,6 +2446,8 @@ def retrieve_call_chain(
                         "rel": str(rec.get("rel") or "calls"),
                         "depth": current_depth,
                         "direction": "caller",
+                        "call_site_path": rec.get("call_site_path"),
+                        "call_site_line": rec.get("call_site_line"),
                     }
                 )
                 _record_node(
@@ -2504,9 +2528,12 @@ def _format_call_chain_text(payload: dict[str, Any]) -> str:
     if edges:
         lines.append("Edges:")
         for edge in edges:
+            site = ""
+            if edge.get("call_site_path") and edge.get("call_site_line"):
+                site = f" @ {edge['call_site_path']}:{edge['call_site_line']}"
             lines.append(
                 f"- depth={edge.get('depth')} {edge.get('src')} -[{edge.get('rel')}]-> "
-                f"{edge.get('dst')} ({edge.get('direction')})"
+                f"{edge.get('dst')} ({edge.get('direction')}){site}"
             )
     nodes = payload.get("nodes") or {}
     if nodes:

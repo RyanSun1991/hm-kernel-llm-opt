@@ -514,9 +514,12 @@ def call_chain_to_markdown(payload: dict[str, Any]) -> str:
         lines.append("")
         lines.append("## Edges")
         for edge in edges:
+            site = ""
+            if edge.get("call_site_path") and edge.get("call_site_line"):
+                site = f" @ {edge['call_site_path']}:{edge['call_site_line']}"
             lines.append(
                 f"- depth={edge.get('depth')} {edge.get('src')} -[{edge.get('rel')}]-> "
-                f"{edge.get('dst')} ({edge.get('direction')})"
+                f"{edge.get('dst')} ({edge.get('direction')}){site}"
             )
 
     nodes = payload.get("nodes") or {}

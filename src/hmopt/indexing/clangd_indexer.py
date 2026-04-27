@@ -118,6 +118,8 @@ class CodeRelation:
     dst_kind: str
     src_path: Optional[str] = None
     dst_path: Optional[str] = None
+    call_site_path: Optional[str] = None
+    call_site_line: Optional[int] = None
 
 
 @dataclass
@@ -359,6 +361,41 @@ def _scan_tokens(text: str, names: set[str], max_hits: int) -> list[str]:
     return hits
 
 
+def _scan_tokens_with_lines(
+    text: str,
+    names: set[str],
+    max_hits: int,
+) -> list[tuple[str, int]]:
+    """Like _scan_tokens but also returns the 0-indexed line offset of the first hit per name."""
+    hits: list[tuple[str, int]] = []
+    seen: set[str] = set()
+    if not text or not names:
+        return hits
+    line_starts = [0]
+    for idx, ch in enumerate(text):
+        if ch == "\n":
+            line_starts.append(idx + 1)
+
+    def _line_of(offset: int) -> int:
+        lo, hi = 0, len(line_starts) - 1
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if line_starts[mid] <= offset:
+                lo = mid
+            else:
+                hi = mid - 1
+        return lo
+
+    for match in TOKEN_PATTERN.finditer(text):
+        token = match.group(0)
+        if token in names and token not in seen:
+            hits.append((token, _line_of(match.start())))
+            seen.add(token)
+            if max_hits and len(hits) >= max_hits:
+                break
+    return hits
+
+
 def _limit_names(names: list[str], limit: int) -> set[str]:
     if limit and len(names) > limit:
         logger.warning("Usage scan names truncated: %d -> %d", len(names), limit)
@@ -375,6 +412,8 @@ def _add_relation(
     dst_name: Optional[str] = None,
     dst_path: Optional[Path] = None,
     dst_kind: Optional[str] = None,
+    call_site_path: Optional[str] = None,
+    call_site_line: Optional[int] = None,
 ) -> None:
     if dst:
         dst_id = dst.symbol_id
@@ -399,6 +438,8 @@ def _add_relation(
         dst_kind=dst_kind,
         src_path=str(src.path),
         dst_path=dst_path_str,
+        call_site_path=call_site_path,
+        call_site_line=call_site_line,
     )
 
 
@@ -595,6 +636,8 @@ def index_kernel_code(
             dst_name: Optional[str] = None,
             dst_path: Optional[Path] = None,
             dst_kind: Optional[str] = None,
+            call_site_path: Optional[str] = None,
+            call_site_line: Optional[int] = None,
         ) -> None:
             if relation_limit and relation_counts[src.symbol_id] >= relation_limit:
                 return
@@ -607,6 +650,8 @@ def index_kernel_code(
                 dst_name=dst_name,
                 dst_path=dst_path,
                 dst_kind=dst_kind,
+                call_site_path=call_site_path,
+                call_site_line=call_site_line,
             )
             if len(relations) > before:
                 relation_counts[src.symbol_id] += 1
@@ -651,10 +696,14 @@ def index_kernel_code(
                     continue
                 seen: set[tuple[str, str]] = set()
 
-                def _collect_calls(item: dict, depth: int) -> list[tuple[str, Optional[Path]]]:
+                def _collect_calls(
+                    item: dict,
+                    depth: int,
+                    caller_path: Optional[Path],
+                ) -> list[tuple[str, Optional[Path], Optional[Path], Optional[int]]]:
                     if depth > max_depth:
                         return []
-                    results: list[tuple[str, Optional[Path]]] = []
+                    results: list[tuple[str, Optional[Path], Optional[Path], Optional[int]]] = []
                     try:
                         outgoing = client.outgoing_calls(item)
                     except Exception:
@@ -666,22 +715,46 @@ def index_kernel_code(
                         path = Path(uri.replace("file://", "")) if uri and uri.startswith("file://") else None
                         if not name:
                             continue
+                        # fromRanges: ranges in the *caller* (item) where the call occurs.
+                        from_ranges = call.get("fromRanges") or []
+                        site_line: Optional[int] = None
+                        if from_ranges:
+                            first = from_ranges[0] or {}
+                            start = first.get("start") or {}
+                            line0 = start.get("line")
+                            if isinstance(line0, int):
+                                site_line = line0 + 1  # 1-indexed
                         key = (name, str(path) if path else "")
                         if key in seen:
                             continue
                         seen.add(key)
-                        results.append((name, path))
+                        results.append((name, path, caller_path, site_line))
                         if depth < max_depth:
-                            results.extend(_collect_calls(target, depth + 1))
+                            target_uri = target.get("uri")
+                            target_path = (
+                                Path(target_uri.replace("file://", ""))
+                                if target_uri and target_uri.startswith("file://")
+                                else caller_path
+                            )
+                            results.extend(_collect_calls(target, depth + 1, target_path))
                         if max_calls and len(results) >= max_calls:
                             break
                     return results
 
                 for item in items:
-                    targets = _collect_calls(item, 1)
-                    for name, path in targets[:max_calls] if max_calls else targets:
+                    targets = _collect_calls(item, 1, rec.path)
+                    iter_targets = targets[:max_calls] if max_calls else targets
+                    for name, path, caller_path, site_line in iter_targets:
                         dst = _resolve_by_name(name, path or rec.path)
-                        _add_limited_relation(rec, dst, "calls", dst_name=name, dst_path=path)
+                        _add_limited_relation(
+                            rec,
+                            dst,
+                            "calls",
+                            dst_name=name,
+                            dst_path=path,
+                            call_site_path=str(caller_path) if caller_path else str(rec.path),
+                            call_site_line=site_line,
+                        )
                         call_edge_sources.add(rec.symbol_id)
 
         # Token-based usage scan for types/macros/functions.
@@ -691,23 +764,54 @@ def index_kernel_code(
                 continue
             if rec.kind not in KIND_FUNCTIONS:
                 continue
+            chunk_base_line = getattr(chunk, "start_line", 0) or 0
             if clangd_config.usage_scan_enabled:
-                used_types = _scan_tokens(chunk.text, type_name_set, clangd_config.relation_max_per_symbol)
-                for name in used_types:
+                used_types = _scan_tokens_with_lines(
+                    chunk.text, type_name_set, clangd_config.relation_max_per_symbol
+                )
+                for name, line_offset in used_types:
                     dst = _resolve_by_name(name, rec.path)
-                    _add_limited_relation(rec, dst, "uses_type", dst_name=name, dst_path=dst.path if dst else None)
-                used_macros = _scan_tokens(chunk.text, macro_name_set, clangd_config.relation_max_per_symbol)
-                for name in used_macros:
+                    _add_limited_relation(
+                        rec,
+                        dst,
+                        "uses_type",
+                        dst_name=name,
+                        dst_path=dst.path if dst else None,
+                        call_site_path=str(rec.path),
+                        call_site_line=chunk_base_line + line_offset + 1,
+                    )
+                used_macros = _scan_tokens_with_lines(
+                    chunk.text, macro_name_set, clangd_config.relation_max_per_symbol
+                )
+                for name, line_offset in used_macros:
                     dst = _resolve_by_name(name, rec.path)
-                    _add_limited_relation(rec, dst, "uses_macro", dst_name=name, dst_path=dst.path if dst else None)
+                    _add_limited_relation(
+                        rec,
+                        dst,
+                        "uses_macro",
+                        dst_name=name,
+                        dst_path=dst.path if dst else None,
+                        call_site_path=str(rec.path),
+                        call_site_line=chunk_base_line + line_offset + 1,
+                    )
             # Regex fallback for call edges when call hierarchy is disabled or empty.
             if not clangd_config.call_hierarchy_enabled or rec.symbol_id not in call_edge_sources:
-                called = _scan_tokens(chunk.text, function_name_set, clangd_config.relation_max_per_symbol)
-                for name in called:
+                called = _scan_tokens_with_lines(
+                    chunk.text, function_name_set, clangd_config.relation_max_per_symbol
+                )
+                for name, line_offset in called:
                     if name == rec.name:
                         continue
                     dst = _resolve_by_name(name, rec.path)
-                    _add_limited_relation(rec, dst, "calls", dst_name=name, dst_path=dst.path if dst else None)
+                    _add_limited_relation(
+                        rec,
+                        dst,
+                        "calls",
+                        dst_name=name,
+                        dst_path=dst.path if dst else None,
+                        call_site_path=str(rec.path),
+                        call_site_line=chunk_base_line + line_offset + 1,
+                    )
 
         file_summaries: list[FileSummary] = []
         if clangd_config.file_summary_enabled:

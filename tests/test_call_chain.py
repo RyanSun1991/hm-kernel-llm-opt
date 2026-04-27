@@ -59,6 +59,8 @@ def _make_row(
     src_start: int | None = None,
     src_end: int | None = None,
     src_kind: str | None = "function",
+    call_site_path: str | None = None,
+    call_site_line: int | None = None,
 ) -> dict[str, Any]:
     return {
         "src": src,
@@ -74,6 +76,8 @@ def _make_row(
         "src_start": src_start,
         "src_end": src_end,
         "src_kind": src_kind,
+        "call_site_path": call_site_path,
+        "call_site_line": call_site_line,
     }
 
 
@@ -242,7 +246,7 @@ def test_call_chain_frontier_cap_truncates(monkeypatch):
     assert 1 in out["stats"]["hops_truncated_at"]
 
 
-def test_call_chain_carries_node_metadata(monkeypatch):
+def test_call_chain_carries_call_site_metadata(monkeypatch):
     edges = {
         "root": [
             _make_row(
@@ -251,6 +255,8 @@ def test_call_chain_carries_node_metadata(monkeypatch):
                 dst_path="/k/c.c",
                 dst_start=42,
                 dst_end=99,
+                call_site_path="/k/root.c",
+                call_site_line=123,
             )
         ]
     }
@@ -261,6 +267,9 @@ def test_call_chain_carries_node_metadata(monkeypatch):
     out = pipeline.retrieve_call_chain(
         cfg, ["root"], direction="callees", depth=1, output_format="json"
     )
+    edge = out["edges"][0]
+    assert edge["call_site_path"] == "/k/root.c"
+    assert edge["call_site_line"] == 123
     node = out["nodes"]["child"]
     assert node["path"] == "/k/c.c"
     assert node["start_line"] == 42
