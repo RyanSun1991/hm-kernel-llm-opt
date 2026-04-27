@@ -13,14 +13,17 @@ OpenCode expands `@<path>` references inline, so the agent receives the full con
 
 ## Available Commands
 
-| Command | Pipeline | Description |
-|---------|----------|-------------|
-| `optimize_generic` | `generic_full` | Full pipeline for any kernel target with auto-routing |
-| `optimize_memmgr_reclaim` | `memmgr_reclaim_full` | Memory reclaim and allocator analysis |
-| `optimize_hyperhold` | `hyperhold_full` | Swap I/O, compression, hpio, iotab |
-| `optimize_workqueue` | `workqueue_full` | Workqueue and thread-pool optimization |
-| `review_sync` | `sync_review` | Synchronization and lock safety review (no implementation) |
-| `research_only` | `generic_full` | Research and analysis only (stops before implementation) |
+| Command | Pipeline / Agent | Description |
+|---------|------------------|-------------|
+| `optimize_generic` | `generic_full` pipeline | Full pipeline for any kernel target with auto-routing |
+| `optimize_memmgr_reclaim` | `memmgr_reclaim_full` pipeline | Memory reclaim and allocator analysis |
+| `optimize_hyperhold` | `hyperhold_full` pipeline | Swap I/O, compression, hpio, iotab |
+| `optimize_workqueue` | `workqueue_full` pipeline | Workqueue and thread-pool optimization |
+| `review_sync` | `sync_review` pipeline | Synchronization and lock safety review (no implementation) |
+| `research_only` | `generic_full` pipeline | Research and analysis only (stops before implementation) |
+| `function_detail` | `@kernel-function-research` primary agent | One-shot deep dive on ONE kernel function — design + callee-graph report, no optimization |
+| `research` | `@kernel-research` primary agent | Iterative subsystem / file / function research with a human in the loop — builds a living design doc across many turns, no optimization |
+| `plan` | `@kernel-plan` primary agent | Iterative ideation + planning with a human in the loop — reads an existing design doc + memory + idea ledger, triages per idea, produces a plan |
 
 ## Customizing a Command
 
