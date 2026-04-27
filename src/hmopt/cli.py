@@ -18,7 +18,13 @@ from hmopt.opencode import (
     resume_pipeline_session,
 )
 from hmopt.orchestration import run_artifact_analysis, run_pipeline, run_runtime_ingest
-from hmopt.indexing import build_kernel_index, build_runtime_index, route_query
+from hmopt.indexing import (
+    build_kernel_index,
+    build_runtime_index,
+    fetch_code_snippets,
+    retrieve_call_chain,
+    route_query,
+)
 from hmopt.storage.artifact_store import ArtifactStore
 from hmopt.storage.db.engine import init_engine
 from hmopt.storage.db import models
@@ -251,6 +257,88 @@ def query(
     )
     typer.echo(response)
 
+
+@app.command("call-chain")
+def call_chain_cmd(
+    symbols: str = typer.Option(
+        ..., "--symbols", help="Comma-separated root symbols"
+    ),
+    direction: str = typer.Option(
+        "both", "--direction", help="callers|callees|both"
+    ),
+    depth: int = typer.Option(3, "--depth", help="BFS depth (1..6)"),
+    per_hop_limit: int = typer.Option(
+        100, "--per-hop-limit", help="Per-hop edge limit (Cypher LIMIT)"
+    ),
+    frontier_cap: int = typer.Option(
+        50, "--frontier-cap", help="Max frontier symbols expanded per layer"
+    ),
+    edge_kinds: Optional[str] = typer.Option(
+        None,
+        "--edge-kinds",
+        help="Comma-separated edge kinds: calls,uses_type,uses_macro",
+    ),
+    output_format: str = typer.Option(
+        "text", "--output-format", help="text|json"
+    ),
+    config: str = typer.Option("configs/app.yaml", help="Config YAML"),
+) -> None:
+    # Demo: hmopt call-chain --symbols do_syscall --depth 6 --direction callees
+    # Purpose: pure structural call-chain retrieval (no code bodies, depth up to 6).
+    logging.basicConfig(level=logging.INFO)
+    cfg = _load_config(config)
+    sym_list = [s.strip() for s in symbols.split(",") if s.strip()]
+    kinds_list = (
+        [k.strip() for k in edge_kinds.split(",") if k.strip()] if edge_kinds else None
+    )
+    out = retrieve_call_chain(
+        cfg,
+        sym_list,
+        direction=direction,
+        depth=depth,
+        per_hop_limit=per_hop_limit,
+        frontier_cap=frontier_cap,
+        edge_kinds=kinds_list,
+        output_format="json" if output_format == "json" else "text",
+    )
+    if output_format == "json":
+        typer.echo(json.dumps(out, indent=2, ensure_ascii=False))
+    else:
+        typer.echo(out)
+
+
+@app.command("get-snippets")
+def get_snippets_cmd(
+    symbols: str = typer.Option(
+        ..., "--symbols", help="Comma-separated symbol list to fetch bodies for"
+    ),
+    per_symbol_max_chars: int = typer.Option(
+        4000, "--per-symbol-max-chars", help="Per-snippet char cap"
+    ),
+    total_max_chars: Optional[int] = typer.Option(
+        None, "--total-max-chars", help="Optional total char budget across all snippets"
+    ),
+    output_format: str = typer.Option(
+        "text", "--output-format", help="text|json"
+    ),
+    config: str = typer.Option("configs/app.yaml", help="Config YAML"),
+) -> None:
+    # Demo: hmopt get-snippets --symbols do_syscall,handle_mm_fault
+    # Purpose: batch fetch function bodies for an explicit symbol list.
+    logging.basicConfig(level=logging.INFO)
+    cfg = _load_config(config)
+    sym_list = [s.strip() for s in symbols.split(",") if s.strip()]
+    out = fetch_code_snippets(
+        cfg,
+        sym_list,
+        per_symbol_max_chars=per_symbol_max_chars,
+        total_max_chars=total_max_chars,
+        output_format="json" if output_format == "json" else "text",
+    )
+    if output_format == "json":
+        typer.echo(json.dumps(out, indent=2, ensure_ascii=False))
+    else:
+        typer.echo(out)
 
 
 @app.command()

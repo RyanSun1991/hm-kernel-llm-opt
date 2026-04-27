@@ -2183,3 +2183,547 @@ def retrieve_code_context(
             lines.append("Graph relation summary: " + rel_summary)
 
     return "\n\n".join(lines).strip()
+
+
+_DEFAULT_EDGE_KINDS = ("calls", "uses_type", "uses_macro")
+_CALL_CHAIN_DEPTH_HARD_CAP = 6
+
+
+def retrieve_call_chain(
+    config: AppConfig,
+    symbols: list[str],
+    *,
+    direction: str = "both",
+    depth: int = 3,
+    per_hop_limit: int = 100,
+    frontier_cap: int = 50,
+    edge_kinds: Optional[list[str]] = None,
+    output_format: str = "json",
+) -> dict[str, Any] | str:
+    """Pure structural call-chain retrieval — no code bodies, no scoring.
+
+    Returns symbol→symbol edges with optional call-site `path:line` and per-node metadata
+    (path, lines, kind). Suitable for shaping the call graph before fetching bodies via
+    `fetch_code_snippets`. Supports depth up to 6.
+    """
+    if not symbols:
+        return {"roots": [], "edges": [], "nodes": {}, "stats": {}} if output_format != "text" else ""
+
+    direction_norm = (direction or "both").strip().lower()
+    if direction_norm not in {"both", "callers", "callees"}:
+        direction_norm = "both"
+
+    try:
+        depth_int = int(depth)
+    except (TypeError, ValueError):
+        depth_int = 3
+    depth_int = max(1, min(_CALL_CHAIN_DEPTH_HARD_CAP, depth_int))
+
+    try:
+        per_hop = int(per_hop_limit)
+    except (TypeError, ValueError):
+        per_hop = 100
+    per_hop = max(1, per_hop)
+
+    try:
+        cap = int(frontier_cap)
+    except (TypeError, ValueError):
+        cap = 50
+    cap = max(1, cap)
+
+    if edge_kinds:
+        kinds = [str(k).strip() for k in edge_kinds if str(k).strip()]
+        kinds_filter = kinds or list(_DEFAULT_EDGE_KINDS)
+    else:
+        kinds_filter = list(_DEFAULT_EDGE_KINDS)
+
+    roots = [str(s).strip() for s in symbols if str(s).strip()]
+    if not roots:
+        return {"roots": [], "edges": [], "nodes": {}, "stats": {}} if output_format != "text" else ""
+
+    if not config.indexing.neo4j.enabled:
+        logger.warning("retrieve_call_chain requires Neo4j; returning empty graph")
+        empty = {
+            "roots": roots,
+            "edges": [],
+            "nodes": {},
+            "stats": {
+                "total_edges": 0,
+                "total_nodes": 0,
+                "depth_reached": 0,
+                "hops_truncated_at": [],
+                "neo4j_disabled": True,
+            },
+        }
+        return empty if output_format != "text" else _format_call_chain_text(empty)
+
+    paths = _index_paths(config)
+    code_index_cfg = _neo4j_index_config("code")
+    metadata = _load_embedding_metadata(paths.code_dir) or {}
+    embed_dim = metadata.get("dimension")
+    if not embed_dim:
+        logger.warning("Code index embedding metadata missing; cannot build Neo4j store")
+        return {
+            "roots": roots,
+            "edges": [],
+            "nodes": {},
+            "stats": {"total_edges": 0, "total_nodes": 0, "depth_reached": 0, "hops_truncated_at": []},
+        } if output_format != "text" else ""
+
+    try:
+        vector_store = Neo4jVectorStore(
+            username=config.indexing.neo4j.user,
+            password=config.indexing.neo4j.password,
+            url=config.indexing.neo4j.uri,
+            database=config.indexing.neo4j.database,
+            embedding_dimension=int(embed_dim),
+            index_name=code_index_cfg.index_name,
+            node_label=code_index_cfg.node_label,
+        )
+    except Exception as exc:
+        logger.warning("Neo4j vector store init failed: %s", exc)
+        return {
+            "roots": roots,
+            "edges": [],
+            "nodes": {},
+            "stats": {"total_edges": 0, "total_nodes": 0, "depth_reached": 0, "hops_truncated_at": []},
+        } if output_format != "text" else ""
+
+    edges: list[dict[str, Any]] = []
+    node_qualnames: set[str] = set(roots)
+    visited: set[str] = set(roots)
+    frontier: set[str] = set(roots)
+    hops_truncated_at: list[int] = []
+    depth_reached = 0
+
+    fetch_outgoing = direction_norm in {"callees", "both"}
+    fetch_incoming = direction_norm in {"callers", "both"}
+
+    out_cypher = (
+        "MATCH (s:symbol)-[r]->(t) "
+        "WHERE (s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols) "
+        "AND type(r) IN $kinds "
+        "RETURN s.symbol_name as src, s.symbol_qualname as src_qual, "
+        "type(r) as rel, "
+        "t.symbol_name as dst, t.symbol_qualname as dst_qual, "
+        "t.path as dst_path, t.start_line as dst_start, t.end_line as dst_end, "
+        "t.symbol_kind as dst_kind "
+        "LIMIT $limit"
+    )
+    in_cypher = (
+        "MATCH (s:symbol)<-[r]-(t) "
+        "WHERE (s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols) "
+        "AND type(r) IN $kinds "
+        "RETURN t.symbol_name as src, t.symbol_qualname as src_qual, "
+        "type(r) as rel, "
+        "s.symbol_name as dst, s.symbol_qualname as dst_qual, "
+        "t.path as src_path, t.start_line as src_start, t.end_line as src_end, "
+        "t.symbol_kind as src_kind "
+        "LIMIT $limit"
+    )
+
+    nodes_meta: dict[str, dict[str, Any]] = {}
+
+    def _record_node(qual: Optional[str], name: Optional[str], **fields: Any) -> Optional[str]:
+        key = qual or name
+        if not key:
+            return None
+        entry = nodes_meta.setdefault(
+            key,
+            {
+                "symbol_name": name,
+                "symbol_qualname": qual,
+                "path": None,
+                "start_line": None,
+                "end_line": None,
+                "kind": None,
+                "depth": None,
+            },
+        )
+        for f, v in fields.items():
+            if v is not None and entry.get(f) is None:
+                entry[f] = v
+        if name and entry.get("symbol_name") is None:
+            entry["symbol_name"] = name
+        if qual and entry.get("symbol_qualname") is None:
+            entry["symbol_qualname"] = qual
+        return key
+
+    for root in roots:
+        _record_node(root, root, depth=0)
+
+    for current_depth in range(1, depth_int + 1):
+        if not frontier:
+            break
+        layer = list(frontier)[:cap]
+        if len(frontier) > cap:
+            hops_truncated_at.append(current_depth)
+        new_frontier: set[str] = set()
+        layer_truncated = False
+
+        if fetch_outgoing:
+            try:
+                rows = vector_store.database_query(
+                    out_cypher,
+                    {"symbols": layer, "kinds": kinds_filter, "limit": per_hop},
+                )
+            except Exception as exc:
+                logger.warning("call_chain outgoing query failed at depth=%d: %s", current_depth, exc)
+                rows = []
+            if rows and len(rows) >= per_hop:
+                layer_truncated = True
+            for rec in rows or []:
+                src_key = rec.get("src_qual") or rec.get("src")
+                dst_key = rec.get("dst_qual") or rec.get("dst")
+                if not src_key or not dst_key:
+                    continue
+                edges.append(
+                    {
+                        "src": src_key,
+                        "dst": dst_key,
+                        "rel": str(rec.get("rel") or "calls"),
+                        "depth": current_depth,
+                        "direction": "callee",
+                    }
+                )
+                _record_node(src_key, rec.get("src"))
+                _record_node(
+                    dst_key,
+                    rec.get("dst"),
+                    path=rec.get("dst_path"),
+                    start_line=rec.get("dst_start"),
+                    end_line=rec.get("dst_end"),
+                    kind=rec.get("dst_kind"),
+                )
+                node_qualnames.add(dst_key)
+                if dst_key not in visited:
+                    visited.add(dst_key)
+                    nodes_meta[dst_key]["depth"] = current_depth
+                    new_frontier.add(dst_key)
+
+        if fetch_incoming:
+            try:
+                rows = vector_store.database_query(
+                    in_cypher,
+                    {"symbols": layer, "kinds": kinds_filter, "limit": per_hop},
+                )
+            except Exception as exc:
+                logger.warning("call_chain incoming query failed at depth=%d: %s", current_depth, exc)
+                rows = []
+            if rows and len(rows) >= per_hop:
+                layer_truncated = True
+            for rec in rows or []:
+                src_key = rec.get("src_qual") or rec.get("src")
+                dst_key = rec.get("dst_qual") or rec.get("dst")
+                if not src_key or not dst_key:
+                    continue
+                edges.append(
+                    {
+                        "src": src_key,
+                        "dst": dst_key,
+                        "rel": str(rec.get("rel") or "calls"),
+                        "depth": current_depth,
+                        "direction": "caller",
+                    }
+                )
+                _record_node(
+                    src_key,
+                    rec.get("src"),
+                    path=rec.get("src_path"),
+                    start_line=rec.get("src_start"),
+                    end_line=rec.get("src_end"),
+                    kind=rec.get("src_kind"),
+                )
+                _record_node(dst_key, rec.get("dst"))
+                node_qualnames.add(src_key)
+                if src_key not in visited:
+                    visited.add(src_key)
+                    nodes_meta[src_key]["depth"] = current_depth
+                    new_frontier.add(src_key)
+
+        depth_reached = current_depth
+        if layer_truncated and current_depth not in hops_truncated_at:
+            hops_truncated_at.append(current_depth)
+        frontier = new_frontier
+
+    # Backfill metadata for any node that didn't get path/lines from the edge result.
+    missing_meta = [k for k, v in nodes_meta.items() if not v.get("path")]
+    if missing_meta:
+        fallback = lookup_code_symbols(config, missing_meta)
+        for key, meta in fallback.items():
+            if not isinstance(meta, dict):
+                continue
+            entry = nodes_meta.get(key)
+            if not entry:
+                continue
+            for field_name, mapped_key in (
+                ("symbol_name", "symbol_name"),
+                ("symbol_qualname", "symbol_qualname"),
+                ("path", "path"),
+                ("start_line", "start_line"),
+                ("end_line", "end_line"),
+            ):
+                if entry.get(field_name) is None and meta.get(mapped_key) is not None:
+                    entry[field_name] = meta.get(mapped_key)
+
+    payload: dict[str, Any] = {
+        "roots": roots,
+        "direction": direction_norm,
+        "depth_requested": depth_int,
+        "edge_kinds": kinds_filter,
+        "edges": edges,
+        "nodes": nodes_meta,
+        "stats": {
+            "total_edges": len(edges),
+            "total_nodes": len(nodes_meta),
+            "depth_reached": depth_reached,
+            "hops_truncated_at": hops_truncated_at,
+            "per_hop_limit": per_hop,
+            "frontier_cap": cap,
+        },
+    }
+
+    if output_format in ("json", "payload", "dict"):
+        return payload
+    return _format_call_chain_text(payload)
+
+
+def _format_call_chain_text(payload: dict[str, Any]) -> str:
+    lines: list[str] = ["[Kernel Call Chain]"]
+    lines.append(f"Roots: {', '.join(payload.get('roots', []))}")
+    lines.append(
+        f"Direction: {payload.get('direction')} | depth_requested={payload.get('depth_requested')} | "
+        f"edge_kinds={','.join(payload.get('edge_kinds', []) or [])}"
+    )
+    stats = payload.get("stats", {}) or {}
+    lines.append(
+        f"Stats: edges={stats.get('total_edges')} nodes={stats.get('total_nodes')} "
+        f"depth_reached={stats.get('depth_reached')} truncated_at={stats.get('hops_truncated_at') or '[]'}"
+    )
+    edges = payload.get("edges") or []
+    if edges:
+        lines.append("Edges:")
+        for edge in edges:
+            lines.append(
+                f"- depth={edge.get('depth')} {edge.get('src')} -[{edge.get('rel')}]-> "
+                f"{edge.get('dst')} ({edge.get('direction')})"
+            )
+    nodes = payload.get("nodes") or {}
+    if nodes:
+        lines.append("Nodes:")
+        for key, meta in nodes.items():
+            path = meta.get("path") or "?"
+            start = meta.get("start_line")
+            end = meta.get("end_line")
+            kind = meta.get("kind") or "?"
+            depth_v = meta.get("depth")
+            lines.append(
+                f"- {key} kind={kind} depth={depth_v} path={path}:{start}-{end}"
+            )
+    return "\n".join(lines)
+
+
+def fetch_code_snippets(
+    config: AppConfig,
+    symbols: list[str],
+    *,
+    per_symbol_max_chars: int = 4000,
+    total_max_chars: Optional[int] = None,
+    output_format: str = "json",
+) -> dict[str, Any] | str:
+    """Batch fetch function bodies for an explicit symbol list.
+
+    Returns one entry per symbol with truncation flag + char count, plus a `missing` list for
+    symbols the index couldn't resolve. Honors a `total_max_chars` budget if provided —
+    additional symbols beyond the budget are listed in `missing` with reason `budget_hit`.
+    """
+    if not symbols:
+        empty = {"snippets": [], "missing": [], "stats": {"returned": 0, "truncated_count": 0, "total_chars": 0}}
+        return empty if output_format != "text" else "[Kernel Snippets]\n(no symbols requested)"
+
+    try:
+        per_max = int(per_symbol_max_chars)
+    except (TypeError, ValueError):
+        per_max = 4000
+    per_max = max(200, per_max)
+
+    total_budget: Optional[int] = None
+    if total_max_chars is not None:
+        try:
+            total_budget = max(per_max, int(total_max_chars))
+        except (TypeError, ValueError):
+            total_budget = None
+
+    requested = [str(s).strip() for s in symbols if str(s).strip()]
+    if not requested:
+        empty = {"snippets": [], "missing": [], "stats": {"returned": 0, "truncated_count": 0, "total_chars": 0}}
+        return empty if output_format != "text" else "[Kernel Snippets]\n(no symbols requested)"
+
+    paths = _index_paths(config)
+    code_index_cfg = _neo4j_index_config("code")
+    embed_meta = _load_embedding_metadata(paths.code_dir) or {}
+    embed_dim = embed_meta.get("dimension")
+
+    storage: Optional[StorageContext] = None
+    docstore_nodes: dict[str, TextNode] = {}
+    try:
+        storage = _storage_context(
+            config,
+            paths.code_dir,
+            embedding_dimension=int(embed_dim) if embed_dim else None,
+            index_name=code_index_cfg.index_name,
+            node_label=code_index_cfg.node_label,
+        )
+        docs = getattr(storage.docstore, "docs", {}) or {}
+        if isinstance(docs, dict):
+            docstore_nodes = docs
+    except Exception as exc:
+        logger.warning("fetch_code_snippets storage init failed: %s", exc)
+        storage = None
+
+    node_lookup: dict[str, TextNode] = {}
+    targets = set(requested)
+    for node in docstore_nodes.values():
+        meta = getattr(node, "metadata", {}) if node else {}
+        if meta.get("type") != "code":
+            continue
+        name = meta.get("symbol_name")
+        qual = meta.get("symbol_qualname")
+        if name and name in targets and name not in node_lookup:
+            node_lookup[name] = node
+        if qual and qual in targets and qual not in node_lookup:
+            node_lookup[qual] = node
+        if len(node_lookup) >= len(targets):
+            break
+
+    metadata_by_symbol = lookup_code_symbols(
+        config, [s for s in requested if s not in node_lookup]
+    )
+
+    def _load_text(symbol: str, meta: Optional[dict[str, Any]]) -> tuple[str, Optional[dict[str, Any]]]:
+        node = node_lookup.get(symbol)
+        text = getattr(node, "text", "") if node else ""
+        if text:
+            node_meta = getattr(node, "metadata", {}) if node else {}
+            return text, dict(node_meta) if isinstance(node_meta, dict) else {}
+        if not meta:
+            return "", None
+        property_graph_store = storage.property_graph_store if storage else None
+        if property_graph_store:
+            symbol_id = meta.get("symbol_id")
+            if symbol_id:
+                try:
+                    nodes = property_graph_store.get(ids=[symbol_id])
+                except Exception as exc:
+                    logger.warning("Neo4j node lookup failed for %s: %s", symbol_id, exc)
+                    nodes = []
+                for n in nodes:
+                    t = getattr(n, "text", "")
+                    if t:
+                        return t, meta
+            for key in ("symbol_name", "symbol_qualname"):
+                prop_value = meta.get(key) or symbol
+                if not prop_value:
+                    continue
+                try:
+                    nodes = property_graph_store.get(properties={key: prop_value})
+                except Exception as exc:
+                    logger.warning("Neo4j prop lookup failed for %s=%s: %s", key, prop_value, exc)
+                    nodes = []
+                for n in nodes:
+                    t = getattr(n, "text", "")
+                    if t:
+                        return t, meta
+        symbol_id = meta.get("symbol_id")
+        if symbol_id and symbol_id in docstore_nodes:
+            t = getattr(docstore_nodes[symbol_id], "text", "")
+            if t:
+                return t, meta
+        return "", meta
+
+    snippets: list[dict[str, Any]] = []
+    missing: list[dict[str, Any]] = []
+    truncated_count = 0
+    total_chars = 0
+    budget_hit = False
+
+    for symbol in requested:
+        if budget_hit:
+            missing.append({"symbol": symbol, "reason": "budget_hit"})
+            continue
+        meta = metadata_by_symbol.get(symbol)
+        text, resolved_meta = _load_text(symbol, meta)
+        if not text:
+            missing.append({"symbol": symbol, "reason": "not_found"})
+            continue
+        truncated = False
+        char_count = len(text)
+        if char_count > per_max:
+            text = f"{text[:per_max]}\n...[truncated {char_count - per_max} chars]"
+            truncated = True
+            char_count = len(text)
+        if total_budget is not None and total_chars + char_count > total_budget:
+            missing.append({"symbol": symbol, "reason": "budget_hit"})
+            budget_hit = True
+            continue
+        out_meta = resolved_meta or meta or {}
+        snippets.append(
+            {
+                "symbol": symbol,
+                "symbol_id": out_meta.get("symbol_id"),
+                "symbol_name": out_meta.get("symbol_name"),
+                "symbol_qualname": out_meta.get("symbol_qualname"),
+                "path": out_meta.get("path"),
+                "start_line": out_meta.get("start_line"),
+                "end_line": out_meta.get("end_line"),
+                "truncated": truncated,
+                "char_count": char_count,
+                "text": text,
+            }
+        )
+        if truncated:
+            truncated_count += 1
+        total_chars += char_count
+
+    payload: dict[str, Any] = {
+        "snippets": snippets,
+        "missing": missing,
+        "stats": {
+            "returned": len(snippets),
+            "missing": len(missing),
+            "truncated_count": truncated_count,
+            "total_chars": total_chars,
+            "budget_hit": budget_hit,
+            "per_symbol_max_chars": per_max,
+            "total_max_chars": total_budget,
+        },
+    }
+
+    if output_format in ("json", "payload", "dict"):
+        return payload
+    return _format_snippets_text(payload)
+
+
+def _format_snippets_text(payload: dict[str, Any]) -> str:
+    lines = ["[Kernel Snippets]"]
+    stats = payload.get("stats", {}) or {}
+    lines.append(
+        f"returned={stats.get('returned')} missing={stats.get('missing')} "
+        f"truncated={stats.get('truncated_count')} total_chars={stats.get('total_chars')} "
+        f"budget_hit={stats.get('budget_hit')}"
+    )
+    for entry in payload.get("snippets") or []:
+        lines.append("")
+        lines.append(
+            f"### {entry.get('symbol')} ({entry.get('path')}:{entry.get('start_line')}-{entry.get('end_line')})"
+        )
+        lines.append(
+            f"chars={entry.get('char_count')} truncated={entry.get('truncated')}"
+        )
+        lines.append(str(entry.get("text") or ""))
+    if payload.get("missing"):
+        lines.append("")
+        lines.append("Missing:")
+        for entry in payload["missing"]:
+            lines.append(f"- {entry.get('symbol')} ({entry.get('reason')})")
+    return "\n".join(lines)

@@ -45,17 +45,28 @@ If the user has given only a partial lead (e.g. "the reclaim cold path"), stop a
 
 ## Mandatory MCP Queries
 
+**Two-step retrieval protocol.**  Use `kernel_call_chain` first to shape the graph (no code bodies — cheap, supports depth up to 6), then `kernel_get_snippets` to batch-fetch only the bodies you actually need.  Do NOT use `kernel_symbol_graph` for the callee tree — it bundles snippets and clamps depth at 4, which is exactly the bottleneck this two-step flow exists to escape.  Reserve `kernel_index_code` / `kernel_symbol_graph` / `kernel_hotspot_context` for ad-hoc one-shot lookups (e.g. "what is the signature of `try_to_free_pages`").
+
 Issue these in order.  **Cache every response inline in the final artifact** under an "Evidence" appendix so a reader can audit the callee graph without re-running MCP.
 
-1. **Symbol definition** — file:line, full signature, storage class, return type, and (if macro-expanded) the raw macro name.
-2. **Macro / inline wrappers** — does the symbol appear only under a macro wrapper or as a `static inline` in a header?  Record both the wrapper and the body call-sites.
-3. **Callee graph** — depth = the user-specified depth (default 3).  The MCP should return every direct callee with `file:line` for the call-site.  For each edge also capture enough context to fill in the annotations below.
-4. **Caller graph** — depth = 1 (direct callers only by default).  Produce a short table, not a full graph.
-5. **Referenced data structures** — structs, unions, and globals the function touches.  Record field-level access if the index exposes it.
-6. **Concurrency primitives** — every lock acquire / release, RCU section, atomic op, seqlock, preempt-disable, and memory barrier in the body.
-7. **Error paths** — every early return, `goto` label, and `ERR_PTR` / `IS_ERR` style usage.
-8. **Per-callee hot-path classification** — for EVERY node in the callee graph (root + every expanded callee up to the requested depth), decide `[HOT]` / `[SLOW]` / `[COLD]` / `[UNKNOWN]` against the criteria in the Callee Graph Contract.  The deciding evidence for each classification MUST be cited with `file:line` of the call-site (branch header, loop header, `likely()` / `unlikely()` macro, error-goto label, fast-path / slow-path comment in the source).  Do this as a deliberate pass over the graph — it is not a by-product of the callee-graph query.  Record the rationale in the indented-tree form and summarize it in the Hot-Path Analysis section.
-9. **Hotspot runtime corroboration** — if runtime evidence exists for the target (hiperf / flamegraph / perf under `outputs/` or a run-id the user attached), match each `[HOT]` / `[SLOW]` node against the observed sample fractions.  Flag any node whose static class disagrees with the runtime signal (e.g. a `[COLD]` node that took 30% of samples) as a classification-revision candidate in Open Questions.  Optional — say so explicitly when runtime evidence is absent; do NOT promote a classification because "it feels hot".
+1. **Symbol definition** — `kernel_index_code` (or `kernel_get_snippets` after step 3 if you only need the body).  Record file:line, full signature, storage class, return type, and (if macro-expanded) the raw macro name.
+2. **Macro / inline wrappers** — does the symbol appear only under a macro wrapper or as a `static inline` in a header?  Record both the wrapper and the body call-sites.  In the call-chain edges, edges with `rel=uses_macro` and `rel=uses_type` mark macro / type touches; edges with `rel=calls` whose dst node has `kind ∈ {macro, inline}` flag macro / inline call-sites.
+3. **Callee graph (structural)** — `kernel_call_chain(symbols=[<target>], direction="callees", depth=<user_depth, default 3, max 6>, edge_kinds=["calls"])`.  Returns edges with `call_site_path:call_site_line` plus per-node `path / start_line / end_line / kind`.  Use this to build the indented tree skeleton — every `(*)` / `[inline]` / `[stub]` / `[module:*]` annotation can be derived from the node `kind` and `path` without opening the source yet.
+4. **Caller graph (structural)** — `kernel_call_chain(symbols=[<target>], direction="callers", depth=1)`.  One layer is enough for the caller table; bump to depth 2 only if the user explicitly asked for transitive callers.
+5. **Bodies for classification** — `kernel_get_snippets(symbols=[<root + every non-trivially-classifiable callee from step 3>], per_symbol_max_chars=6000)`.  Pull bodies in **one** batch call; `kernel_get_snippets` reports any symbols past the budget in `missing` with `reason=budget_hit` so you can issue a follow-up batch instead of silently losing snippets.  Do NOT pull bodies for obviously-cold leaves (`BUG()`, `WARN()`, simple stat dumps) — that is wasted budget.
+6. **Referenced data structures** — `kernel_call_chain(symbols=[<target>], direction="callees", depth=1, edge_kinds=["uses_type"])` to enumerate touched types, then `kernel_get_snippets` for any whose layout matters to the walkthrough.  Field-level R/W access has to come from reading the body itself.
+7. **Concurrency primitives** — derived from the bodies fetched in step 5.  Every lock acquire / release, RCU section, atomic op, seqlock, preempt-disable, and memory barrier in the body.  No additional MCP query needed.
+8. **Error paths** — derived from the bodies fetched in step 5.  Every early return, `goto` label, and `ERR_PTR` / `IS_ERR` style usage.
+9. **Per-callee hot-path classification** — for EVERY node in the callee graph from step 3 (root + every expanded callee up to the requested depth), decide `[HOT]` / `[SLOW]` / `[COLD]` / `[UNKNOWN]` against the criteria in the Callee Graph Contract.  The deciding evidence for each classification MUST be cited with `file:line` — and the call-chain edges already carry `call_site_path:call_site_line` for exactly this, so the citation is a copy from the edge metadata, not a re-query.  Do this as a deliberate pass over the graph — it is not a by-product of step 3.  Record the rationale in the indented-tree form and summarize it in the Hot-Path Analysis section.
+10. **Hotspot runtime corroboration** — if runtime evidence exists for the target (hiperf / flamegraph / perf under `outputs/` or a run-id the user attached), match each `[HOT]` / `[SLOW]` node against the observed sample fractions.  Flag any node whose static class disagrees with the runtime signal (e.g. a `[COLD]` node that took 30% of samples) as a classification-revision candidate in Open Questions.  Optional — say so explicitly when runtime evidence is absent; do NOT promote a classification because "it feels hot".
+
+### Watch list — when the call-chain response signals truncation
+
+`kernel_call_chain` returns a `stats` block with `hops_truncated_at: [depth_i, ...]` listing the layers where `per_hop_limit` or `frontier_cap` cut the BFS short.  When that list is non-empty, the graph view is incomplete:
+
+- For an over-`per_hop_limit` hit: re-issue the call with `per_hop_limit` raised (cap is 500) and the `symbols` list narrowed to the parents of the truncated layer.  Do not raise it globally — that bloats the cheap layers.
+- For an over-`frontier_cap` hit: split the frontier into chunks and issue multiple `kernel_call_chain` calls, each with a different subset of `symbols` from the prior layer.
+- If both caps are exhausted at depth ≥ 4 on a wide-fan-out function (e.g. syscall dispatch), reduce depth and document the truncation in Open Questions instead of churning the index.
 
 ## Callee Graph Contract (non-negotiable)
 

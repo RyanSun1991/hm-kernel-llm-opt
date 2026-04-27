@@ -31,6 +31,8 @@ class MCPToolAgentConfig:
     mcp_api_key: str | None = None
     graph_tool_name: str = "kernel_symbol_graph"
     hotspot_tool_name: str = "kernel_hotspot_context"
+    call_chain_tool_name: str = "kernel_call_chain"
+    snippets_tool_name: str = "kernel_get_snippets"
     default_scenario: str = "general"
     graph_depth: int = 2
     max_snippets: int = 8
@@ -257,6 +259,51 @@ class MCPToolAgent:
                     },
                 },
             },
+            {
+                "type": "function",
+                "function": {
+                    "name": self._config.call_chain_tool_name,
+                    "description": (
+                        "Pure structural call-chain retrieval. Returns caller/callee edges with "
+                        "call-site file:line and per-node metadata — no code bodies. Use this first "
+                        "to shape the graph; depth up to 6."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "symbols": {"type": "array", "items": {"type": "string"}},
+                            "direction": {"type": "string", "enum": ["both", "callers", "callees"]},
+                            "depth": {"type": "integer"},
+                            "per_hop_limit": {"type": "integer"},
+                            "frontier_cap": {"type": "integer"},
+                            "edge_kinds": {"type": "array", "items": {"type": "string"}},
+                            "response_format": {"type": "string", "enum": ["markdown", "json"]},
+                        },
+                        "required": ["symbols"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": self._config.snippets_tool_name,
+                    "description": (
+                        "Batch fetch function bodies for an explicit symbol list. Use after "
+                        "kernel_call_chain to retrieve code for selected nodes. Honors per-symbol "
+                        "and total char budgets."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "symbols": {"type": "array", "items": {"type": "string"}},
+                            "per_symbol_max_chars": {"type": "integer"},
+                            "total_max_chars": {"type": "integer"},
+                            "response_format": {"type": "string", "enum": ["markdown", "json"]},
+                        },
+                        "required": ["symbols"],
+                    },
+                },
+            },
         ]
 
     def _allowed_tool_names(self) -> set[str]:
@@ -264,6 +311,8 @@ class MCPToolAgent:
             self._config.tool_name,
             self._config.graph_tool_name,
             self._config.hotspot_tool_name,
+            self._config.call_chain_tool_name,
+            self._config.snippets_tool_name,
         }
 
     def _resolve_scenario(
@@ -376,6 +425,50 @@ class MCPToolAgent:
                 "response_format": response_format,
             }
             return {k: v for k, v in arguments.items() if v is not None and v != ""}
+
+        if tool_name == self._config.call_chain_tool_name:
+            if not symbols:
+                symbols = _extract_symbol_candidates(base_query)
+            direction_raw = str(raw_arguments.get("direction") or "both").strip().lower()
+            if direction_raw not in {"both", "callers", "callees"}:
+                direction_raw = "both"
+            edge_kinds_raw = raw_arguments.get("edge_kinds")
+            if isinstance(edge_kinds_raw, str):
+                edge_kinds = [item.strip() for item in edge_kinds_raw.split(",") if item.strip()]
+            elif isinstance(edge_kinds_raw, list):
+                edge_kinds = [str(item).strip() for item in edge_kinds_raw if str(item).strip()]
+            else:
+                edge_kinds = None
+            arguments = {
+                "symbols": symbols,
+                "direction": direction_raw,
+                "depth": _coerce_optional_int(raw_arguments.get("depth"), fallback=3),
+                "per_hop_limit": _coerce_optional_int(
+                    raw_arguments.get("per_hop_limit"), fallback=100
+                ),
+                "frontier_cap": _coerce_optional_int(
+                    raw_arguments.get("frontier_cap"), fallback=50
+                ),
+                "edge_kinds": edge_kinds,
+                "response_format": response_format,
+            }
+            return {k: v for k, v in arguments.items() if v is not None}
+
+        if tool_name == self._config.snippets_tool_name:
+            if not symbols:
+                symbols = _extract_symbol_candidates(base_query)
+            arguments = {
+                "symbols": symbols,
+                "per_symbol_max_chars": _coerce_optional_int(
+                    raw_arguments.get("per_symbol_max_chars"),
+                    fallback=self._config.max_chars,
+                ),
+                "total_max_chars": _coerce_optional_int(
+                    raw_arguments.get("total_max_chars"), fallback=None
+                ),
+                "response_format": response_format,
+            }
+            return {k: v for k, v in arguments.items() if v is not None}
 
         scenario = str(raw_arguments.get("scenario", default_scenario) or "general").strip().lower()
         if scenario not in _SUPPORTED_SCENARIOS:

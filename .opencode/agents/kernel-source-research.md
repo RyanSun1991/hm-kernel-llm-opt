@@ -55,6 +55,13 @@ Use Kernel Index MCP for:
 - symbol relations
 - hotspot context when runtime evidence exists
 
+For caller / callee / dependency / impact-radius questions, prefer the **two-step protocol** over the bundled `kernel_symbol_graph`:
+
+1. `kernel_call_chain(symbols=[...], direction="callees|callers|both", depth=<up to 6>, edge_kinds=["calls"])` — pure structural graph with `call_site_path:call_site_line` per edge.  Depth is honored up to 6 because no bodies are bundled.
+2. `kernel_get_snippets(symbols=[...], per_symbol_max_chars=...)` — batch fetch bodies for the specific nodes you need to read.
+
+The bundled tools (`kernel_index_code`, `kernel_symbol_graph`, `kernel_hotspot_context`) clamp `graph_depth` to 4 and silently truncate the tail of snippets when the budget is hit; they remain appropriate for one-shot questions whose answer fits in a single response, but are wrong for transitive call-chain analysis at depth ≥ 3.
+
 ## Research Deliverables
 
 The artifact slug for this pass comes from `.opencode/state/current_task.json` → `artifact_slug`.  When iteration is disabled or this is pass 1, the slug equals the base target slug (e.g. `sysmgr_pwrmgr`).  On iteration K ≥ 2 it is `<base_slug>__iter<K>`.  Use the slug verbatim — do NOT invent your own.
