@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import threading
-from http.server import HTTPServer
+import time
+from http.server import ThreadingHTTPServer
 from typing import Any
 from unittest.mock import patch
 from urllib.request import Request, urlopen
@@ -20,13 +22,19 @@ from relay_service import RelayHandler, ALLOWED_COMMANDS
 
 @pytest.fixture()
 def relay_server():
-    """Start the relay server on a random port."""
-    server = HTTPServer(("127.0.0.1", 0), RelayHandler)
+    """Start the relay server on a random port.
+
+    Uses ThreadingHTTPServer to mirror the production main() — keeps the
+    test surface aligned with what real clients hit, and lets the
+    concurrency / keep-alive-disconnect tests below actually exercise
+    threading behavior."""
+    server = ThreadingHTTPServer(("127.0.0.1", 0), RelayHandler)
     port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield f"http://127.0.0.1:{port}"
     server.shutdown()
+    server.server_close()
 
 
 def _get(url: str, path: str) -> dict[str, Any]:
@@ -188,10 +196,12 @@ def test_main_installs_openpyxl_when_missing(monkeypatch):
         return _R()
 
     # Patch subprocess.run used by main(); avoid touching real pip.  Also
-    # make HTTPServer.serve_forever return immediately so main() exits.
+    # make ThreadingHTTPServer.serve_forever return immediately so main()
+    # exits.  main() instantiates ThreadingHTTPServer (not HTTPServer) so
+    # we patch the actual class used.
     monkeypatch.setattr(relay_service.subprocess, "run", fake_run)
-    monkeypatch.setattr(relay_service.HTTPServer, "serve_forever", lambda self: None)
-    monkeypatch.setattr(relay_service.HTTPServer, "server_close", lambda self: None)
+    monkeypatch.setattr(relay_service.ThreadingHTTPServer, "serve_forever", lambda self: None)
+    monkeypatch.setattr(relay_service.ThreadingHTTPServer, "server_close", lambda self: None)
 
     relay_service.main(["--port", "0"])
 
@@ -212,3 +222,136 @@ def test_exec_timeout(relay_server):
     assert code == 200
     assert result["returncode"] == -9
     assert "timeout" in result["stderr"]
+
+
+def test_keepalive_disconnect_does_not_crash_handler(relay_server, capsys):
+    """A client that closes a keep-alive connection between requests (the
+    common Windows symptom: ConnectionResetError WinError 10054) MUST NOT
+    leak a stack trace into the handler's stderr.  Repro the situation by
+    opening a raw socket, sending a complete HTTP/1.1 request, reading the
+    response, then dropping the socket via SO_LINGER=0 so Windows-style
+    RST is what arrives at the server side."""
+    host, port = relay_server.replace("http://", "").split(":")
+    port = int(port)
+
+    sock = socket.create_connection((host, port), timeout=5)
+    # SO_LINGER l_onoff=1, l_linger=0 → close() sends RST instead of FIN.
+    # struct format on most platforms: two ints (8 bytes).
+    import struct
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
+                    struct.pack("ii", 1, 0))
+    sock.sendall(
+        b"GET /health HTTP/1.1\r\n"
+        b"Host: 127.0.0.1\r\n"
+        b"Connection: keep-alive\r\n"
+        b"\r\n"
+    )
+    # Drain the response so the server thinks the request completed.
+    data = b""
+    while True:
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        data += chunk
+        if b'"status"' in data:
+            break
+    sock.close()  # → RST due to SO_LINGER=0
+
+    # Give the server's keep-alive readline() a moment to wake up on the
+    # RST and run the handle() except block.
+    time.sleep(0.3)
+
+    # The original /health response must have been delivered cleanly.
+    assert b"HTTP/1.0 200" in data or b"HTTP/1.1 200" in data
+    assert b'"status"' in data and b'"ok"' in data
+
+    # And the server must NOT have printed a "Traceback" — the handle()
+    # override is supposed to swallow ConnectionResetError /
+    # ConnectionAbortedError / BrokenPipeError and emit a single-line log.
+    err = capsys.readouterr().err
+    assert "Traceback" not in err, (
+        "Server printed a stack trace for a benign keep-alive disconnect; "
+        f"stderr was:\n{err}"
+    )
+
+
+def test_response_carries_request_id_and_connection_close(relay_server):
+    """Every JSON response MUST include a request_id field in the body and an
+    X-Request-ID header, and MUST advertise Connection: close so the client
+    does not try to reuse the socket as a keep-alive — the deliberate design
+    choice that eliminates the half-open keep-alive failure mode."""
+    req = Request(f"{relay_server}/health", method="GET")
+    with urlopen(req, timeout=5) as resp:
+        body = json.loads(resp.read())
+        connection_hdr = (resp.headers.get("Connection") or "").lower()
+        request_id_hdr = resp.headers.get("X-Request-ID") or ""
+
+    assert connection_hdr == "close", (
+        f"expected 'Connection: close', got {connection_hdr!r}; "
+        "without it half-open keep-alive sockets accumulate"
+    )
+    assert "request_id" in body, "response body missing request_id field"
+    assert len(body["request_id"]) == 8, body["request_id"]
+    assert body["request_id"] == request_id_hdr, (
+        "X-Request-ID header must match body.request_id; "
+        f"header={request_id_hdr!r} body={body['request_id']!r}"
+    )
+
+
+def test_request_ids_are_unique_per_request(relay_server):
+    """Sequential requests must get distinct request_ids — otherwise the log
+    correlation guarantee is broken."""
+    seen = set()
+    for _ in range(8):
+        req = Request(f"{relay_server}/health", method="GET")
+        with urlopen(req, timeout=5) as resp:
+            rid = json.loads(resp.read())["request_id"]
+        assert rid not in seen, f"request_id {rid} was reused"
+        seen.add(rid)
+
+
+def test_concurrent_requests_do_not_serialize(relay_server):
+    """ThreadingHTTPServer must serve concurrent requests in parallel — a
+    long-running /exec MUST NOT block /health behind it.  Regression for
+    'service stays single-threaded under heavy load'."""
+    if os.name == "nt":
+        slow_args = ["-n", "3", "127.0.0.1"]   # ~3 s on Windows ping
+    else:
+        slow_args = ["-c", "3", "-i", "1", "127.0.0.1"]  # ~3 s on Linux
+
+    slow_done = threading.Event()
+    health_done = threading.Event()
+
+    def slow_request():
+        _post(relay_server, "/exec", {
+            "command": "ping", "args": slow_args, "timeout_s": 10,
+        })
+        slow_done.set()
+
+    def health_request():
+        _get(relay_server, "/health")
+        health_done.set()
+
+    slow_thread = threading.Thread(target=slow_request, daemon=True)
+    slow_thread.start()
+    # Give the slow request a head start so we know it's actually running
+    # in the server when /health arrives.
+    time.sleep(0.4)
+
+    health_thread = threading.Thread(target=health_request, daemon=True)
+    health_thread.start()
+
+    # /health must finish well before the slow ping does.  If the server
+    # is single-threaded, /health waits behind /exec and finishes only
+    # after slow_done; that's the failure mode we're guarding against.
+    assert health_done.wait(timeout=2.0), (
+        "/health did not return within 2 s while a 3 s /exec was in flight; "
+        "server appears to serialize requests"
+    )
+    assert not slow_done.is_set(), (
+        "/exec finished before the 2 s deadline — test setup is wrong, "
+        "the slow command was not actually slow"
+    )
+
+    # Drain the slow request so the server fixture can shut down cleanly.
+    assert slow_thread.join(timeout=15) or slow_done.is_set()
