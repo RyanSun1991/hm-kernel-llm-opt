@@ -84,15 +84,13 @@ These rules prevent agents from silently absorbing work that belongs to other st
 - **Code Reviewer**: You MUST NOT fix code. You MUST NOT run tester validation. Your job ends when you delegate to tester or manager.
 - **Tester**: You MUST NOT modify code. You MUST NOT re-review. Your job ends when you report results and delegate to manager.
 
-## Context Refresh Protocol
+## Context Refresh Protocol — Now Mandatory Every Turn
 
-If your conversation has exceeded 10 exchanges or you feel uncertain about the current stage:
+The previous "if you feel uncertain" variant is obsolete. OpenCode does not signal compaction to the agent; therefore feeling-based triggers fail exactly when they are needed (right after compaction, when the agent confidently misremembers state).
 
-1. Re-read this file (`.opencode/skills/stage_gate_enforcement.md`)
-2. Re-read `.opencode/docs/harness_engineer_system.md` Section "Stage Order"
-3. Read `.opencode/state/current_task.json` for the current stage
-4. Enumerate the existing artifacts with Bash: `ls .opencode/reviews/ .opencode/plans/ .opencode/bench/`. **Do NOT glob `.opencode/**`** — it hangs.
-5. Resume from the correct stage
+The manager (`os-opt-manager`) MUST run the **Per-Turn State Rebuild** protocol — defined in `.opencode/agents/os-opt-manager.md` under the section of that exact name — at the START of EVERY turn. Not just when uncertain. Not just after 10 exchanges. Every turn.
+
+Sub-agents do not loop and therefore do not need this protocol; they are spawned fresh and finish in one or a few turns inside their own session.
 
 ## Delegation Message Template
 

@@ -18,6 +18,14 @@
   "prompt_file": ".opencode/state/current_prompt.md",
   "created_at": "",
   "iteration": 0,
+  "current_stage": "intake",
+  "pending_action": {
+    "next_agent": "",
+    "delegation_packet_path": "",
+    "expected_artifact": ""
+  },
+  "gates_passed": [],
+  "last_handoff_path": "",
   "auto_iterate": {
     "enabled": false,
     "max_iterations": 1,

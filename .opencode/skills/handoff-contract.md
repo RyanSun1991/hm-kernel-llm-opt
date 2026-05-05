@@ -4,6 +4,27 @@
 
 No agent should hand work to the next stage without a compact handoff packet.
 
+## Manager-Visible Return Cap — Hard Limit ≤500 tokens
+
+When a sub-agent (researcher / plan-reviewer / coder / code-reviewer / tester) returns to `os-opt-manager`, the chat-visible return that the manager sees in its conversation context MUST stay under ~500 tokens. This is a compaction-survival measure: the manager runs many iterations in one session, and full sub-agent outputs in chat would balloon the manager's context until OpenCode auto-compacts and key state is summarized away.
+
+The chat-visible return MUST contain ONLY:
+
+1. `verdict:` line — one of `pass | fail | inconclusive | approve | reject | needs_revision | skipped`
+2. `artifact:` line(s) — exact path under `.opencode/{docs,plans,patches,reviews,bench}/` for every file the sub-agent produced
+3. ≤3 key-fact bullets, each ≤30 tokens, each citing `file:line` from the artifact (no inline quoting of patch hunks, design prose, or review prose)
+4. `next:` line — the next agent name, or `manager_decide` if the manager must route based on the artifact contents
+5. `blocking:` bullets (only if non-empty, ≤2)
+
+Forbidden in the chat-visible return — these MUST be on disk only:
+
+- pasted patch hunks (write to `.opencode/patches/<slug>.patch`)
+- full design / plan / review / validation prose (write to the corresponding `.opencode/` subdir)
+- re-stated facts that already live in an artifact you just wrote
+- any quoted file content the manager can re-Read from disk
+
+The manager Reads the artifact only when its decision needs the details — not to "review" it inline. A sub-agent that returns more than ~500 tokens of chat-visible content is violating this contract; the manager should record the violation and remind the sub-agent on the next bounce.
+
 ## Minimum Handoff Packet
 
 - target and subsystem in scope
