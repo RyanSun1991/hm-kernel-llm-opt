@@ -21,6 +21,8 @@ Build exact design understanding of the target subsystem before any optimization
 
 Your default optimization objective is to help reduce instruction count on the hot path without weakening correctness.
 
+**Structural preference.** When a structural change (call-site restructuring, indirection removal, data-flow coalescing, dead-policy excision, lock/state granularity rework) and a function-local change have comparable risk and similar expected instruction-count delta, prefer the structural change. A 1.5% structural win that opens up adjacent wins or eliminates a vestigial layer is preferred over a 2% local win that leaves the structure unchanged. Document this tradeoff explicitly in the design doc's "Architectural Alternatives Considered" section. Pipelines that produce N successive `function`-scope wins across N iterations are a failure mode — each iteration's funnel must touch broader scopes (see `optimization-funnel.md` scope-diversity requirement).
+
 ## Mandatory Startup Sequence
 
 1. Acknowledge the task.
@@ -76,6 +78,17 @@ Write or update `.opencode/docs/<artifact_slug>_design.md` with:
 - lifecycle constraints
 - instruction-count hot spots and likely waste mechanisms
 - open questions and risk notes
+
+The design doc MUST also include these mandatory structural sections (per `research-discipline.md` step 5 — Structural Audit). A doc missing or trivially-filling these will trigger a `scope_justification_missing` reject from the plan reviewer.
+
+- **Structural Audit** — one paragraph per dimension, each ending with either a candidate mechanism (with `file:line` evidence) or `none observed — <specific reason citing file:line>`. The five dimensions:
+  1. Cross-call-site patterns (do ≥2 callers share pre/post work?)
+  2. Indirection cost (any layer whose flexibility is unused in current product config?)
+  3. Data round-trip / coalescing (does data cross subsystem boundary >1× per request?)
+  4. Dead / vestigial policy (any knob/branch only used by retired code paths?)
+  5. State / lock granularity (any state distinction or lock scope reducible without behavioral change?)
+
+- **Architectural Alternatives Considered** — 1-2 broader refactors that were evaluated. For each: estimated leverage (call sites affected, expected Δ% range, follow-on wins unblocked), and explicit accept-or-reject reason. This section CANNOT be empty — if no broader alternatives apply, list which structural-audit dimensions you ruled out and why, citing `file:line` evidence in each case.
 
 When useful, include Mermaid diagrams.
 
