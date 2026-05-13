@@ -14,5 +14,11 @@ See `docs/scip_clang_integration_plan.md` for the full rollout plan.
 """
 
 from .clangd import ClangdBackend
+from .scip_clang import ScipClangBackend, ScipClangConfig, ScipClangError
 
-__all__ = ["ClangdBackend"]
+__all__ = [
+    "ClangdBackend",
+    "ScipClangBackend",
+    "ScipClangConfig",
+    "ScipClangError",
+]
