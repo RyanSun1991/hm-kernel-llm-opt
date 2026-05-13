@@ -92,55 +92,18 @@ class SymbolRecord:
     container: Optional[str]
 
 
-@dataclass
-class CodeChunk:
-    path: Path
-    symbol_id: str
-    symbol_name: str
-    symbol_qualname: str
-    kind: str
-    start_line: int
-    end_line: int
-    text: str
-    parser: str
-    detail: Optional[str] = None
-    container: Optional[str] = None
-
-
-@dataclass
-class CodeRelation:
-    src_id: str
-    dst_id: str
-    kind: str
-    src_name: str
-    dst_name: str
-    src_kind: str
-    dst_kind: str
-    src_path: Optional[str] = None
-    dst_path: Optional[str] = None
-
-
-@dataclass
-class FileSummary:
-    path: Path
-    text: str
-
-
-@dataclass
-class RelationSummary:
-    symbol_id: str
-    symbol_name: str
-    symbol_kind: str
-    path: str
-    text: str
-
-
-@dataclass
-class CodeIndex:
-    chunks: list[CodeChunk]
-    relations: list[CodeRelation]
-    file_summaries: list[FileSummary]
-    relation_summaries: list[RelationSummary]
+# Public data classes (CodeChunk, CodeRelation, FileSummary, RelationSummary,
+# CodeIndex) live in `models.py` so that alternate backends (e.g. scip-clang)
+# can share the same schema. Re-exported here for backward compatibility —
+# `from hmopt.indexing.clangd_indexer import CodeIndex, CodeChunk, ...`
+# continues to work unchanged.
+from .models import (  # noqa: E402  (re-export shim, must follow dataclass defs above)
+    CodeChunk,
+    CodeIndex,
+    CodeRelation,
+    FileSummary,
+    RelationSummary,
+)
 
 
 def _symbol_kind_name(kind_id: int) -> str:
