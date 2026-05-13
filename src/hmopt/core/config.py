@@ -134,6 +134,23 @@ class ClangdConfig(BaseModel):
     relation_summary_max_items: int = 50
 
 
+class ScipClangConfig(BaseModel):
+    """Configuration for the scip-clang batch indexer backend.
+
+    Active only when `indexing.backend == "scip-clang"`. See
+    `docs/scip_clang_integration_plan.md` for the full rollout plan.
+    """
+
+    enabled: bool = True
+    binary: str = "scip-clang"
+    timeout_sec: int = 7200
+    extra_args: list[str] = Field(default_factory=list)
+    keep_scip_file: bool = False
+    """If True, the intermediate `index.scip` is preserved at
+    `<repo_path>/.hmopt/scip/index.scip` for debugging instead of being
+    cleaned up after parsing."""
+
+
 class MCPConfig(BaseModel):
     enabled: bool = False
     base_url: str = "http://localhost:20010/v1"
@@ -170,8 +187,19 @@ class IndexingConfig(BaseModel):
     query_prompt_file: Optional[Path] = None
     query_system_prompt_file: Optional[Path] = None
     hotspot_focus_symbol: Optional[str] = None
+    backend: str = "clangd"
+    """Which code-index backend to use: "clangd" | "scip-clang".
+
+    The default preserves existing behavior. When set to "scip-clang", the
+    pipeline invokes the scip-clang batch indexer instead and parses its
+    .scip output. Both backends produce the same `CodeIndex` shape; the
+    scip-clang path additionally fills Optional fields (call_site_*,
+    scip_symbol, documentation, signature, syntax_kind, role_bits, is_write,
+    is_forward_decl, is_generated, etc.)."""
+
     neo4j: Neo4jConfig = Neo4jConfig()
     clangd: ClangdConfig = ClangdConfig()
+    scip_clang: ScipClangConfig = ScipClangConfig()
     mcp: MCPConfig = MCPConfig()
 
 
@@ -345,6 +373,15 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "relation_summary_max_items": int(clangd_cfg.get("relation_summary_max_items", 50)),
     }
 
+    scip_clang_cfg = indexing_cfg.get("scip_clang", {})
+    scip_clang_norm = {
+        "enabled": bool(scip_clang_cfg.get("enabled", True)),
+        "binary": scip_clang_cfg.get("binary", "scip-clang"),
+        "timeout_sec": int(scip_clang_cfg.get("timeout_sec", 7200)),
+        "extra_args": scip_clang_cfg.get("extra_args", []),
+        "keep_scip_file": bool(scip_clang_cfg.get("keep_scip_file", False)),
+    }
+
     mcp_cfg = indexing_cfg.get("mcp", {})
     mcp_norm = {
         "enabled": bool(mcp_cfg.get("enabled", False)),
@@ -386,8 +423,10 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
             if indexing_cfg.get("query_prompt_file") else None,
         "query_system_prompt_file": Path(indexing_cfg["query_system_prompt_file"])
             if indexing_cfg.get("query_system_prompt_file") else None,
+        "backend": indexing_cfg.get("backend", "clangd"),
         "neo4j": neo4j_norm,
         "clangd": clangd_norm,
+        "scip_clang": scip_clang_norm,
         "mcp": mcp_norm,
     }
 

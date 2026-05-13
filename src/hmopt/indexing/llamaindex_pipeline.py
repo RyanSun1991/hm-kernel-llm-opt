@@ -588,6 +588,16 @@ def _filter_unchanged_nodes_by_hash(
         upsert_nodes.append(node)
     return upsert_nodes, skipped
 
+def _drop_none(props: dict[str, Any]) -> dict[str, Any]:
+    """Return a new dict with None values removed.
+
+    Neo4j stores absent properties efficiently when they're simply missing
+    from the property map; writing explicit nulls bloats the graph and breaks
+    `IS NULL` queries elsewhere.
+    """
+    return {k: v for k, v in props.items() if v is not None}
+
+
 def _build_graph_entities(index: CodeIndex) -> tuple[list[EntityNode], list[Relation]]:
     nodes: dict[str, EntityNode] = {}
 
@@ -601,21 +611,35 @@ def _build_graph_entities(index: CodeIndex) -> tuple[list[EntityNode], list[Rela
         symbol_qualname: Optional[str] = None,
         start_line: Optional[int] = None,
         end_line: Optional[int] = None,
+        backend_origin: Optional[str] = None,
+        scip_symbol: Optional[str] = None,
+        documentation: Optional[list[str]] = None,
+        signature: Optional[str] = None,
+        is_forward_decl: Optional[bool] = None,
+        is_generated: Optional[bool] = None,
+        header_origin_tu: Optional[str] = None,
     ) -> None:
         if node_id in nodes:
             return
-        properties = {
-            "symbol_name": symbol_name,
-            "symbol_kind": symbol_kind,
-        }
-        if symbol_qualname:
-            properties["symbol_qualname"] = symbol_qualname
-        if path:
-            properties["path"] = path
-        if start_line is not None:
-            properties["start_line"] = start_line
-        if end_line is not None:
-            properties["end_line"] = end_line
+        properties = _drop_none(
+            {
+                "symbol_name": symbol_name,
+                "symbol_kind": symbol_kind,
+                "symbol_qualname": symbol_qualname,
+                "path": path,
+                "start_line": start_line,
+                "end_line": end_line,
+                # scip-only / provenance fields; harmless on clangd-origin
+                # records because _drop_none skips the None values.
+                "backend_origin": backend_origin,
+                "scip_symbol": scip_symbol,
+                "documentation": documentation if documentation else None,
+                "signature": signature,
+                "is_forward_decl": is_forward_decl,
+                "is_generated": is_generated,
+                "header_origin_tu": header_origin_tu,
+            }
+        )
         nodes[node_id] = EntityNode(name=node_id, label=label, properties=properties)
 
     for chunk in index.chunks:
@@ -628,6 +652,13 @@ def _build_graph_entities(index: CodeIndex) -> tuple[list[EntityNode], list[Rela
             path=str(chunk.path),
             start_line=chunk.start_line,
             end_line=chunk.end_line,
+            backend_origin=chunk.backend_origin,
+            scip_symbol=chunk.scip_symbol,
+            documentation=chunk.documentation,
+            signature=chunk.signature,
+            is_forward_decl=chunk.is_forward_decl,
+            is_generated=chunk.is_generated,
+            header_origin_tu=chunk.header_origin_tu,
         )
 
     relations: list[Relation] = []
@@ -638,6 +669,7 @@ def _build_graph_entities(index: CodeIndex) -> tuple[list[EntityNode], list[Rela
             symbol_name=rel.src_name,
             symbol_kind=rel.src_kind,
             path=rel.src_path,
+            backend_origin=rel.backend_origin,
         )
         label = "external" if rel.dst_kind == "external" else "symbol"
         add_node(
@@ -646,20 +678,35 @@ def _build_graph_entities(index: CodeIndex) -> tuple[list[EntityNode], list[Rela
             symbol_name=rel.dst_name,
             symbol_kind=rel.dst_kind,
             path=rel.dst_path,
+            backend_origin=rel.backend_origin,
         )
         relations.append(
             Relation(
                 label=rel.kind,
                 source_id=rel.src_id,
                 target_id=rel.dst_id,
-                properties={
-                    "src_name": rel.src_name,
-                    "dst_name": rel.dst_name,
-                    "src_kind": rel.src_kind,
-                    "dst_kind": rel.dst_kind,
-                    "src_path": rel.src_path,
-                    "dst_path": rel.dst_path,
-                },
+                properties=_drop_none(
+                    {
+                        "src_name": rel.src_name,
+                        "dst_name": rel.dst_name,
+                        "src_kind": rel.src_kind,
+                        "dst_kind": rel.dst_kind,
+                        "src_path": rel.src_path,
+                        "dst_path": rel.dst_path,
+                        # Backend provenance + scip-only enrichments.
+                        # _drop_none skips entries whose value is None so
+                        # clangd-origin relations stay byte-compatible with
+                        # the previous schema.
+                        "backend_origin": rel.backend_origin,
+                        "call_site_path": rel.call_site_path,
+                        "call_site_line": rel.call_site_line,
+                        "call_site_col": rel.call_site_col,
+                        "syntax_kind": rel.syntax_kind,
+                        "role_bits": rel.role_bits,
+                        "is_write": rel.is_write,
+                        "occurrence_count": rel.occurrence_count,
+                    }
+                ),
             )
         )
 
@@ -679,18 +726,55 @@ def _upsert_clangd_graph(storage: StorageContext, index: CodeIndex, nodes: list[
         property_graph_store.upsert_relations(relations)
 
 
-def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> IndexPaths:
-    paths = _index_paths(config)
-    paths.code_dir.mkdir(parents=True, exist_ok=True)
-    llm, embed = _build_llama_models(config)
-    neo4j_cfg = _neo4j_index_config("code")
-    # _reset_neo4j_vector_index(
-    #     config,
-    #     embedding_dimension=embed_dim,
-    #     index_name=neo4j_cfg.index_name,
-    #     node_label=neo4j_cfg.node_label,
-    # )
+def _build_code_index_via_backend(
+    *,
+    config: AppConfig,
+    repo_path: Path,
+) -> CodeIndex:
+    """Dispatch to the configured code-index backend and return a CodeIndex.
 
+    Both backends emit the unified `CodeIndex` schema defined in
+    `hmopt.indexing.models`. The clangd backend tags every record with
+    `backend_origin="clangd"` and leaves scip-only Optional fields as None;
+    the scip-clang backend populates `call_site_*`, `syntax_kind`, `role_bits`,
+    `is_write`, `occurrence_count`, `scip_symbol`, `documentation`, `signature`,
+    `is_forward_decl`, `is_generated` where available.
+
+    See `docs/scip_clang_integration_plan.md` for the design.
+    """
+
+    backend_name = (config.indexing.backend or "clangd").strip().lower()
+
+    if backend_name == "scip-clang":
+        # Lazy import so a clangd-only install doesn't need the scip-clang
+        # subprocess or its protobuf bindings on disk.
+        from hmopt.indexing.backends.scip_clang import (
+            ScipClangBackend,
+            ScipClangConfig as BackendScipClangConfig,
+        )
+
+        scip_cfg = BackendScipClangConfig(
+            binary=config.indexing.scip_clang.binary,
+            timeout_s=config.indexing.scip_clang.timeout_sec,
+            extra_args=list(config.indexing.scip_clang.extra_args),
+            keep_scip_file=config.indexing.scip_clang.keep_scip_file,
+        )
+        backend = ScipClangBackend(scip_cfg)
+        compile_commands_dir = config.indexing.clangd.compile_commands_dir
+        return backend.build(
+            repo_path=repo_path,
+            compile_commands_dir=compile_commands_dir,
+            config=scip_cfg,
+        )
+
+    if backend_name not in ("clangd", ""):
+        logger.warning(
+            "Unknown indexing.backend=%s; falling back to clangd", backend_name
+        )
+
+    # Default path: clangd. We retain the existing inline plumbing so
+    # ClangdBackend stays a thin wrapper around `index_kernel_code` while
+    # preserving every clangd config knob.
     clangd_cfg = LspClangdConfig(
         binary=config.indexing.clangd.binary,
         compile_commands_dir=config.indexing.clangd.compile_commands_dir,
@@ -708,10 +792,35 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
         relation_summary_enabled=config.indexing.clangd.relation_summary_enabled,
         relation_summary_max_items=config.indexing.clangd.relation_summary_max_items,
     )
-    code_index = index_kernel_code(
-        Path(repo_path or config.project.repo_path),
+    return index_kernel_code(
+        repo_path,
         clangd_config=clangd_cfg if config.indexing.clangd.enabled else None,
         max_files=config.indexing.clangd.max_files,
+    )
+
+
+def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> IndexPaths:
+    paths = _index_paths(config)
+    paths.code_dir.mkdir(parents=True, exist_ok=True)
+    llm, embed = _build_llama_models(config)
+    neo4j_cfg = _neo4j_index_config("code")
+    # _reset_neo4j_vector_index(
+    #     config,
+    #     embedding_dimension=embed_dim,
+    #     index_name=neo4j_cfg.index_name,
+    #     node_label=neo4j_cfg.node_label,
+    # )
+
+    code_index = _build_code_index_via_backend(
+        config=config,
+        repo_path=Path(repo_path or config.project.repo_path),
+    )
+    logger.info(
+        "Code index built: backend=%s chunks=%d relations=%d diagnostics=%s",
+        code_index.diagnostics.get("backend_name", "unknown"),
+        len(code_index.chunks),
+        len(code_index.relations),
+        {k: v for k, v in code_index.diagnostics.items() if k != "failed_tus"},
     )
     nodes = _index_to_nodes(code_index)
 

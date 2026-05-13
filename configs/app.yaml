@@ -50,6 +50,16 @@ indexing:
   query_graph_top_k: 3
   query_hotspot_top_k: 10
   query_code_context_mode: snippets  # snippets|mcp|hybrid
+  # Code-index backend. Both backends emit the same CodeIndex schema; only
+  # the call_site_* / scip-only enrichments differ. See
+  # docs/scip_clang_integration_plan.md for the comparison.
+  backend: clangd                    # clangd | scip-clang
+  scip_clang:
+    enabled: true
+    binary: scip-clang               # PATH lookup; or absolute path
+    timeout_sec: 7200
+    extra_args: []
+    keep_scip_file: false            # set true to preserve .hmopt/scip/index.scip for debugging
   clangd:
     enabled: true
     binary: clangd

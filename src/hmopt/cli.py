@@ -188,18 +188,35 @@ def index_kernel(
     compile_commands_dir: Optional[str] = typer.Option(
         None, help="Directory containing compile_commands.json"
     ),
+    backend: Optional[str] = typer.Option(
+        None,
+        help=(
+            "Code-index backend: clangd | scip-clang. Overrides config.indexing.backend. "
+            "scip-clang requires the scip-clang binary on PATH and protobuf>=4.25."
+        ),
+    ),
 ) -> None:
     # Demo: python -m hmopt.cli index-kernel --repo-path /path/to/hm-verif-kernel \
-    #          --compile-commands-dir /path/to/hm-verif-kernel
-    # Purpose: build kernel code ingestion + LlamaIndex index (clangd preferred).
+    #          --compile-commands-dir /path/to/hm-verif-kernel --backend scip-clang
+    # Purpose: build kernel code ingestion + LlamaIndex index. Either backend
+    # produces the same CodeIndex shape; scip-clang additionally populates
+    # call_site_* fields and other scip-only enrichments.
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
     if repo_path:
         cfg.project.repo_path = repo_path
     if compile_commands_dir:
         cfg.indexing.clangd.compile_commands_dir = Path(compile_commands_dir)
+    if backend:
+        normalized = backend.strip().lower()
+        if normalized not in ("clangd", "scip-clang"):
+            typer.echo(
+                f"Unknown backend {backend!r}; expected clangd | scip-clang", err=True
+            )
+            raise typer.Exit(code=2)
+        cfg.indexing.backend = normalized
     build_kernel_index(cfg, repo_path=cfg.project.repo_path)
-    typer.echo("Kernel code index built")
+    typer.echo(f"Kernel code index built (backend={cfg.indexing.backend})")
 
 
 @app.command()
