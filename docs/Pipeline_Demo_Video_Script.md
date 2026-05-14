@@ -33,7 +33,7 @@
 | BEAT | t | 画面 | 终端/UI 文本 | 字幕卡 | 屏幕注释 | 音效 |
 |---|---|---|---|---|---|---|
 | 1 | 0:14–0:18 | OPENCODE 区全屏放大；光标在空 prompt 闪烁 | `user@dev-host:~/hm-kernel-llm-opt$ █` | — | — | 环境氛围音 |
-| 2 | 0:18–0:25 | 用户一字一字敲入命令（按真实击键节奏） | `bash scripts/run_opencode_pipeline.sh \`<br>`  --profile generic_full \`<br>`  --target sysmgr/memmgr/...<TARGET>.c \`<br>`  --start-mcp` | — | 黄框圈住 `--profile generic_full` 与 `--target` | 键盘 ASMR |
+| 2 | 0:18–0:25 | 用户一字一字敲入命令（按真实击键节奏） | `bash scripts/run_opencode_pipeline.sh \`<br>`  --profile generic_full \`<br>`  --target sysmgr/memmgr/...{TARGET}.c \`<br>`  --start-mcp` | — | 黄框圈住 `--profile generic_full` 与 `--target` | 键盘 ASMR |
 | 3 | 0:25–0:30 | 回车，刷出第一段绿色 OK 行 | `[start] main MCP via scripts/run_mcp_server.sh`<br>`[start] build MCP via scripts/run_build_mcp_server.sh`<br>`[start] auto-test MCP via scripts/run_auto_test_mcp_server.sh`<br>`[start] seq MCP via scripts/run_seq_mcp_server.sh`<br>`[ok] staged prompt → .opencode/state/current_prompt.md` | — | 浅蓝标签贴在最后一行：`pipeline session staged` | "ping" |
 
 > **录制要点**：本场是全片唯一"有人介入"的画面。整段之后到 ACT 5 末尾不出现任何鼠标光标或人手。
@@ -52,18 +52,18 @@
 | BEAT | t | 画面 | 终端/UI 文本 | 字幕卡 | 屏幕注释 | 音效 |
 |---|---|---|---|---|---|---|
 | 1 | 0:30–0:35 | 字幕卡全屏 | — | 主：`Stage 1 — Intake & Routing`<br>副：`入站与路由`<br>角：`01 / 07` | — | stinger |
-| 2 | 0:35–0:43 | OPENCODE 区出现首个 banner | `=== kernel-pipeline-starter v1 — acknowledging target: <TARGET> ===`<br>`loading: .opencode/config.yaml`<br>`loading: .opencode/skills/language-config.md`<br>`loading: .opencode/docs/harness_engineer_system.md`<br>... | — | 浅蓝标签：`agent: kernel-pipeline-starter v1` | — |
-| 3 | 0:43–0:52 | 自动切到 manager；HUD 中心 hub 亮起 | `=== os-opt-manager v1 — taking control of target: <TARGET> ===`<br>`stage: intake`<br>`primary metric: instruction_count`<br>`routing decision: specialist = auto (generic_full)` | — | 浅蓝标签：`agent: os-opt-manager v1`<br>HUD 中心节点：`MANAGER` 亮 | — |
-| 4 | 0:52–1:05 | manager 输出首个 handoff packet（右侧弹浮窗） | `## Handoff → research`<br>`- target: <TARGET>`<br>`- primary_metric: instruction_count`<br>`- evidence_baseline: outputs/runs/<run_id>/baseline.json`<br>`- hot_path: (to be discovered)`<br>`- files_in_scope: [<TARGET>]`<br>`- risks: routing-only stage, no code change`<br>`- next_action: research specialist enter` | — | 右侧浮窗 5 字段逐项绿色脉冲 | tick × 5 |
+| 2 | 0:35–0:43 | OPENCODE 区出现首个 banner | `=== kernel-pipeline-starter v1 — acknowledging target: {TARGET} ===`<br>`loading: .opencode/config.yaml`<br>`loading: .opencode/skills/language-config.md`<br>`loading: .opencode/docs/harness_engineer_system.md`<br>... | — | 浅蓝标签：`agent: kernel-pipeline-starter v1` | — |
+| 3 | 0:43–0:52 | 自动切到 manager；HUD 中心 hub 亮起 | `=== os-opt-manager v1 — taking control of target: {TARGET} ===`<br>`stage: intake`<br>`primary metric: instruction_count`<br>`routing decision: specialist = auto (generic_full)` | — | 浅蓝标签：`agent: os-opt-manager v1`<br>HUD 中心节点：`MANAGER` 亮 | — |
+| 4 | 0:52–1:05 | manager 输出首个 handoff packet（右侧弹浮窗） | `## Handoff → research`<br>`- target: {TARGET}`<br>`- primary_metric: instruction_count`<br>`- evidence_baseline: outputs/runs/{run_id}/baseline.json`<br>`- hot_path: (to be discovered)`<br>`- files_in_scope: [{TARGET}]`<br>`- risks: routing-only stage, no code change`<br>`- next_action: research specialist enter` | — | 右侧浮窗 5 字段逐项绿色脉冲 | tick × 5 |
 
 ### SCENE 2.2 — Stage 2 · Research（1:05 – 1:55）
 
 | BEAT | t | 画面 | 终端/UI 文本 | 字幕卡 | 屏幕注释 | 音效 |
 |---|---|---|---|---|---|---|
 | 1 | 1:05–1:10 | 字幕卡 | — | 主：`Stage 2 — Research`<br>副：`调研`<br>角：`02 / 07` | — | stinger |
-| 2 | 1:10–1:25 | OPENCODE 区 specialist banner + 调用 MCP；MCP 区高亮 | OPENCODE：`=== <specialist> v1 — acknowledging target ===`<br>`tool_call: mcp__hmopt__query("call chain of <FN>", mode="runtime_code")`<br>`tool_call: mcp__hmopt__symbol_neighbors("<FN>")`<br><br>MCP：`[main]  ▶ query(mode=runtime_code) hits=27 latency=412ms`<br>`[main]  ▶ symbol_neighbors hits=14 latency=98ms` | — | OPENCODE 一侧黄框圈 `tool_call:` 行<br>MCP 一侧黄框圈对应响应行<br>HUD：`RESEARCH` 节点亮 | 数据流 whoosh |
-| 3 | 1:25–1:40 | FS/DIFF 区切到文件树；两个新文件淡入 | 文件树左侧高亮：<br>`.opencode/docs/<target>_design.md`（新增）<br>`.opencode/plans/<target>_plan.md`（新增） | — | 双黄框，每个框边写中文：`design 笔记` / `优化候选 plan` | "ping" × 2 |
-| 4 | 1:40–1:55 | research 日志 ×4 加速扫过；关键命中行减速回 1× | （正常滚动）...<br>`(slow) HOT-SPOT: <FN> contributes 18.4% of cycles`<br>`(slow) IDEA #1: hoist boundary check out of inner loop`<br>`(slow) IDEA #2: replace linear scan with hashed lookup`<br>`(slow) IDEA #3: ...` | — | 屏角字幕：`× 4 加速`（仅在加速段显示） | tape rewind 拟态 |
+| 2 | 1:10–1:25 | OPENCODE 区 specialist banner + 调用 MCP；MCP 区高亮 | OPENCODE：`=== {specialist} v1 — acknowledging target ===`<br>`tool_call: mcp__hmopt__query("call chain of {FN}", mode="runtime_code")`<br>`tool_call: mcp__hmopt__symbol_neighbors("{FN}")`<br><br>MCP：`[main]  ▶ query(mode=runtime_code) hits=27 latency=412ms`<br>`[main]  ▶ symbol_neighbors hits=14 latency=98ms` | — | OPENCODE 一侧黄框圈 `tool_call:` 行<br>MCP 一侧黄框圈对应响应行<br>HUD：`RESEARCH` 节点亮 | 数据流 whoosh |
+| 3 | 1:25–1:40 | FS/DIFF 区切到文件树；两个新文件淡入 | 文件树左侧高亮：<br>`.opencode/docs/{target}_design.md`（新增）<br>`.opencode/plans/{target}_plan.md`（新增） | — | 双黄框，每个框边写中文：`design 笔记` / `优化候选 plan` | "ping" × 2 |
+| 4 | 1:40–1:55 | research 日志 ×4 加速扫过；关键命中行减速回 1× | （正常滚动）...<br>`(slow) HOT-SPOT: {FN} contributes 18.4% of cycles`<br>`(slow) IDEA #1: hoist boundary check out of inner loop`<br>`(slow) IDEA #2: replace linear scan with hashed lookup`<br>`(slow) IDEA #3: ...` | — | 屏角字幕：`× 4 加速`（仅在加速段显示） | tape rewind 拟态 |
 
 ### SCENE 2.3 — Stage 3 · Plan Review（GATE）（1:55 – 2:35）
 
@@ -71,11 +71,7 @@
 |---|---|---|---|---|---|---|
 | 1 | 1:55–2:00 | 字幕卡（GATE 专用样式：底色泛红警示边） | — | 主：`Stage 3 — Plan Review (GATE)`<br>副：`计划评审 — 不通过即回退`<br>角：`03 / 07` | — | gate-stinger（低频） |
 | 2 | 2:00–2:15 | OPENCODE 区 reviewer banner；逐条评分输出 | `=== kernel-plan-reviewer v1 — reviewing plan ===`<br>`criterion: instruction-count tradeoff ........... PASS`<br>`criterion: risk surface (locks / refcount) ...... PASS`<br>`criterion: testability (A/B feasibility) ........ PASS`<br>`criterion: bad-plan memory check ................ PASS` | — | 浅蓝标签：`agent: kernel-plan-reviewer v1`<br>右侧侧栏中文："这是硬闸门：未通过则回退到 Research" | — |
-| 3 | 2:15–2:28 | FS/DIFF 区切到 `*_plan_review.md`；verdict 行放大 | ```md
-verdict: APPROVED
-top_idea: IDEA #1 — hoist boundary check
-proceed_to: implementation
-```` | — | 绿色对勾 ✓ 动画从 verdict 行放大覆盖 | gate-pass chime（高频 ding） |
+| 3 | 2:15–2:28 | FS/DIFF 区切到 `*_plan_review.md`；verdict 行放大 | `verdict: APPROVED`<br>`top_idea: IDEA #1 — hoist boundary check`<br>`proceed_to: implementation` | — | 绿色对勾 ✓ 动画从 verdict 行放大覆盖 | gate-pass chime（高频 ding） |
 | 4 | 2:28–2:35 | OPENCODE 区 manager 自动 dispatch | `[manager] received verdict: APPROVED`<br>`[manager] dispatching → kernel-code-agent` | — | 屏底字幕条："✓ 通过，pipeline 自动进入实现阶段"<br>HUD 节点流向 `IMPL` | — |
 
 ### SCENE 2.4 — Stage 4 · Implementation（2:35 – 3:30）
@@ -83,15 +79,9 @@ proceed_to: implementation
 | BEAT | t | 画面 | 终端/UI 文本 | 字幕卡 | 屏幕注释 | 音效 |
 |---|---|---|---|---|---|---|
 | 1 | 2:35–2:40 | 字幕卡 | — | 主：`Stage 4 — Implementation`<br>副：`实现`<br>角：`04 / 07` | — | stinger |
-| 2 | 2:40–2:55 | OPENCODE 一半 + FS/DIFF 一半同屏；diff 实时滚动 | OPENCODE：`=== kernel-code-agent v1 — implementing IDEA #1 ===`<br>`editing: <TARGET>`<br>`tool_call: mcp__build__compile(target=<MODULE>)`<br><br>FS/DIFF：`+ if (likely(!boundary_dirty(ctx)))`<br>`+   return fast_path(ctx);`<br>`-` ... | — | 浅蓝标签：`agent: kernel-code-agent v1`<br>FS 一侧绿/红 diff 行用 +/- 色块自然显示 | 键盘 ASMR |
-| 3 | 2:55–3:15 | MCP 区切到 build MCP；进度条 ×8 加速 | `[build] ▶ make ARCH=arm64 CC=clang ...`<br>`[build]   CC kernel/<X>.o`<br>`[build]   CC kernel/<Y>.o`<br>`...（加速段）...`<br>`[build] ✓ BUILD PASS  duration=7m12s` | — | 屏角字幕：`× 8 加速 · build 实际耗时 7m 12s`<br>build 终端外圈 orange hue 边框 | 加速 hum |
-| 4 | 3:15–3:30 | FS/DIFF 区：patch 文件 + `git diff --stat` 弹出 | ```
-.opencode/patches/<target>.patch  (新增)
-
-$ git diff --stat
- <TARGET>  | 17 +++++++++++-----
- 1 file changed, 12 insertions(+), 5 deletions(-)
-``` | — | 黄框圈 patch 文件名<br>绿色大字 `BUILD PASS` 浮起 | success chime |
+| 2 | 2:40–2:55 | OPENCODE 一半 + FS/DIFF 一半同屏；diff 实时滚动 | OPENCODE：`=== kernel-code-agent v1 — implementing IDEA #1 ===`<br>`editing: {TARGET}`<br>`tool_call: mcp__build__compile(target={MODULE})`<br><br>FS/DIFF：`+ if (likely(!boundary_dirty(ctx)))`<br>`+   return fast_path(ctx);`<br>`-` ... | — | 浅蓝标签：`agent: kernel-code-agent v1`<br>FS 一侧绿/红 diff 行用 +/- 色块自然显示 | 键盘 ASMR |
+| 3 | 2:55–3:15 | MCP 区切到 build MCP；进度条 ×8 加速 | `[build] ▶ make ARCH=arm64 CC=clang ...`<br>`[build]   CC kernel/{X}.o`<br>`[build]   CC kernel/{Y}.o`<br>`...（加速段）...`<br>`[build] ✓ BUILD PASS  duration=7m12s` | — | 屏角字幕：`× 8 加速 · build 实际耗时 7m 12s`<br>build 终端外圈 orange hue 边框 | 加速 hum |
+| 4 | 3:15–3:30 | FS/DIFF 区：patch 文件 + `git diff --stat` 弹出 | `.opencode/patches/{target}.patch  (新增)`<br><br>`$ git diff --stat`<br>` {TARGET}  │ 17 +++++++++++-----`<br>` 1 file changed, 12 insertions(+), 5 deletions(-)` | — | 黄框圈 patch 文件名<br>绿色大字 `BUILD PASS` 浮起 | success chime |
 
 ### SCENE 2.5 — Stage 5 · Code Review（GATE）（3:30 – 4:10）
 
@@ -99,11 +89,7 @@ $ git diff --stat
 |---|---|---|---|---|---|---|
 | 1 | 3:30–3:35 | 字幕卡（GATE 警示边） | — | 主：`Stage 5 — Code Review (GATE)`<br>副：`代码评审 — 不通过即回退`<br>角：`05 / 07` | — | gate-stinger |
 | 2 | 3:35–3:55 | OPENCODE 区 reviewer 输出；tradeoff 段落放大 | `=== kernel-code-reviewer v1 — reviewing patch ===`<br>`section: correctness ..................... PASS`<br>`section: instruction-count tradeoff ...... +Δ -12.3% est`<br>`section: locking & refcount .............. PASS`<br>`section: build & symbol shape ............ PASS` | — | 框出 `tradeoff` 段；右侧浮窗："Reviewer 估算指令数 ↓ 12.3%（待真机验证）" | — |
-| 3 | 3:55–4:05 | FS/DIFF 区切到 `*_code_review.md`；verdict 放大 | ```md
-verdict: APPROVED
-unblocked: tester
-notes: see tradeoff section for follow-up
-```` | — | 绿色对勾 ✓ | gate-pass chime |
+| 3 | 3:55–4:05 | FS/DIFF 区切到 `*_code_review.md`；verdict 放大 | `verdict: APPROVED`<br>`unblocked: tester`<br>`notes: see tradeoff section for follow-up` | — | 绿色对勾 ✓ | gate-pass chime |
 | 4 | 4:05–4:10 | OPENCODE 区 manager 自动 dispatch | `[manager] received verdict: APPROVED`<br>`[manager] dispatching → kernel-tester-agent` | — | 屏底字幕条："✓ 通过，进入真机 A/B 验证"<br>HUD 节点流向 `TEST` | — |
 
 ### SCENE 2.6 — Stage 6 · Tester A/B（4:10 – 5:50）★ 重头戏
@@ -120,7 +106,7 @@ notes: see tradeoff section for follow-up
 | 6 | 5:00–5:15 | MCP（flash）+ DEVICE | MCP：`[flash] ▶ flash boot feature.img`<br>`[flash] ▶ flash system feature.img`<br>`[flash] ▶ reboot`<br><br>scrcpy：fastboot → 桌面（同节奏） | — | scrcpy 一侧贴绿字：`Feature Image` | flash 进度音 |
 | 7 | 5:15–5:30 | DEVICE + DASH | DEVICE：workload 第二次启动<br>DASH（第二列定格）：<br>`instruction_count = 1,083,219`<br>`cycles            =   866,750`<br>`cache_miss        =    47,901`<br>`wakeup_lat (us)   =       138` | — | DASH 第二列上方贴绿字：`Feature`<br>tick 音节奏与 Baseline 一致 | tick × 4 |
 | 8 | 5:30–5:42 | DASH 全屏放大 | DASH 第三列"Δ"出现，数字从 Baseline 数到 Feature：<br>`Δ instruction_count  ↓ 12.3%`<br>`Δ cycles             ↓ 11.6%`<br>`Δ cache_miss         ↓  6.8%`<br>`Δ wakeup_lat         ↓  4.2%` | — | 主指标行 96pt 大字 + 红色 ↓ 箭头；其它指标 48pt | drop（主指标定格瞬间） |
-| 9 | 5:42–5:50 | FS/DIFF | `.opencode/bench/<target>_validation.md` 弹出，第一行高亮：<br>`verdict: IMPROVED — primary metric ↓ 12.3%` | — | 黄框圈文件名；绿色对勾 ✓ | "ping" + chime |
+| 9 | 5:42–5:50 | FS/DIFF | `.opencode/bench/{target}_validation.md` 弹出，第一行高亮：<br>`verdict: IMPROVED — primary metric ↓ 12.3%` | — | 黄框圈文件名；绿色对勾 ✓ | "ping" + chime |
 
 ---
 
@@ -149,8 +135,8 @@ ACT 3 不占独立时间段，分两层呈现：
 | BEAT | t | 画面 | 终端/UI 文本 | 字幕卡 | 屏幕注释 | 音效 |
 |---|---|---|---|---|---|---|
 | 1 | 5:50–5:55 | 字幕卡 | — | 主：`Stage 7 — Decision & Memory`<br>副：`决策与长期记忆`<br>角：`07 / 07` | — | stinger |
-| 2 | 5:55–6:05 | OPENCODE 区 manager 落定决策 | `[manager] reading: .opencode/bench/<target>_validation.md`<br>`[manager] verdict: ACCEPT — instruction_count ↓ 12.3%`<br>`[manager] writing memory: .opencode/memory/targets/<target>.md`<br>`[manager] writing memory: .opencode/memory/ideas/accepted.md` | — | 浅蓝标签：`agent: os-opt-manager v1`<br>HUD 节点流向 `MEMORY` | — |
-| 3 | 6:05–6:15 | FS/DIFF 区文件树滚动；本轮新增/修改文件依次绿色 ↑ 闪 | （文件树列高亮以下条目，每条 0.4s）<br>`.opencode/docs/<target>_design.md            (+)`<br>`.opencode/plans/<target>_plan.md             (+)`<br>`.opencode/reviews/<target>_plan_review.md    (+)`<br>`.opencode/patches/<target>.patch             (+)`<br>`.opencode/reviews/<target>_code_review.md    (+)`<br>`.opencode/bench/<target>_validation.md       (+)`<br>`.opencode/memory/targets/<target>.md         (±)`<br>`.opencode/memory/ideas/accepted.md           (±)`<br>`outputs/runs/<run_id>/metrics.json           (+)` | — | 每条文件名右侧贴中文小标：`research笔记` / `候选 plan` / `计划评审` / `代码补丁` / `代码评审` / `A/B 验证报告` / `目标长期记忆` / `已采纳想法库` / `指标快照` | "ping" × 9，节奏渐密 |
+| 2 | 5:55–6:05 | OPENCODE 区 manager 落定决策 | `[manager] reading: .opencode/bench/{target}_validation.md`<br>`[manager] verdict: ACCEPT — instruction_count ↓ 12.3%`<br>`[manager] writing memory: .opencode/memory/targets/{target}.md`<br>`[manager] writing memory: .opencode/memory/ideas/accepted.md` | — | 浅蓝标签：`agent: os-opt-manager v1`<br>HUD 节点流向 `MEMORY` | — |
+| 3 | 6:05–6:15 | FS/DIFF 区文件树滚动；本轮新增/修改文件依次绿色 ↑ 闪 | （文件树列高亮以下条目，每条 0.4s）<br>`.opencode/docs/{target}_design.md            (+)`<br>`.opencode/plans/{target}_plan.md             (+)`<br>`.opencode/reviews/{target}_plan_review.md    (+)`<br>`.opencode/patches/{target}.patch             (+)`<br>`.opencode/reviews/{target}_code_review.md    (+)`<br>`.opencode/bench/{target}_validation.md       (+)`<br>`.opencode/memory/targets/{target}.md         (±)`<br>`.opencode/memory/ideas/accepted.md           (±)`<br>`outputs/runs/{run_id}/metrics.json           (+)` | — | 每条文件名右侧贴中文小标：`research笔记` / `候选 plan` / `计划评审` / `代码补丁` / `代码评审` / `A/B 验证报告` / `目标长期记忆` / `已采纳想法库` / `指标快照` | "ping" × 9，节奏渐密 |
 
 ### SCENE 4.2 — 本轮 artifacts 总览（6:15 – 6:30）
 
@@ -167,7 +153,7 @@ ACT 3 不占独立时间段，分两层呈现：
 | BEAT | t | 画面 | 终端/UI 文本 | 字幕卡 | 屏幕注释 | 音效 |
 |---|---|---|---|---|---|---|
 | 1 | 6:30–6:35 | 字幕卡（节奏更急促） | — | 主：`Iteration #2 — Closed-Loop Re-Entry`<br>副：`第 2 轮迭代自动启动 · 无人介入` | — | stinger（高昂） |
-| 2 | 6:35–6:50 | OPENCODE 区 manager 再次 fan-out | `[manager] iteration #2 — re-entering pipeline`<br>`[manager] reading prior memory: .opencode/memory/targets/<target>.md`<br>`[manager] re-routing → specialist: <same or different>`<br>`[manager] dispatching → research` | — | HUD 节点回到 `RESEARCH` 并亮起 | — |
+| 2 | 6:35–6:50 | OPENCODE 区 manager 再次 fan-out | `[manager] iteration #2 — re-entering pipeline`<br>`[manager] reading prior memory: .opencode/memory/targets/{target}.md`<br>`[manager] re-routing → specialist: {same or different}`<br>`[manager] dispatching → research` | — | HUD 节点回到 `RESEARCH` 并亮起 | — |
 | 3 | 6:50–6:55 | 4 分屏快剪 0.5s 闪现 4 个画面（OpenCode / MCP / DEVICE / DASH） | — | — | — | drum fill |
 
 ### SCENE 5.2 — Round 2 极速快进（6:55 – 7:25）
@@ -176,7 +162,7 @@ ACT 3 不占独立时间段，分两层呈现：
 
 | BEAT | t | 画面 | 终端文本（仅保留行） | 字幕卡 | 屏幕注释 | 音效 |
 |---|---|---|---|---|---|---|
-| 1 | 6:55–7:25 | OPENCODE 区主，HUD 节点依次亮：RESEARCH → PLAN-REVIEW → IMPL → CODE-REVIEW → TEST → MEMORY | `=== <specialist> v1 — iteration 2 ===`<br>`...`<br>`verdict: APPROVED`<br>`=== kernel-code-agent v1 — iteration 2 ===`<br>`...`<br>`verdict: APPROVED`<br>`=== kernel-tester-agent v1 — iteration 2 ===`<br>`verdict: IMPROVED — primary metric ↓ 4.7% (incremental)` | — | 屏角字幕：`× 16 加速 · 第 2 轮实际耗时 25m`<br>HUD 节点每次切换一次 tick 音 | 持续加速 hum + 7 × tick |
+| 1 | 6:55–7:25 | OPENCODE 区主，HUD 节点依次亮：RESEARCH → PLAN-REVIEW → IMPL → CODE-REVIEW → TEST → MEMORY | `=== {specialist} v1 — iteration 2 ===`<br>`...`<br>`verdict: APPROVED`<br>`=== kernel-code-agent v1 — iteration 2 ===`<br>`...`<br>`verdict: APPROVED`<br>`=== kernel-tester-agent v1 — iteration 2 ===`<br>`verdict: IMPROVED — primary metric ↓ 4.7% (incremental)` | — | 屏角字幕：`× 16 加速 · 第 2 轮实际耗时 25m`<br>HUD 节点每次切换一次 tick 音 | 持续加速 hum + 7 × tick |
 
 ### SCENE 5.3 — 累计指标对比（7:25 – 7:45）
 
@@ -217,7 +203,7 @@ ACT 3 不占独立时间段，分两层呈现：
 **Agent 身份（浅蓝 #7CD4FD）**：
 - `agent: kernel-pipeline-starter v1`
 - `agent: os-opt-manager v1`
-- `agent: <specialist> v1`（如 `wq-threadpool-opt v1` / `memmgr-reclaim-research v1`）
+- `agent: {specialist} v1`（如 `wq-threadpool-opt v1` / `memmgr-reclaim-research v1`）
 - `agent: kernel-plan-reviewer v1`
 - `agent: kernel-code-agent v1`
 - `agent: kernel-code-reviewer v1`
@@ -278,8 +264,8 @@ ACT 3 不占独立时间段，分两层呈现：
 
 > **重要**：脚本中 SCENE 2.x 各 BEAT 给出的终端文本是**期望形态**，最终成片必须使用真实跑批的终端输出。如果真实输出与示意稿出入较大，按以下优先级处理：
 >
-> 1. **必须保留的行**：所有 `=== <agent> vN — ... ===` banner 行、所有 `verdict:` 行、所有 `tool_call:` 行、所有 `[manager] dispatching → ...` 行。
-> 2. **可以删减/折叠的行**：研究阶段的 candidate 枚举、build 阶段的中间 `CC <X>.o` 行、刷机阶段的中间进度细节。
+> 1. **必须保留的行**：所有 `=== {agent} vN — ... ===` banner 行、所有 `verdict:` 行、所有 `tool_call:` 行、所有 `[manager] dispatching → ...` 行。
+> 2. **可以删减/折叠的行**：研究阶段的 candidate 枚举、build 阶段的中间 `CC {X}.o` 行、刷机阶段的中间进度细节。
 > 3. **绝对禁止改写的行**：任何指标数字、任何 verdict 字面值、任何 artifact 路径。
 
 如果某行真实输出过长，**只截屏裁剪而不在剪辑里手敲替换**——保持"这是真跑出来的"的视觉信誉。
