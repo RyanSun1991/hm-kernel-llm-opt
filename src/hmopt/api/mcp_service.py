@@ -514,9 +514,21 @@ def call_chain_to_markdown(payload: dict[str, Any]) -> str:
         lines.append("")
         lines.append("## Edges")
         for edge in edges:
+            suffix = ""
+            cs_path = edge.get("call_site_path")
+            cs_line = edge.get("call_site_line")
+            if cs_path and cs_line is not None:
+                cs_col = edge.get("call_site_col")
+                if cs_col is not None:
+                    suffix = f"  @{cs_path}:{cs_line}:{cs_col}"
+                else:
+                    suffix = f"  @{cs_path}:{cs_line}"
+                is_write = edge.get("is_write")
+                if is_write is True:
+                    suffix += " [write]"
             lines.append(
                 f"- depth={edge.get('depth')} {edge.get('src')} -[{edge.get('rel')}]-> "
-                f"{edge.get('dst')} ({edge.get('direction')})"
+                f"{edge.get('dst')} ({edge.get('direction')}){suffix}"
             )
 
     nodes = payload.get("nodes") or {}

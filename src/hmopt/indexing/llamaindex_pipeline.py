@@ -2298,6 +2298,30 @@ _DEFAULT_EDGE_KINDS = ("calls", "uses_type", "uses_macro")
 _CALL_CHAIN_DEPTH_HARD_CAP = 6
 
 
+def _call_site_fields(rec: dict[str, Any]) -> dict[str, Any]:
+    """Extract per-edge call-site enrichments from a Cypher row.
+
+    Returns only the fields that are non-None — clangd-origin edges don't
+    carry these properties, and we don't want to clutter the response
+    payload with explicit nulls. Field names match `CodeRelation` so
+    downstream consumers see a uniform schema regardless of backend.
+    """
+    out: dict[str, Any] = {}
+    if rec.get("cs_path") is not None:
+        out["call_site_path"] = rec.get("cs_path")
+    if rec.get("cs_line") is not None:
+        out["call_site_line"] = rec.get("cs_line")
+    if rec.get("cs_col") is not None:
+        out["call_site_col"] = rec.get("cs_col")
+    if rec.get("cs_syntax_kind") is not None:
+        out["syntax_kind"] = rec.get("cs_syntax_kind")
+    if rec.get("cs_is_write") is not None:
+        out["is_write"] = rec.get("cs_is_write")
+    if rec.get("cs_backend_origin") is not None:
+        out["backend_origin"] = rec.get("cs_backend_origin")
+    return out
+
+
 def retrieve_call_chain(
     config: AppConfig,
     symbols: list[str],
@@ -2408,6 +2432,11 @@ def retrieve_call_chain(
     fetch_outgoing = direction_norm in {"callees", "both"}
     fetch_incoming = direction_norm in {"callers", "both"}
 
+    # Both queries also return the relationship's optional scip-clang
+    # enrichments (call_site_path/line/col, syntax_kind, is_write,
+    # backend_origin). On clangd-origin edges these properties are absent
+    # and Cypher returns null — _call_site_fields() drops the nulls before
+    # they reach the response payload.
     out_cypher = (
         "MATCH (s:symbol)-[r]->(t) "
         "WHERE (s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols) "
@@ -2416,7 +2445,13 @@ def retrieve_call_chain(
         "type(r) as rel, "
         "t.symbol_name as dst, t.symbol_qualname as dst_qual, "
         "t.path as dst_path, t.start_line as dst_start, t.end_line as dst_end, "
-        "t.symbol_kind as dst_kind "
+        "t.symbol_kind as dst_kind, "
+        "r.call_site_path as cs_path, "
+        "r.call_site_line as cs_line, "
+        "r.call_site_col as cs_col, "
+        "r.syntax_kind as cs_syntax_kind, "
+        "r.is_write as cs_is_write, "
+        "r.backend_origin as cs_backend_origin "
         "LIMIT $limit"
     )
     in_cypher = (
@@ -2427,7 +2462,13 @@ def retrieve_call_chain(
         "type(r) as rel, "
         "s.symbol_name as dst, s.symbol_qualname as dst_qual, "
         "t.path as src_path, t.start_line as src_start, t.end_line as src_end, "
-        "t.symbol_kind as src_kind "
+        "t.symbol_kind as src_kind, "
+        "r.call_site_path as cs_path, "
+        "r.call_site_line as cs_line, "
+        "r.call_site_col as cs_col, "
+        "r.syntax_kind as cs_syntax_kind, "
+        "r.is_write as cs_is_write, "
+        "r.backend_origin as cs_backend_origin "
         "LIMIT $limit"
     )
 
@@ -2486,15 +2527,15 @@ def retrieve_call_chain(
                 dst_key = rec.get("dst_qual") or rec.get("dst")
                 if not src_key or not dst_key:
                     continue
-                edges.append(
-                    {
-                        "src": src_key,
-                        "dst": dst_key,
-                        "rel": str(rec.get("rel") or "calls"),
-                        "depth": current_depth,
-                        "direction": "callee",
-                    }
-                )
+                edge = {
+                    "src": src_key,
+                    "dst": dst_key,
+                    "rel": str(rec.get("rel") or "calls"),
+                    "depth": current_depth,
+                    "direction": "callee",
+                }
+                edge.update(_call_site_fields(rec))
+                edges.append(edge)
                 _record_node(src_key, rec.get("src"))
                 _record_node(
                     dst_key,
@@ -2526,15 +2567,15 @@ def retrieve_call_chain(
                 dst_key = rec.get("dst_qual") or rec.get("dst")
                 if not src_key or not dst_key:
                     continue
-                edges.append(
-                    {
-                        "src": src_key,
-                        "dst": dst_key,
-                        "rel": str(rec.get("rel") or "calls"),
-                        "depth": current_depth,
-                        "direction": "caller",
-                    }
-                )
+                edge = {
+                    "src": src_key,
+                    "dst": dst_key,
+                    "rel": str(rec.get("rel") or "calls"),
+                    "depth": current_depth,
+                    "direction": "caller",
+                }
+                edge.update(_call_site_fields(rec))
+                edges.append(edge)
                 _record_node(
                     src_key,
                     rec.get("src"),
@@ -2613,9 +2654,18 @@ def _format_call_chain_text(payload: dict[str, Any]) -> str:
     if edges:
         lines.append("Edges:")
         for edge in edges:
+            suffix = ""
+            cs_path = edge.get("call_site_path")
+            cs_line = edge.get("call_site_line")
+            if cs_path and cs_line is not None:
+                cs_col = edge.get("call_site_col")
+                if cs_col is not None:
+                    suffix = f"  @{cs_path}:{cs_line}:{cs_col}"
+                else:
+                    suffix = f"  @{cs_path}:{cs_line}"
             lines.append(
                 f"- depth={edge.get('depth')} {edge.get('src')} -[{edge.get('rel')}]-> "
-                f"{edge.get('dst')} ({edge.get('direction')})"
+                f"{edge.get('dst')} ({edge.get('direction')}){suffix}"
             )
     nodes = payload.get("nodes") or {}
     if nodes:
