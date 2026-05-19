@@ -17,16 +17,26 @@ CLANG_HINT_RE = re.compile(r"(?:^|\s)(\S*clang\+\+|\S*clang)(?:\s|$)")
 def build_transform(
     host_prefix: Optional[str],
     docker_trunk: str,
-    maps: Dict[str, str],
+    maps: Dict[str, object],
 ):
     """
     Transform path fragments in compile commands.
 
     1) docker trunk -> host trunk:
        /work/trunk_new/... -> <host_prefix>/work/trunk_new/...
-    2) yocto tmp/work recipe workdir -> mapped repo root (supports git-r0/git and git-r0/build):
-       .../tmp/work/<triplet>/<recipe>/git-r0/git/...   -> <mapped_path>/...
-       .../tmp/work/<triplet>/<recipe>/git-r0/build/... -> <mapped_path>/...
+    2) yocto tmp/work recipe workdir -> mapped repo root:
+       .../tmp/work/<triplet>/<recipe>/git-r0/git/...   -> <repo_root>/...
+       .../tmp/work/<triplet>/<recipe>/git-r0/build/... -> <repo_root>/<source_subdir>/...
+
+    Map value syntax:
+      - "recipe=/abs/repo_root"                — both git/ and build/ map to /abs/repo_root/
+                                                  (legacy behavior; build/ entries lose the
+                                                  in-repo source subdirectory)
+      - "recipe=/abs/repo_root:source_subdir"  — git/ → /abs/repo_root/,
+                                                  build/ → /abs/repo_root/source_subdir/.
+                                                  Use when the yocto recipe builds from a
+                                                  subdirectory of the source tree (e.g.
+                                                  hm-sysmgr-* recipes build from <repo>/sysmgr/).
 
     NOTE:
     - map replacement intentionally does not depend on --docker-trunk/--host-prefix values,
@@ -43,17 +53,26 @@ def build_transform(
         )
 
     yocto_rules: List[Tuple[re.Pattern, str]] = []
-    for recipe, target in maps.items():
+    for recipe, value in maps.items():
+        if isinstance(value, tuple):
+            target, source_subdir = value
+        else:
+            target, source_subdir = value, ""
         target = target.rstrip("/") + "/"
-        # match both host and docker style prefixes by anchoring from tmp/work onward
-        pat = re.compile(
+        source_subdir = source_subdir.strip("/")
+        target_build = f"{target}{source_subdir}/" if source_subdir else target
+
+        base = (
             r"(?:^|/)"
             r"[^\s]*?/build_tools/yocto/ng/build/tmp/work/"
             r"[^/]+/"
             + re.escape(recipe)
-            + r"/git-r0/(?:git|build)/"
+            + r"/git-r0/"
         )
-        yocto_rules.append((pat, target))
+        # Order matters: match build/ before git/ would still be unambiguous because the
+        # alternation is removed, but keep two explicit patterns for clarity.
+        yocto_rules.append((re.compile(base + r"git/"), target))
+        yocto_rules.append((re.compile(base + r"build/"), target_build))
 
     def transform(text: str) -> str:
         out = text
@@ -177,18 +196,34 @@ def main():
         action="append",
         default=[],
         help=(
-            "recipe=real_repo_root ; replaces "
-            ".../<recipe>/git-r0/git/ and .../<recipe>/git-r0/build/ -> real_repo_root/"
+            "recipe=real_repo_root[:source_subdir] ; replaces "
+            ".../<recipe>/git-r0/git/ -> real_repo_root/ and "
+            ".../<recipe>/git-r0/build/ -> real_repo_root/source_subdir/ "
+            "(source_subdir is optional; without it, build/ also maps to real_repo_root/, "
+            "which drops the in-repo source subdirectory and is usually wrong for "
+            "yocto recipes that build from a subdir like sysmgr/)"
         ),
     )
     args = ap.parse_args()
 
-    maps: Dict[str, str] = {}
+    maps: Dict[str, Tuple[str, str]] = {}
     for item in args.map:
         if "=" not in item:
-            ap.error(f"--map must be like recipe=/abs/path , got: {item}")
+            ap.error(
+                f"--map must be like recipe=/abs/path[:source_subdir] , got: {item}"
+            )
         k, v = item.split("=", 1)
-        maps[k.strip()] = v.strip()
+        k = k.strip()
+        v = v.strip()
+        # Split off optional :source_subdir suffix. rsplit on ':' so absolute paths
+        # on Linux (no ':') stay intact; values are expected to be POSIX paths.
+        if ":" in v:
+            path_part, _, sub = v.rpartition(":")
+            path_part = path_part.strip()
+            sub = sub.strip()
+        else:
+            path_part, sub = v, ""
+        maps[k] = (path_part, sub)
 
     host_prefix = args.host_prefix.strip() or None
     transform = build_transform(host_prefix, args.docker_trunk, maps)
