@@ -13,6 +13,10 @@ services:
     image: ${HMOPT_IMAGE:-hmopt:local}
     container_name: hmopt-app
     restart: unless-stopped
+    # /dev/shm size — Docker's 64MB default is too small for scip-clang's
+    # IPC (driver↔worker shared-memory ring buffers). 2GB covers the
+    # default ~20 workers with headroom. Override via HMOPT_SHM_SIZE.
+    shm_size: ${HMOPT_SHM_SIZE:-2gb}
     environment:
       HMOPT_LLM_BASE_URL: ${HMOPT_LLM_BASE_URL:-http://host.docker.internal:20010/v1}
       HMOPT_LLM_API_KEY: ${HMOPT_LLM_API_KEY:-}
