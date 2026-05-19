@@ -174,7 +174,7 @@ The first three fields (`nodes`, `relations`, plus the existing companions `chun
 
 - `src/hmopt/indexing/_generated/scip_pb2.py` — generated from `third_party/scip/scip.proto`
 - `src/hmopt/indexing/backends/scip_clang.py`:
-  - `ScipClangBackend` runs `scip-clang --compdb-path=... -o index.scip` as a subprocess
+  - `ScipClangBackend` runs `scip-clang --compdb-path=... --index-output-path=index.scip` as a subprocess
   - parses `index.scip` via `scip_pb2`
   - for each `Document`:
     - definition occurrences → `CodeNode` (with scip-only fields filled)

@@ -132,7 +132,7 @@ class ScipClangBackend:
         cmd = [
             self.config.binary,
             f"--compdb-path={compdb}",
-            f"-o={output_path}",
+            f"--index-output-path={output_path}",
             *self.config.extra_args,
         ]
         logger.info("Running scip-clang: cwd=%s cmd=%s", repo_path, " ".join(cmd))
