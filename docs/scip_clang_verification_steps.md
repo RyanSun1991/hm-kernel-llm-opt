@@ -195,7 +195,7 @@ EOF
 ### 5.2 直接调 scip-clang 验证二进制可用
 
 ```bash
-scip-clang --compdb-path=compile_commands.json -o /tmp/smoke.scip
+scip-clang --compdb-path=compile_commands.json --index-output-path=/tmp/smoke.scip
 ls -lh /tmp/smoke.scip          # 期望几 KB 量级，非 0
 ```
 
@@ -249,7 +249,7 @@ for r in idx.relations:
 **失败模式**：
 - `ScipClangError: scip-clang binary not on PATH` → 安装：`curl -sL https://github.com/sourcegraph/scip-clang/releases/latest/download/scip-clang-x86_64-linux -o /usr/local/bin/scip-clang && chmod +x /usr/local/bin/scip-clang`
 - `scip-clang produced no output (exit=...)` → 看 `stderr tail`；常见原因是 `compile_commands.json` 里 `directory` 不是绝对路径，或 `-c` 缺失
-- chunks 数为 0 → scip-clang 跑了但没解析出任何定义，多半是头文件路径错；用 `scip-clang --compdb-path=... -o /tmp/x.scip --` 加 `-v` 查 driver 实际命令
+- chunks 数为 0 → scip-clang 跑了但没解析出任何定义，多半是头文件路径错；用 `scip-clang --compdb-path=... --index-output-path=/tmp/x.scip` 跑一次单独看 stderr
 
 ### 5.4 通过 CLI 入口闭环（pip install 之后）
 
@@ -283,7 +283,7 @@ jq 'length' "$CCJ/compile_commands.json"   # 期望 ≥ 1，看条目数
 ### 6.2 单跑 scip-clang（不入库）观察规模
 
 ```bash
-time scip-clang --compdb-path="$CCJ/compile_commands.json" -o /tmp/kernel.scip
+time scip-clang --compdb-path="$CCJ/compile_commands.json" --index-output-path=/tmp/kernel.scip
 ls -lh /tmp/kernel.scip
 ```
 

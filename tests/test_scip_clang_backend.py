@@ -117,6 +117,14 @@ def _load_backend_module():
             "from . import _scip_translation as tx",
             "from hmopt_test_indexing.backends import _scip_translation as tx",
         )
+        # The source now uses an absolute submodule import to avoid the
+        # "partially initialized module" error in real `pip install -e .`
+        # environments under Python 3.11+. Rewrite it to the synthetic
+        # namespace this fixture sets up.
+        src = src.replace(
+            "import hmopt.indexing.backends._scip_translation as tx",
+            "import hmopt_test_indexing.backends._scip_translation as tx",
+        )
         src = src.replace(
             "from .._generated import scip_pb2",
             "from hmopt_test_indexing._generated import scip_pb2",
@@ -342,3 +350,42 @@ def test_parse_skips_local_and_punctuation_occurrences(
 
     assert code_index.chunks == []
     assert code_index.relations == []
+
+
+# ---------------------------------------------------------------------------
+# Regression: import form must stay absolute
+# ---------------------------------------------------------------------------
+
+
+def test_scip_clang_uses_absolute_translation_import():
+    """The `_scip_translation` helper module MUST be imported by absolute
+    path, NOT via `from . import _scip_translation as tx`.
+
+    When `hmopt.indexing.backends.__init__` re-exports `ScipClangBackend`,
+    `scip_clang.py` is loaded while the `backends` package is still
+    partially initialized. Under Python 3.11+ the relative `from . import`
+    form raises:
+
+        ImportError: cannot import name '_scip_translation' from
+        partially initialized module 'hmopt.indexing.backends'
+
+    The absolute `import hmopt.indexing.backends._scip_translation as tx`
+    form goes through sys.modules directly and is safe even mid-init.
+
+    The other unit tests in this file string-replace the import line into
+    a synthetic namespace before exec'ing the module, so they CANNOT
+    catch a regression that puts the relative form back. This test
+    inspects the source text directly as a lightweight guard.
+    """
+    src_path = (
+        Path(__file__).resolve().parent.parent
+        / "src" / "hmopt" / "indexing" / "backends" / "scip_clang.py"
+    )
+    src = src_path.read_text(encoding="utf-8")
+    assert "from . import _scip_translation as tx" not in src, (
+        "scip_clang.py must NOT use `from . import _scip_translation as tx` "
+        "— that form fails under Python 3.11+ when backends/__init__.py "
+        "imports scip_clang while the package is mid-init. Use the absolute "
+        "submodule import form (see comment in scip_clang.py)."
+    )
+    assert "import hmopt.indexing.backends._scip_translation as tx" in src

@@ -23,7 +23,17 @@ from time import monotonic
 from typing import Any, Optional
 
 from ..models import CodeChunk, CodeIndex, CodeRelation, FileSummary
-from . import _scip_translation as tx
+
+# Absolute submodule import (NOT `from . import _scip_translation`):
+# when `backends/__init__.py` re-exports ScipClangBackend, this module is
+# loaded while the `backends` package is still partially initialized.
+# Under Python 3.11+ the relative-attribute form raises
+#   ImportError: cannot import name '_scip_translation' from partially
+#   initialized module 'hmopt.indexing.backends'
+# because `getattr` on the in-flight package can't yet see the sibling.
+# Importing the submodule by its fully qualified name goes through
+# sys.modules directly and is safe even mid-init.
+import hmopt.indexing.backends._scip_translation as tx
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +142,12 @@ class ScipClangBackend:
         cmd = [
             self.config.binary,
             f"--compdb-path={compdb}",
-            f"-o={output_path}",
+            # scip-clang's output flag is `--index-output-path`, NOT `-o`.
+            # See https://github.com/sourcegraph/scip-clang `--help` —
+            # passing `-o ...` (or `-o=...`) is rejected with
+            # `error: unknown argument(s) ["-o", ...]` and scip-clang
+            # exits non-zero without producing any output.
+            f"--index-output-path={output_path}",
             *self.config.extra_args,
         ]
         logger.info("Running scip-clang: cwd=%s cmd=%s", repo_path, " ".join(cmd))
