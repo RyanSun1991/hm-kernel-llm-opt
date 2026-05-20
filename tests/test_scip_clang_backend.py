@@ -353,6 +353,138 @@ def test_parse_skips_local_and_punctuation_occurrences(
 
 
 # ---------------------------------------------------------------------------
+# Regression: descriptor-suffix fallback recovers relations when
+# scip-clang leaves syntax_kind=UnspecifiedSyntaxKind(0).
+#
+# scip-clang 0.3.1 + BiSheng (HarmonyOS kernel toolchain) emits the
+# overwhelming majority of reference occurrences with syntax_kind=0
+# (47,680 occurrences in a sysmgr build, of which ~80% are references
+# but only ~5% of those land in the syntax_kind table). Without the
+# fallback, the indexer drops 30k+ references and Neo4j ends up with
+# zero scip-clang relation edges.
+# ---------------------------------------------------------------------------
+
+
+def test_parse_recovers_relation_when_syntax_kind_unspecified(
+    tmp_path, scip_pb2, backend_mod
+):
+    """The reference occurrence carries syntax_kind=0 (default value, scip-clang
+    didn't set it), but the SCIP symbol descriptor `helper().` still uniquely
+    identifies a method call. The backend MUST recover the relation kind
+    from the descriptor's `method` suffix and emit a `:calls` edge."""
+    idx = scip_pb2.Index()
+    doc = idx.documents.add()
+    doc.relative_path = "foo.c"
+    doc.language = "C"
+
+    for name in ("helper", "caller"):
+        info = doc.symbols.add()
+        info.symbol = f"cxx . . . {name}()."
+        info.kind = scip_pb2.SymbolInformation.Function
+        info.display_name = name
+
+    # helper definition (lines 0..2)
+    occ = doc.occurrences.add()
+    occ.range.extend([0, 5, 0, 11])
+    occ.enclosing_range.extend([0, 0, 2, 1])
+    occ.symbol = "cxx . . . helper()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    # caller definition (lines 4..7)
+    occ = doc.occurrences.add()
+    occ.range.extend([4, 4, 4, 10])
+    occ.enclosing_range.extend([4, 0, 7, 1])
+    occ.symbol = "cxx . . . caller()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    # *** The critical occurrence: reference to helper from inside caller's
+    # *** body, with syntax_kind LEFT AT ITS DEFAULT (UnspecifiedSyntaxKind=0).
+    occ = doc.occurrences.add()
+    occ.range.extend([5, 2, 5, 8])
+    occ.symbol = "cxx . . . helper()."
+    occ.symbol_roles = 0
+    # NOTE: occ.syntax_kind intentionally not set — protobuf default = 0.
+
+    scip_file = tmp_path / "index.scip"
+    scip_file.write_bytes(idx.SerializeToString())
+    (tmp_path / "foo.c").write_text(
+        "void helper(int x) {\n"
+        "  return;\n"
+        "}\n"
+        "\n"
+        "int caller(void) {\n"
+        "  helper(42);\n"
+        "  return 0;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    backend = backend_mod.ScipClangBackend()
+    code_index = backend._parse_scip(scip_file, tmp_path, {})
+
+    assert len(code_index.relations) == 1, (
+        "fallback inferred via descriptor suffix should recover one :calls edge"
+    )
+    rel = code_index.relations[0]
+    assert rel.kind == "calls"
+    assert rel.backend_origin == "scip-clang"
+    assert rel.src_name == "caller"
+    assert rel.dst_name == "helper"
+    assert rel.call_site_line == 6
+    # The raw syntax_kind on the relation reflects what scip-clang emitted,
+    # which was 0 — we recovered the relation kind from the descriptor,
+    # not by patching this field.
+    assert rel.syntax_kind == 0
+
+
+def test_parse_does_not_recover_when_syntax_kind_is_punctuation(
+    tmp_path, scip_pb2, backend_mod
+):
+    """Tightening the fallback: when scip-clang DOES set syntax_kind but it
+    maps to None in our table (e.g. PunctuationDelimiter=2, Comment=1), we
+    must respect that signal and skip the occurrence. Otherwise an incidental
+    method-shaped token in punctuation context would manufacture a phantom
+    :calls edge."""
+    idx = scip_pb2.Index()
+    doc = idx.documents.add()
+    doc.relative_path = "x.c"
+    doc.language = "C"
+
+    # A "caller" definition so any spurious recovered edge would actually
+    # find a src_def via the enclosing_range and become a relation.
+    occ = doc.occurrences.add()
+    occ.range.extend([0, 4, 0, 10])
+    occ.enclosing_range.extend([0, 0, 4, 1])
+    occ.symbol = "cxx . . . caller()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+    info = doc.symbols.add()
+    info.symbol = "cxx . . . caller()."
+    info.kind = scip_pb2.SymbolInformation.Function
+
+    # Punctuation occurrence that happens to carry a method-shaped symbol.
+    # syntax_kind != 0, so the fallback MUST NOT engage.
+    occ = doc.occurrences.add()
+    occ.range.extend([1, 0, 1, 1])
+    occ.symbol = "cxx . . . somewhere()."
+    occ.symbol_roles = 0
+    occ.syntax_kind = scip_pb2.PunctuationDelimiter
+
+    scip_file = tmp_path / "index.scip"
+    scip_file.write_bytes(idx.SerializeToString())
+
+    backend = backend_mod.ScipClangBackend()
+    code_index = backend._parse_scip(scip_file, tmp_path, {})
+
+    assert code_index.relations == [], (
+        "explicit non-edge syntax_kind values must be respected — fallback "
+        "should only engage for UnspecifiedSyntaxKind(0)"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Regression: import form must stay absolute
 # ---------------------------------------------------------------------------
 

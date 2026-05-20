@@ -445,9 +445,29 @@ def _build_relation(
     if not occ.symbol:
         return None
 
+    # Parse the destination symbol up front so we can also use it as the
+    # source of truth for relation-kind inference when syntax_kind is
+    # unspecified.
+    dst_parsed = tx.parse_scip_symbol(occ.symbol)
+    if dst_parsed is None or dst_parsed.is_local:
+        return None
+
     rel_kind = tx.scip_syntax_kind_to_relation_kind(occ.syntax_kind)
     if rel_kind is None:
-        return None
+        # Only fall back when scip-clang left syntax_kind unspecified (=0).
+        # Other table misses (Comment=1, PunctuationDelimiter=2, ...) are
+        # explicit "this is not a code reference" signals from scip-clang
+        # and must be respected — otherwise we'd manufacture spurious calls
+        # edges from incidental occurrences of identifier-shaped tokens.
+        #
+        # scip-clang 0.3.1 + BiSheng emits most genuine reference
+        # occurrences with syntax_kind=UnspecifiedSyntaxKind(0); without
+        # this fallback ~80% of refs silently fail to become graph edges.
+        if occ.syntax_kind != 0:
+            return None
+        rel_kind = tx.infer_relation_kind_from_descriptor(dst_parsed)
+        if rel_kind is None:
+            return None
 
     occ_range = tx.normalize_range(occ.range)
     if occ_range is None:
@@ -463,10 +483,7 @@ def _build_relation(
     dst_record = global_defs.get(occ.symbol)
 
     src_parsed = tx.parse_scip_symbol(src_def.symbol)
-    dst_parsed = tx.parse_scip_symbol(occ.symbol)
     if src_parsed is None or src_parsed.is_local:
-        return None
-    if dst_parsed is None or dst_parsed.is_local:
         return None
 
     # src is always defined in this doc (def_extents only holds local defs).

@@ -294,6 +294,54 @@ def scip_syntax_kind_to_relation_kind(syntax_kind: int) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# Descriptor-suffix fallback for relation kind
+# ---------------------------------------------------------------------------
+#
+# scip-clang 0.3.1 with some vendor toolchains (observed: BiSheng-based
+# HarmonyOS kernel builds) leaves Occurrence.syntax_kind unset on the
+# majority of reference occurrences — it defaults to UnspecifiedSyntaxKind=0,
+# which the SyntaxKind table above intentionally rejects. The empirical
+# impact on a kernel-scale .scip: 38,445 reference occurrences out of 47,680
+# total, but ~80% of them have syntax_kind=0 and would be silently dropped
+# without a fallback (0 :calls / :uses_* edges land in Neo4j).
+#
+# The SCIP symbol string itself still encodes the kind via its descriptor
+# suffix (`name().` = method, `name#` = type, `name!` = macro, ...), so we
+# can recover the relation kind from there when syntax_kind is uninformative.
+
+_DESCRIPTOR_SUFFIX_TO_RELATION: dict[str, str] = {
+    "method": "calls",
+    "macro": "uses_macro",
+    "type": "uses_type",
+    "type_parameter": "uses_type",
+    "term": "references",
+    "namespace": "references",
+    "parameter": "references",
+    "meta": "references",
+}
+
+
+def infer_relation_kind_from_descriptor(parsed: ParsedSymbol) -> Optional[str]:
+    """Derive a CodeRelation.kind from a parsed SCIP symbol's last descriptor.
+
+    Used as a fallback in `_build_relation` when SCIP's syntax_kind field is
+    UnspecifiedSyntaxKind (0) or otherwise unmapped, which is a known shape
+    of scip-clang 0.3.1 + BiSheng output. The mapping favors precision over
+    recall: only suffixes whose semantic meaning is unambiguous get a typed
+    edge ('method' → calls, 'macro' → uses_macro, 'type'/'type_parameter' →
+    uses_type); everything else falls back to a generic 'references' edge so
+    we don't lose the link in the graph.
+
+    Returns None if the descriptors list is empty (caller should skip the
+    occurrence — it carries no symbolic identity).
+    """
+    if not parsed.descriptors:
+        return None
+    last_suffix = parsed.descriptors[-1].suffix
+    return _DESCRIPTOR_SUFFIX_TO_RELATION.get(last_suffix)
+
+
+# ---------------------------------------------------------------------------
 # SymbolInformation.Kind → CodeChunk.kind mapping
 # ---------------------------------------------------------------------------
 #
