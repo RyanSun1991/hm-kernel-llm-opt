@@ -629,6 +629,141 @@ def test_parse_skips_layout_fallback_when_scip_provides_enclosing_range(
     assert helper_chunk.end_line == 3
 
 
+def test_parse_widens_only_narrow_extents_when_doc_has_mixed_enclosing_range(
+    tmp_path, scip_pb2, backend_mod
+):
+    """An earlier per-document version of the fallback bypassed widening on
+    any document that contained even one multi-line scip-clang extent —
+    leaving every other def in that document with a narrow extent and its
+    in-body references silently dropped. Verify the fix is per-chunk:
+    the def WITH explicit enclosing_range keeps its tight scip-clang
+    extent; the def WITHOUT enclosing_range gets a layout-inferred
+    extent so its in-body reference resolves."""
+    idx = scip_pb2.Index()
+    doc = idx.documents.add()
+    doc.relative_path = "foo.c"
+    doc.language = "C"
+
+    for name in ("helper", "caller"):
+        info = doc.symbols.add()
+        info.symbol = f"cxx . . . {name}()."
+        info.kind = scip_pb2.SymbolInformation.Function
+
+    # helper definition — explicit multi-line enclosing_range provided.
+    occ = doc.occurrences.add()
+    occ.range.extend([0, 5, 0, 11])
+    occ.enclosing_range.extend([0, 0, 2, 1])
+    occ.symbol = "cxx . . . helper()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    # caller definition — NO enclosing_range. Without per-chunk widening
+    # this def's extent collapses to line 4 only and the reference to
+    # helper at line 5 has no enclosing definition.
+    occ = doc.occurrences.add()
+    occ.range.extend([4, 4, 4, 10])
+    occ.symbol = "cxx . . . caller()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    # Reference to helper from inside caller at line 5.
+    occ = doc.occurrences.add()
+    occ.range.extend([5, 2, 5, 8])
+    occ.symbol = "cxx . . . helper()."
+    occ.symbol_roles = 0
+    occ.syntax_kind = scip_pb2.IdentifierFunction
+
+    scip_file = tmp_path / "index.scip"
+    scip_file.write_bytes(idx.SerializeToString())
+    (tmp_path / "foo.c").write_text(
+        "void helper(int x) {\n"
+        "  return;\n"
+        "}\n"
+        "\n"
+        "int caller(void) {\n"
+        "  helper(42);\n"
+        "  return 0;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    backend = backend_mod.ScipClangBackend()
+    code_index = backend._parse_scip(scip_file, tmp_path, {})
+
+    # helper keeps the scip-clang-provided extent (end_line 3 from
+    # enclosing_range 0..2, 1-based).
+    helper = next(c for c in code_index.chunks if c.symbol_name == "helper")
+    assert helper.end_line == 3, (
+        "helper's enclosing_range was provided; widening must NOT overwrite it"
+    )
+    # caller gets layout-inferred extent (start_line 5 → end_line EOF = 8).
+    caller = next(c for c in code_index.chunks if c.symbol_name == "caller")
+    assert caller.end_line >= 7, (
+        "caller's enclosing_range was missing; widening must extend its "
+        f"end_line beyond its identifier line (got {caller.end_line})"
+    )
+    # Most importantly: the relation resolved because caller's widened
+    # extent contains the reference at line 6.
+    assert len(code_index.relations) == 1
+    rel = code_index.relations[0]
+    assert rel.kind == "calls"
+    assert rel.src_name == "caller"
+    assert rel.dst_name == "helper"
+
+
+def test_parse_widens_chunk_text_when_enclosing_range_missing(
+    tmp_path, scip_pb2, backend_mod
+):
+    """When scip-clang omits enclosing_range, `_build_chunk` falls back to
+    the def-identifier range, producing chunks whose `text` is only the
+    function signature line. That kills vector-store embedding quality —
+    each "chunk" is just `void helper(int x) {` worth of text. After
+    widening, chunk.text MUST include the actual function body."""
+    idx = scip_pb2.Index()
+    doc = idx.documents.add()
+    doc.relative_path = "foo.c"
+    doc.language = "C"
+
+    info = doc.symbols.add()
+    info.symbol = "cxx . . . the_only_fn()."
+    info.kind = scip_pb2.SymbolInformation.Function
+
+    # The_only_fn definition — NO enclosing_range. With a single def in
+    # the file, layout fallback assigns the extent from start_line to EOF.
+    occ = doc.occurrences.add()
+    occ.range.extend([0, 5, 0, 16])
+    occ.symbol = "cxx . . . the_only_fn()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    scip_file = tmp_path / "index.scip"
+    scip_file.write_bytes(idx.SerializeToString())
+    source = (
+        "void the_only_fn(int x)\n"     # line 0
+        "{\n"                            # line 1
+        "  int y = x + 1;\n"             # line 2
+        "  return;\n"                    # line 3
+        "}\n"                            # line 4
+    )
+    (tmp_path / "foo.c").write_text(source, encoding="utf-8")
+
+    backend = backend_mod.ScipClangBackend()
+    code_index = backend._parse_scip(scip_file, tmp_path, {})
+
+    assert len(code_index.chunks) == 1
+    chunk = code_index.chunks[0]
+    # The chunk's text MUST now include the function body, not just
+    # the signature line. Validate by checking for the body content.
+    assert "int y = x + 1" in chunk.text, (
+        f"chunk.text should include the function body after widening, "
+        f"got: {chunk.text!r}"
+    )
+    assert chunk.end_line >= 4, (
+        f"chunk.end_line should be widened to include body (≥4), "
+        f"got {chunk.end_line}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Regression: import form must stay absolute
 # ---------------------------------------------------------------------------

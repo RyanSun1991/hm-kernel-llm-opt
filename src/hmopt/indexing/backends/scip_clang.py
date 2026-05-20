@@ -347,23 +347,43 @@ def _process_document(
             def_extents.append(extent)
     def_extents.sort(key=lambda d: d.extent)
 
-    # ----- Layout fallback: if every def_extent collapses to a single
-    # line, scip-clang likely didn't populate Occurrence.enclosing_range
-    # (observed with scip-clang 0.3.1 + BiSheng), and `_build_chunk` was
-    # forced to derive each extent from the identifier's own range. The
-    # result is an extents list too narrow to contain any in-body
-    # reference — every relation would be dropped by
-    # `find_enclosing_definition` further down. Reconstruct extents from
-    # neighbor-definition layout, which is the right shape for C / kernel
-    # code where top-level definitions don't nest.
-    if def_extents and source_lines:
-        any_multi_line = any(
-            ext.extent[0] != ext.extent[2] for ext in def_extents
+    # ----- Layout fallback (per-chunk): when scip-clang doesn't populate
+    # Occurrence.enclosing_range on a definition, `_build_chunk` is forced
+    # to derive that chunk's extent from the identifier's own range, which
+    # collapses to a single line. find_enclosing_definition then fails for
+    # every in-body reference and `_build_relation` silently drops the
+    # would-be edge. On scip-clang 0.3.1 + BiSheng we see this on ~80% of
+    # definitions, distributed across documents — so the fallback MUST be
+    # per-chunk (an earlier per-document version was bypassed on any doc
+    # that contained even one multi-line scip-clang extent, leaving the
+    # narrow ones unwidened and refs to them still dropped).
+    #
+    # We additionally widen the chunk's `text` and `end_line` in-place so
+    # the body content embedded into the vector store is the actual
+    # function body rather than only the def-identifier line.
+    if chunks and source_lines:
+        layout_extents = _infer_def_extents_from_layout(
+            chunks, source_line_count=len(source_lines)
         )
-        if not any_multi_line:
-            def_extents = _infer_def_extents_from_layout(
-                chunks, source_line_count=len(source_lines)
-            )
+        layout_by_symbol = {ext.symbol: ext for ext in layout_extents}
+        widened: list[tx.DefinitionExtent] = []
+        for chunk, ext in zip(chunks, def_extents):
+            is_narrow = ext.extent[0] == ext.extent[2]
+            layout_ext = layout_by_symbol.get(ext.symbol)
+            if is_narrow and layout_ext is not None:
+                widened.append(layout_ext)
+                # Rebuild this chunk's body text and end_line from the
+                # widened extent. chunk.start_line is already 1-based
+                # from `_build_chunk` and matches layout_ext.extent[0]+1.
+                start_line_0 = layout_ext.extent[0]
+                end_line_0 = layout_ext.extent[2]
+                body_lines = source_lines[start_line_0 : end_line_0 + 1]
+                chunk.text = "\n".join(body_lines)
+                chunk.end_line = end_line_0 + 1
+            else:
+                widened.append(ext)
+        def_extents = widened
+        def_extents.sort(key=lambda d: d.extent)
 
     # ----- Pass 2 (within this doc): reference occurrences → relations.
     relations: list[CodeRelation] = []
