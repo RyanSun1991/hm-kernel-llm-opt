@@ -347,6 +347,24 @@ def _process_document(
             def_extents.append(extent)
     def_extents.sort(key=lambda d: d.extent)
 
+    # ----- Layout fallback: if every def_extent collapses to a single
+    # line, scip-clang likely didn't populate Occurrence.enclosing_range
+    # (observed with scip-clang 0.3.1 + BiSheng), and `_build_chunk` was
+    # forced to derive each extent from the identifier's own range. The
+    # result is an extents list too narrow to contain any in-body
+    # reference — every relation would be dropped by
+    # `find_enclosing_definition` further down. Reconstruct extents from
+    # neighbor-definition layout, which is the right shape for C / kernel
+    # code where top-level definitions don't nest.
+    if def_extents and source_lines:
+        any_multi_line = any(
+            ext.extent[0] != ext.extent[2] for ext in def_extents
+        )
+        if not any_multi_line:
+            def_extents = _infer_def_extents_from_layout(
+                chunks, source_line_count=len(source_lines)
+            )
+
     # ----- Pass 2 (within this doc): reference occurrences → relations.
     relations: list[CodeRelation] = []
     for occ in doc.occurrences:
@@ -364,6 +382,49 @@ def _process_document(
             relations.append(relation)
 
     return chunks, relations
+
+
+def _infer_def_extents_from_layout(
+    chunks: list[CodeChunk],
+    *,
+    source_line_count: int,
+) -> list[tx.DefinitionExtent]:
+    """Reconstruct definition extents from neighbor layout.
+
+    Used when scip-clang's per-occurrence `enclosing_range` field is not
+    populated and every `_build_chunk`-derived extent collapses to the
+    identifier's own line. Each chunk's extent is widened to span from
+    its `start_line` (its identifier line) to the line BEFORE the next
+    chunk's `start_line` — or to EOF for the last chunk. This is the
+    correct shape for C / kernel code where definitions sit at file
+    scope and don't nest.
+
+    Notes:
+    - Chunks without a `scip_symbol` are skipped: the extent is what gets
+      compared back against occurrence symbols by
+      `find_enclosing_definition`, and a missing symbol can't be matched.
+    - `end_col` is set to a sentinel large value so any column on the
+      end line is considered contained.
+    """
+    sorted_by_start = sorted(chunks, key=lambda c: c.start_line)
+    extents: list[tx.DefinitionExtent] = []
+    for i, chunk in enumerate(sorted_by_start):
+        if not chunk.scip_symbol:
+            continue
+        start_line_0 = max(chunk.start_line - 1, 0)
+        if i + 1 < len(sorted_by_start):
+            next_start_0 = max(sorted_by_start[i + 1].start_line - 1, 0)
+            end_line_0 = max(next_start_0 - 1, start_line_0)
+        else:
+            end_line_0 = max(source_line_count - 1, start_line_0)
+        extents.append(
+            tx.DefinitionExtent(
+                symbol=chunk.scip_symbol,
+                extent=(start_line_0, 0, end_line_0, 1_000_000),
+            )
+        )
+    extents.sort(key=lambda d: d.extent)
+    return extents
 
 
 def _build_chunk(

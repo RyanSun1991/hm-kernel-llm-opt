@@ -485,6 +485,151 @@ def test_parse_does_not_recover_when_syntax_kind_is_punctuation(
 
 
 # ---------------------------------------------------------------------------
+# Regression: layout fallback reconstructs def extents when scip-clang
+# omits Occurrence.enclosing_range.
+#
+# Even after the syntax_kind=0 fix, the kernel run still produced zero
+# :calls edges. Root cause: scip-clang 0.3.1 + BiSheng does NOT populate
+# Occurrence.enclosing_range on definition occurrences either; every
+# def_extent then collapses to the identifier's own line, and
+# find_enclosing_definition fails for every in-body reference.
+#
+# The fallback infers each definition's extent from the start_line of
+# the next definition (or EOF for the last). This is correct for C and
+# kernel code where top-level definitions don't nest.
+# ---------------------------------------------------------------------------
+
+
+def test_parse_infers_def_extents_when_enclosing_range_missing(
+    tmp_path, scip_pb2, backend_mod
+):
+    """The .scip omits Occurrence.enclosing_range on every definition.
+    Without the layout fallback, def_extents would collapse to the
+    identifier line, find_enclosing_definition would return None for the
+    in-body reference, and `_build_relation` would silently drop the
+    would-be :calls edge. With the fallback, helper's extent is widened
+    to lines 0..3 and caller's to lines 4..EOF, so the reference on
+    line 5 resolves to caller as its source."""
+    idx = scip_pb2.Index()
+    doc = idx.documents.add()
+    doc.relative_path = "foo.c"
+    doc.language = "C"
+
+    for name in ("helper", "caller"):
+        info = doc.symbols.add()
+        info.symbol = f"cxx . . . {name}()."
+        info.kind = scip_pb2.SymbolInformation.Function
+
+    # helper definition — NO enclosing_range
+    occ = doc.occurrences.add()
+    occ.range.extend([0, 5, 0, 11])
+    # NOTE: occ.enclosing_range intentionally not set
+    occ.symbol = "cxx . . . helper()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    # caller definition — NO enclosing_range
+    occ = doc.occurrences.add()
+    occ.range.extend([4, 4, 4, 10])
+    occ.symbol = "cxx . . . caller()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    # Reference to helper from caller's body at line 5
+    occ = doc.occurrences.add()
+    occ.range.extend([5, 2, 5, 8])
+    occ.symbol = "cxx . . . helper()."
+    occ.symbol_roles = 0
+    occ.syntax_kind = scip_pb2.IdentifierFunction
+
+    scip_file = tmp_path / "index.scip"
+    scip_file.write_bytes(idx.SerializeToString())
+    (tmp_path / "foo.c").write_text(
+        "void helper(int x) {\n"
+        "  return;\n"
+        "}\n"
+        "\n"
+        "int caller(void) {\n"
+        "  helper(42);\n"
+        "  return 0;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    backend = backend_mod.ScipClangBackend()
+    code_index = backend._parse_scip(scip_file, tmp_path, {})
+
+    assert len(code_index.relations) == 1, (
+        "layout fallback should reconstruct caller's extent so the "
+        "in-body reference at line 6 resolves to caller as its source"
+    )
+    rel = code_index.relations[0]
+    assert rel.kind == "calls"
+    assert rel.src_name == "caller"
+    assert rel.dst_name == "helper"
+    assert rel.call_site_line == 6
+
+
+def test_parse_skips_layout_fallback_when_scip_provides_enclosing_range(
+    tmp_path, scip_pb2, backend_mod
+):
+    """When at least one definition carries a multi-line enclosing_range,
+    we trust scip-clang's data and DON'T run the layout fallback —
+    otherwise we'd risk overriding tightly-scoped extents (e.g. nested
+    namespaces or class methods in C++) with the broader layout guess.
+    This test verifies the existing single-doc baseline still works
+    unchanged when enclosing_range IS provided."""
+    idx = scip_pb2.Index()
+    doc = idx.documents.add()
+    doc.relative_path = "foo.c"
+    doc.language = "C"
+
+    for name in ("helper", "caller"):
+        info = doc.symbols.add()
+        info.symbol = f"cxx . . . {name}()."
+        info.kind = scip_pb2.SymbolInformation.Function
+
+    occ = doc.occurrences.add()
+    occ.range.extend([0, 5, 0, 11])
+    occ.enclosing_range.extend([0, 0, 2, 1])  # explicitly set, multi-line
+    occ.symbol = "cxx . . . helper()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    occ = doc.occurrences.add()
+    occ.range.extend([4, 4, 4, 10])
+    occ.enclosing_range.extend([4, 0, 7, 1])  # explicitly set, multi-line
+    occ.symbol = "cxx . . . caller()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    occ = doc.occurrences.add()
+    occ.range.extend([5, 2, 5, 8])
+    occ.symbol = "cxx . . . helper()."
+    occ.symbol_roles = 0
+    occ.syntax_kind = scip_pb2.IdentifierFunction
+
+    scip_file = tmp_path / "index.scip"
+    scip_file.write_bytes(idx.SerializeToString())
+    (tmp_path / "foo.c").write_text(
+        "void helper(int x) {\n  return;\n}\n\nint caller(void) {\n  helper(42);\n  return 0;\n}\n",
+        encoding="utf-8",
+    )
+
+    backend = backend_mod.ScipClangBackend()
+    code_index = backend._parse_scip(scip_file, tmp_path, {})
+
+    assert len(code_index.chunks) == 2
+    helper_chunk = next(c for c in code_index.chunks if c.symbol_name == "helper")
+    # When scip-clang provides enclosing_range, chunk.end_line comes
+    # directly from it (1-based: 0..2 → end_line 3). If the layout
+    # fallback erroneously overrode this, end_line would be 4 (the line
+    # before caller's start at line 5 — chunk start_line=1, next-start=5,
+    # so layout extent would end at line 4).
+    assert helper_chunk.end_line == 3
+
+
+# ---------------------------------------------------------------------------
 # Regression: import form must stay absolute
 # ---------------------------------------------------------------------------
 
