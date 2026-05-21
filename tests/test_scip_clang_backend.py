@@ -765,6 +765,100 @@ def test_parse_widens_chunk_text_when_enclosing_range_missing(
 
 
 # ---------------------------------------------------------------------------
+# Regression: FileSummary.text must be a compact structured summary,
+# NOT the full file body.
+#
+# The full-file-body shape caused a mid-indexing failure on the
+# HarmonyOS sysmgr build after 2-3 hours:
+#   BadRequestError 400: This model's maximum context length is 32768
+#   tokens. However, your request has 47559 input tokens.
+#                                                  (qwen3-embedding-8b)
+#
+# Root cause: file_summary.text was the entire C source text, which
+# for kernel files is 5-100 KB (1k-30k tokens). Batched through
+# OpenAIEmbedding it pushed individual requests past the 32k context
+# window of small self-hosted embedding servers.
+# ---------------------------------------------------------------------------
+
+
+def test_file_summary_is_structured_not_full_file_body(tmp_path, scip_pb2, backend_mod):
+    """FileSummary.text must look like clangd's structured summary
+    (counts + name lists), NOT the raw source text. Total size bounded
+    in the low single-digit KB even for files with many symbols."""
+    idx = scip_pb2.Index()
+    doc = idx.documents.add()
+    doc.relative_path = "kernel/big.c"
+    doc.language = "C"
+
+    # Emit a definition occurrence + matching SymbolInformation for each
+    # of 5 functions and 3 macros — well within "real kernel file" shape.
+    fn_names = ["sched_yield", "wake_up_process", "context_switch", "do_fork", "kfree"]
+    macro_names = ["BUG_ON", "WARN_ON", "likely"]
+    line = 0
+    for name in fn_names:
+        info = doc.symbols.add()
+        info.symbol = f"cxx . . . {name}()."
+        info.kind = scip_pb2.SymbolInformation.Function
+        occ = doc.occurrences.add()
+        occ.range.extend([line, 5, line, 5 + len(name)])
+        occ.enclosing_range.extend([line, 0, line + 2, 1])
+        occ.symbol = f"cxx . . . {name}()."
+        occ.symbol_roles = scip_pb2.Definition
+        occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+        line += 4
+    for name in macro_names:
+        info = doc.symbols.add()
+        info.symbol = f"cxx . . . {name}!"
+        info.kind = scip_pb2.SymbolInformation.Macro
+        occ = doc.occurrences.add()
+        occ.range.extend([line, 8, line, 8 + len(name)])
+        occ.enclosing_range.extend([line, 0, line, 50])
+        occ.symbol = f"cxx . . . {name}!"
+        occ.symbol_roles = scip_pb2.Definition
+        occ.syntax_kind = scip_pb2.IdentifierMacroDefinition
+        line += 1
+
+    scip_file = tmp_path / "index.scip"
+    scip_file.write_bytes(idx.SerializeToString())
+
+    # Write a "big" source file — what the old code would have embedded
+    # in full. 8000 lines, ~80 chars each ≈ 640 KB. This is the shape
+    # that blew up the embedding context.
+    big_source_lines = [f"// dummy padding line {i}" for i in range(8000)]
+    (tmp_path / "kernel" / "big.c").parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "kernel" / "big.c").write_text(
+        "\n".join(big_source_lines) + "\n", encoding="utf-8"
+    )
+
+    backend = backend_mod.ScipClangBackend()
+    code_index = backend._parse_scip(scip_file, tmp_path, {})
+
+    assert len(code_index.file_summaries) == 1
+    summary = code_index.file_summaries[0]
+
+    # The new text must be the structured form, NOT the raw source.
+    assert "counts:" in summary.text
+    assert "functions:" in summary.text
+    assert "macros:" in summary.text
+    # Some function names must appear in the summary.
+    assert "sched_yield" in summary.text
+    assert "BUG_ON" in summary.text
+
+    # And critically: the raw padding lines from the source MUST NOT
+    # leak into the summary.
+    assert "dummy padding line" not in summary.text, (
+        "FileSummary.text must NOT contain the raw file body — that's the "
+        "behavior that broke the embedding server's 32k context window"
+    )
+
+    # Size sanity: even with 8000 lines of source, the summary is at most
+    # a few KB. The old code path would have produced ~640 KB here.
+    assert len(summary.text) < 10_000, (
+        f"FileSummary.text should be O(KB), got {len(summary.text)} chars"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Regression: import form must stay absolute
 # ---------------------------------------------------------------------------
 

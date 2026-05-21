@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import monotonic
@@ -228,19 +229,21 @@ class ScipClangBackend:
             all_chunks.extend(doc_chunks)
             all_relations.extend(doc_relations)
 
-            # File summary mirrors the clangd backend's output for downstream
-            # vector-store compatibility.
-            file_path = repo_path / doc.relative_path
-            if file_path.exists():
-                try:
-                    text = (
-                        doc.text
-                        if doc.text
-                        else file_path.read_text(encoding="utf-8", errors="ignore")
-                    )
-                except OSError:
-                    text = doc.text or ""
-                file_summaries.append(FileSummary(path=file_path, text=text))
+            # File summary: a compact, embedding-friendly aggregate of the
+            # chunks emitted from this Document. PREVIOUSLY this branch put
+            # the whole file body into FileSummary.text, which on kernel
+            # C files (5-100 KB) translated to 1k-30k tokens per summary;
+            # batched with other summaries through OpenAIEmbedding it blew
+            # the 32k context window of small embedding servers (observed
+            # mid-indexing failure: 47559 input tokens > 32768 max,
+            # qwen3-embedding-8b). The structured form below matches what
+            # clangd_indexer._build_file_summaries produces (counts +
+            # name lists), so downstream consumers can handle either
+            # backend uniformly.
+            if doc_chunks:
+                file_path = repo_path / doc.relative_path
+                summary_text = _build_file_summary_text(file_path, doc_chunks)
+                file_summaries.append(FileSummary(path=file_path, text=summary_text))
 
         return CodeIndex(
             chunks=all_chunks,
@@ -402,6 +405,56 @@ def _process_document(
             relations.append(relation)
 
     return chunks, relations
+
+
+# Kind classification — mirrors the same-named constants in
+# `clangd_indexer.py:69-73` so both backends' FileSummary entries have
+# identical shape. Duplicated rather than imported to keep each backend's
+# module self-contained (the backends shouldn't reach into each other).
+_KIND_FUNCTIONS = {"function", "method", "constructor"}
+_KIND_TYPES = {"class", "struct", "enum", "enum_member", "interface", "type_parameter", "type"}
+_KIND_FIELDS = {"field", "property"}
+_KIND_VARIABLES = {"variable"}
+_KIND_CONSTANTS = {"constant"}
+_KIND_MACROS = {"macro"}
+
+
+def _build_file_summary_text(
+    file_path: Path,
+    chunks: list[CodeChunk],
+    *,
+    max_items: int = 50,
+) -> str:
+    """Produce a compact, embedding-friendly summary of one Document.
+
+    Format matches `clangd_indexer._build_file_summaries` so the vector
+    store sees the same shape regardless of which backend produced the
+    summary. Total length is bounded by `max_items` per kind category,
+    so the resulting text is always a few KB at most — far below the
+    32k-token context window of the embedding server.
+
+    Replaces the previous "put the whole file body in here" approach,
+    which made FileSummary.text grow with the source file and would
+    push batched embed requests past 32k tokens on kernel-scale files.
+    """
+    kinds = Counter(chunk.kind for chunk in chunks)
+    kinds_dict = {kind: kinds[kind] for kind in sorted(kinds)}
+    functions = sorted({c.symbol_name for c in chunks if c.kind in _KIND_FUNCTIONS})
+    types = sorted({c.symbol_name for c in chunks if c.kind in _KIND_TYPES})
+    globals_ = sorted({c.symbol_name for c in chunks if c.kind in _KIND_VARIABLES})
+    constants = sorted({c.symbol_name for c in chunks if c.kind in _KIND_CONSTANTS})
+    fields = sorted({c.symbol_name for c in chunks if c.kind in _KIND_FIELDS})
+    macros = sorted({c.symbol_name for c in chunks if c.kind in _KIND_MACROS})
+    return (
+        f"file summary: {file_path}\n"
+        f"counts: {kinds_dict}\n"
+        f"functions: {functions[:max_items]}\n"
+        f"types: {types[:max_items]}\n"
+        f"globals: {globals_[:max_items]}\n"
+        f"constants: {constants[:max_items]}\n"
+        f"fields: {fields[:max_items]}\n"
+        f"macros: {macros[:max_items]}\n"
+    )
 
 
 def _infer_def_extents_from_layout(
