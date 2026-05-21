@@ -117,6 +117,14 @@ def _load_backend_module():
             "from . import _scip_translation as tx",
             "from hmopt_test_indexing.backends import _scip_translation as tx",
         )
+        # The source now uses an absolute submodule import to avoid the
+        # "partially initialized module" error in real `pip install -e .`
+        # environments under Python 3.11+. Rewrite it to the synthetic
+        # namespace this fixture sets up.
+        src = src.replace(
+            "import hmopt.indexing.backends._scip_translation as tx",
+            "import hmopt_test_indexing.backends._scip_translation as tx",
+        )
         src = src.replace(
             "from .._generated import scip_pb2",
             "from hmopt_test_indexing._generated import scip_pb2",
@@ -342,3 +350,548 @@ def test_parse_skips_local_and_punctuation_occurrences(
 
     assert code_index.chunks == []
     assert code_index.relations == []
+
+
+# ---------------------------------------------------------------------------
+# Regression: descriptor-suffix fallback recovers relations when
+# scip-clang leaves syntax_kind=UnspecifiedSyntaxKind(0).
+#
+# scip-clang 0.3.1 + BiSheng (HarmonyOS kernel toolchain) emits the
+# overwhelming majority of reference occurrences with syntax_kind=0
+# (47,680 occurrences in a sysmgr build, of which ~80% are references
+# but only ~5% of those land in the syntax_kind table). Without the
+# fallback, the indexer drops 30k+ references and Neo4j ends up with
+# zero scip-clang relation edges.
+# ---------------------------------------------------------------------------
+
+
+def test_parse_recovers_relation_when_syntax_kind_unspecified(
+    tmp_path, scip_pb2, backend_mod
+):
+    """The reference occurrence carries syntax_kind=0 (default value, scip-clang
+    didn't set it), but the SCIP symbol descriptor `helper().` still uniquely
+    identifies a method call. The backend MUST recover the relation kind
+    from the descriptor's `method` suffix and emit a `:calls` edge."""
+    idx = scip_pb2.Index()
+    doc = idx.documents.add()
+    doc.relative_path = "foo.c"
+    doc.language = "C"
+
+    for name in ("helper", "caller"):
+        info = doc.symbols.add()
+        info.symbol = f"cxx . . . {name}()."
+        info.kind = scip_pb2.SymbolInformation.Function
+        info.display_name = name
+
+    # helper definition (lines 0..2)
+    occ = doc.occurrences.add()
+    occ.range.extend([0, 5, 0, 11])
+    occ.enclosing_range.extend([0, 0, 2, 1])
+    occ.symbol = "cxx . . . helper()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    # caller definition (lines 4..7)
+    occ = doc.occurrences.add()
+    occ.range.extend([4, 4, 4, 10])
+    occ.enclosing_range.extend([4, 0, 7, 1])
+    occ.symbol = "cxx . . . caller()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    # *** The critical occurrence: reference to helper from inside caller's
+    # *** body, with syntax_kind LEFT AT ITS DEFAULT (UnspecifiedSyntaxKind=0).
+    occ = doc.occurrences.add()
+    occ.range.extend([5, 2, 5, 8])
+    occ.symbol = "cxx . . . helper()."
+    occ.symbol_roles = 0
+    # NOTE: occ.syntax_kind intentionally not set — protobuf default = 0.
+
+    scip_file = tmp_path / "index.scip"
+    scip_file.write_bytes(idx.SerializeToString())
+    (tmp_path / "foo.c").write_text(
+        "void helper(int x) {\n"
+        "  return;\n"
+        "}\n"
+        "\n"
+        "int caller(void) {\n"
+        "  helper(42);\n"
+        "  return 0;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    backend = backend_mod.ScipClangBackend()
+    code_index = backend._parse_scip(scip_file, tmp_path, {})
+
+    assert len(code_index.relations) == 1, (
+        "fallback inferred via descriptor suffix should recover one :calls edge"
+    )
+    rel = code_index.relations[0]
+    assert rel.kind == "calls"
+    assert rel.backend_origin == "scip-clang"
+    assert rel.src_name == "caller"
+    assert rel.dst_name == "helper"
+    assert rel.call_site_line == 6
+    # The raw syntax_kind on the relation reflects what scip-clang emitted,
+    # which was 0 — we recovered the relation kind from the descriptor,
+    # not by patching this field.
+    assert rel.syntax_kind == 0
+
+
+def test_parse_does_not_recover_when_syntax_kind_is_punctuation(
+    tmp_path, scip_pb2, backend_mod
+):
+    """Tightening the fallback: when scip-clang DOES set syntax_kind but it
+    maps to None in our table (e.g. PunctuationDelimiter=2, Comment=1), we
+    must respect that signal and skip the occurrence. Otherwise an incidental
+    method-shaped token in punctuation context would manufacture a phantom
+    :calls edge."""
+    idx = scip_pb2.Index()
+    doc = idx.documents.add()
+    doc.relative_path = "x.c"
+    doc.language = "C"
+
+    # A "caller" definition so any spurious recovered edge would actually
+    # find a src_def via the enclosing_range and become a relation.
+    occ = doc.occurrences.add()
+    occ.range.extend([0, 4, 0, 10])
+    occ.enclosing_range.extend([0, 0, 4, 1])
+    occ.symbol = "cxx . . . caller()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+    info = doc.symbols.add()
+    info.symbol = "cxx . . . caller()."
+    info.kind = scip_pb2.SymbolInformation.Function
+
+    # Punctuation occurrence that happens to carry a method-shaped symbol.
+    # syntax_kind != 0, so the fallback MUST NOT engage.
+    occ = doc.occurrences.add()
+    occ.range.extend([1, 0, 1, 1])
+    occ.symbol = "cxx . . . somewhere()."
+    occ.symbol_roles = 0
+    occ.syntax_kind = scip_pb2.PunctuationDelimiter
+
+    scip_file = tmp_path / "index.scip"
+    scip_file.write_bytes(idx.SerializeToString())
+
+    backend = backend_mod.ScipClangBackend()
+    code_index = backend._parse_scip(scip_file, tmp_path, {})
+
+    assert code_index.relations == [], (
+        "explicit non-edge syntax_kind values must be respected — fallback "
+        "should only engage for UnspecifiedSyntaxKind(0)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Regression: layout fallback reconstructs def extents when scip-clang
+# omits Occurrence.enclosing_range.
+#
+# Even after the syntax_kind=0 fix, the kernel run still produced zero
+# :calls edges. Root cause: scip-clang 0.3.1 + BiSheng does NOT populate
+# Occurrence.enclosing_range on definition occurrences either; every
+# def_extent then collapses to the identifier's own line, and
+# find_enclosing_definition fails for every in-body reference.
+#
+# The fallback infers each definition's extent from the start_line of
+# the next definition (or EOF for the last). This is correct for C and
+# kernel code where top-level definitions don't nest.
+# ---------------------------------------------------------------------------
+
+
+def test_parse_infers_def_extents_when_enclosing_range_missing(
+    tmp_path, scip_pb2, backend_mod
+):
+    """The .scip omits Occurrence.enclosing_range on every definition.
+    Without the layout fallback, def_extents would collapse to the
+    identifier line, find_enclosing_definition would return None for the
+    in-body reference, and `_build_relation` would silently drop the
+    would-be :calls edge. With the fallback, helper's extent is widened
+    to lines 0..3 and caller's to lines 4..EOF, so the reference on
+    line 5 resolves to caller as its source."""
+    idx = scip_pb2.Index()
+    doc = idx.documents.add()
+    doc.relative_path = "foo.c"
+    doc.language = "C"
+
+    for name in ("helper", "caller"):
+        info = doc.symbols.add()
+        info.symbol = f"cxx . . . {name}()."
+        info.kind = scip_pb2.SymbolInformation.Function
+
+    # helper definition — NO enclosing_range
+    occ = doc.occurrences.add()
+    occ.range.extend([0, 5, 0, 11])
+    # NOTE: occ.enclosing_range intentionally not set
+    occ.symbol = "cxx . . . helper()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    # caller definition — NO enclosing_range
+    occ = doc.occurrences.add()
+    occ.range.extend([4, 4, 4, 10])
+    occ.symbol = "cxx . . . caller()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    # Reference to helper from caller's body at line 5
+    occ = doc.occurrences.add()
+    occ.range.extend([5, 2, 5, 8])
+    occ.symbol = "cxx . . . helper()."
+    occ.symbol_roles = 0
+    occ.syntax_kind = scip_pb2.IdentifierFunction
+
+    scip_file = tmp_path / "index.scip"
+    scip_file.write_bytes(idx.SerializeToString())
+    (tmp_path / "foo.c").write_text(
+        "void helper(int x) {\n"
+        "  return;\n"
+        "}\n"
+        "\n"
+        "int caller(void) {\n"
+        "  helper(42);\n"
+        "  return 0;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    backend = backend_mod.ScipClangBackend()
+    code_index = backend._parse_scip(scip_file, tmp_path, {})
+
+    assert len(code_index.relations) == 1, (
+        "layout fallback should reconstruct caller's extent so the "
+        "in-body reference at line 6 resolves to caller as its source"
+    )
+    rel = code_index.relations[0]
+    assert rel.kind == "calls"
+    assert rel.src_name == "caller"
+    assert rel.dst_name == "helper"
+    assert rel.call_site_line == 6
+
+
+def test_parse_skips_layout_fallback_when_scip_provides_enclosing_range(
+    tmp_path, scip_pb2, backend_mod
+):
+    """When at least one definition carries a multi-line enclosing_range,
+    we trust scip-clang's data and DON'T run the layout fallback —
+    otherwise we'd risk overriding tightly-scoped extents (e.g. nested
+    namespaces or class methods in C++) with the broader layout guess.
+    This test verifies the existing single-doc baseline still works
+    unchanged when enclosing_range IS provided."""
+    idx = scip_pb2.Index()
+    doc = idx.documents.add()
+    doc.relative_path = "foo.c"
+    doc.language = "C"
+
+    for name in ("helper", "caller"):
+        info = doc.symbols.add()
+        info.symbol = f"cxx . . . {name}()."
+        info.kind = scip_pb2.SymbolInformation.Function
+
+    occ = doc.occurrences.add()
+    occ.range.extend([0, 5, 0, 11])
+    occ.enclosing_range.extend([0, 0, 2, 1])  # explicitly set, multi-line
+    occ.symbol = "cxx . . . helper()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    occ = doc.occurrences.add()
+    occ.range.extend([4, 4, 4, 10])
+    occ.enclosing_range.extend([4, 0, 7, 1])  # explicitly set, multi-line
+    occ.symbol = "cxx . . . caller()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    occ = doc.occurrences.add()
+    occ.range.extend([5, 2, 5, 8])
+    occ.symbol = "cxx . . . helper()."
+    occ.symbol_roles = 0
+    occ.syntax_kind = scip_pb2.IdentifierFunction
+
+    scip_file = tmp_path / "index.scip"
+    scip_file.write_bytes(idx.SerializeToString())
+    (tmp_path / "foo.c").write_text(
+        "void helper(int x) {\n  return;\n}\n\nint caller(void) {\n  helper(42);\n  return 0;\n}\n",
+        encoding="utf-8",
+    )
+
+    backend = backend_mod.ScipClangBackend()
+    code_index = backend._parse_scip(scip_file, tmp_path, {})
+
+    assert len(code_index.chunks) == 2
+    helper_chunk = next(c for c in code_index.chunks if c.symbol_name == "helper")
+    # When scip-clang provides enclosing_range, chunk.end_line comes
+    # directly from it (1-based: 0..2 → end_line 3). If the layout
+    # fallback erroneously overrode this, end_line would be 4 (the line
+    # before caller's start at line 5 — chunk start_line=1, next-start=5,
+    # so layout extent would end at line 4).
+    assert helper_chunk.end_line == 3
+
+
+def test_parse_widens_only_narrow_extents_when_doc_has_mixed_enclosing_range(
+    tmp_path, scip_pb2, backend_mod
+):
+    """An earlier per-document version of the fallback bypassed widening on
+    any document that contained even one multi-line scip-clang extent —
+    leaving every other def in that document with a narrow extent and its
+    in-body references silently dropped. Verify the fix is per-chunk:
+    the def WITH explicit enclosing_range keeps its tight scip-clang
+    extent; the def WITHOUT enclosing_range gets a layout-inferred
+    extent so its in-body reference resolves."""
+    idx = scip_pb2.Index()
+    doc = idx.documents.add()
+    doc.relative_path = "foo.c"
+    doc.language = "C"
+
+    for name in ("helper", "caller"):
+        info = doc.symbols.add()
+        info.symbol = f"cxx . . . {name}()."
+        info.kind = scip_pb2.SymbolInformation.Function
+
+    # helper definition — explicit multi-line enclosing_range provided.
+    occ = doc.occurrences.add()
+    occ.range.extend([0, 5, 0, 11])
+    occ.enclosing_range.extend([0, 0, 2, 1])
+    occ.symbol = "cxx . . . helper()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    # caller definition — NO enclosing_range. Without per-chunk widening
+    # this def's extent collapses to line 4 only and the reference to
+    # helper at line 5 has no enclosing definition.
+    occ = doc.occurrences.add()
+    occ.range.extend([4, 4, 4, 10])
+    occ.symbol = "cxx . . . caller()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    # Reference to helper from inside caller at line 5.
+    occ = doc.occurrences.add()
+    occ.range.extend([5, 2, 5, 8])
+    occ.symbol = "cxx . . . helper()."
+    occ.symbol_roles = 0
+    occ.syntax_kind = scip_pb2.IdentifierFunction
+
+    scip_file = tmp_path / "index.scip"
+    scip_file.write_bytes(idx.SerializeToString())
+    (tmp_path / "foo.c").write_text(
+        "void helper(int x) {\n"
+        "  return;\n"
+        "}\n"
+        "\n"
+        "int caller(void) {\n"
+        "  helper(42);\n"
+        "  return 0;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    backend = backend_mod.ScipClangBackend()
+    code_index = backend._parse_scip(scip_file, tmp_path, {})
+
+    # helper keeps the scip-clang-provided extent (end_line 3 from
+    # enclosing_range 0..2, 1-based).
+    helper = next(c for c in code_index.chunks if c.symbol_name == "helper")
+    assert helper.end_line == 3, (
+        "helper's enclosing_range was provided; widening must NOT overwrite it"
+    )
+    # caller gets layout-inferred extent (start_line 5 → end_line EOF = 8).
+    caller = next(c for c in code_index.chunks if c.symbol_name == "caller")
+    assert caller.end_line >= 7, (
+        "caller's enclosing_range was missing; widening must extend its "
+        f"end_line beyond its identifier line (got {caller.end_line})"
+    )
+    # Most importantly: the relation resolved because caller's widened
+    # extent contains the reference at line 6.
+    assert len(code_index.relations) == 1
+    rel = code_index.relations[0]
+    assert rel.kind == "calls"
+    assert rel.src_name == "caller"
+    assert rel.dst_name == "helper"
+
+
+def test_parse_widens_chunk_text_when_enclosing_range_missing(
+    tmp_path, scip_pb2, backend_mod
+):
+    """When scip-clang omits enclosing_range, `_build_chunk` falls back to
+    the def-identifier range, producing chunks whose `text` is only the
+    function signature line. That kills vector-store embedding quality —
+    each "chunk" is just `void helper(int x) {` worth of text. After
+    widening, chunk.text MUST include the actual function body."""
+    idx = scip_pb2.Index()
+    doc = idx.documents.add()
+    doc.relative_path = "foo.c"
+    doc.language = "C"
+
+    info = doc.symbols.add()
+    info.symbol = "cxx . . . the_only_fn()."
+    info.kind = scip_pb2.SymbolInformation.Function
+
+    # The_only_fn definition — NO enclosing_range. With a single def in
+    # the file, layout fallback assigns the extent from start_line to EOF.
+    occ = doc.occurrences.add()
+    occ.range.extend([0, 5, 0, 16])
+    occ.symbol = "cxx . . . the_only_fn()."
+    occ.symbol_roles = scip_pb2.Definition
+    occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+
+    scip_file = tmp_path / "index.scip"
+    scip_file.write_bytes(idx.SerializeToString())
+    source = (
+        "void the_only_fn(int x)\n"     # line 0
+        "{\n"                            # line 1
+        "  int y = x + 1;\n"             # line 2
+        "  return;\n"                    # line 3
+        "}\n"                            # line 4
+    )
+    (tmp_path / "foo.c").write_text(source, encoding="utf-8")
+
+    backend = backend_mod.ScipClangBackend()
+    code_index = backend._parse_scip(scip_file, tmp_path, {})
+
+    assert len(code_index.chunks) == 1
+    chunk = code_index.chunks[0]
+    # The chunk's text MUST now include the function body, not just
+    # the signature line. Validate by checking for the body content.
+    assert "int y = x + 1" in chunk.text, (
+        f"chunk.text should include the function body after widening, "
+        f"got: {chunk.text!r}"
+    )
+    assert chunk.end_line >= 4, (
+        f"chunk.end_line should be widened to include body (≥4), "
+        f"got {chunk.end_line}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Regression: FileSummary.text must be a compact structured summary,
+# NOT the full file body.
+#
+# The full-file-body shape caused a mid-indexing failure on the
+# HarmonyOS sysmgr build after 2-3 hours:
+#   BadRequestError 400: This model's maximum context length is 32768
+#   tokens. However, your request has 47559 input tokens.
+#                                                  (qwen3-embedding-8b)
+#
+# Root cause: file_summary.text was the entire C source text, which
+# for kernel files is 5-100 KB (1k-30k tokens). Batched through
+# OpenAIEmbedding it pushed individual requests past the 32k context
+# window of small self-hosted embedding servers.
+# ---------------------------------------------------------------------------
+
+
+def test_file_summary_is_structured_not_full_file_body(tmp_path, scip_pb2, backend_mod):
+    """FileSummary.text must look like clangd's structured summary
+    (counts + name lists), NOT the raw source text. Total size bounded
+    in the low single-digit KB even for files with many symbols."""
+    idx = scip_pb2.Index()
+    doc = idx.documents.add()
+    doc.relative_path = "kernel/big.c"
+    doc.language = "C"
+
+    # Emit a definition occurrence + matching SymbolInformation for each
+    # of 5 functions and 3 macros — well within "real kernel file" shape.
+    fn_names = ["sched_yield", "wake_up_process", "context_switch", "do_fork", "kfree"]
+    macro_names = ["BUG_ON", "WARN_ON", "likely"]
+    line = 0
+    for name in fn_names:
+        info = doc.symbols.add()
+        info.symbol = f"cxx . . . {name}()."
+        info.kind = scip_pb2.SymbolInformation.Function
+        occ = doc.occurrences.add()
+        occ.range.extend([line, 5, line, 5 + len(name)])
+        occ.enclosing_range.extend([line, 0, line + 2, 1])
+        occ.symbol = f"cxx . . . {name}()."
+        occ.symbol_roles = scip_pb2.Definition
+        occ.syntax_kind = scip_pb2.IdentifierFunctionDefinition
+        line += 4
+    for name in macro_names:
+        info = doc.symbols.add()
+        info.symbol = f"cxx . . . {name}!"
+        info.kind = scip_pb2.SymbolInformation.Macro
+        occ = doc.occurrences.add()
+        occ.range.extend([line, 8, line, 8 + len(name)])
+        occ.enclosing_range.extend([line, 0, line, 50])
+        occ.symbol = f"cxx . . . {name}!"
+        occ.symbol_roles = scip_pb2.Definition
+        occ.syntax_kind = scip_pb2.IdentifierMacroDefinition
+        line += 1
+
+    scip_file = tmp_path / "index.scip"
+    scip_file.write_bytes(idx.SerializeToString())
+
+    # Write a "big" source file — what the old code would have embedded
+    # in full. 8000 lines, ~80 chars each ≈ 640 KB. This is the shape
+    # that blew up the embedding context.
+    big_source_lines = [f"// dummy padding line {i}" for i in range(8000)]
+    (tmp_path / "kernel" / "big.c").parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "kernel" / "big.c").write_text(
+        "\n".join(big_source_lines) + "\n", encoding="utf-8"
+    )
+
+    backend = backend_mod.ScipClangBackend()
+    code_index = backend._parse_scip(scip_file, tmp_path, {})
+
+    assert len(code_index.file_summaries) == 1
+    summary = code_index.file_summaries[0]
+
+    # The new text must be the structured form, NOT the raw source.
+    assert "counts:" in summary.text
+    assert "functions:" in summary.text
+    assert "macros:" in summary.text
+    # Some function names must appear in the summary.
+    assert "sched_yield" in summary.text
+    assert "BUG_ON" in summary.text
+
+    # And critically: the raw padding lines from the source MUST NOT
+    # leak into the summary.
+    assert "dummy padding line" not in summary.text, (
+        "FileSummary.text must NOT contain the raw file body — that's the "
+        "behavior that broke the embedding server's 32k context window"
+    )
+
+    # Size sanity: even with 8000 lines of source, the summary is at most
+    # a few KB. The old code path would have produced ~640 KB here.
+    assert len(summary.text) < 10_000, (
+        f"FileSummary.text should be O(KB), got {len(summary.text)} chars"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Regression: import form must stay absolute
+# ---------------------------------------------------------------------------
+
+
+def test_scip_clang_uses_absolute_translation_import():
+    """The `_scip_translation` helper module MUST be imported by absolute
+    path, NOT via `from . import _scip_translation as tx`.
+
+    When `hmopt.indexing.backends.__init__` re-exports `ScipClangBackend`,
+    `scip_clang.py` is loaded while the `backends` package is still
+    partially initialized. Under Python 3.11+ the relative `from . import`
+    form raises:
+
+        ImportError: cannot import name '_scip_translation' from
+        partially initialized module 'hmopt.indexing.backends'
+
+    The absolute `import hmopt.indexing.backends._scip_translation as tx`
+    form goes through sys.modules directly and is safe even mid-init.
+
+    The other unit tests in this file string-replace the import line into
+    a synthetic namespace before exec'ing the module, so they CANNOT
+    catch a regression that puts the relative form back. This test
+    inspects the source text directly as a lightweight guard.
+    """
+    src_path = (
+        Path(__file__).resolve().parent.parent
+        / "src" / "hmopt" / "indexing" / "backends" / "scip_clang.py"
+    )
+    src = src_path.read_text(encoding="utf-8")
+    assert "from . import _scip_translation as tx" not in src, (
+        "scip_clang.py must NOT use `from . import _scip_translation as tx` "
+        "— that form fails under Python 3.11+ when backends/__init__.py "
+        "imports scip_clang while the package is mid-init. Use the absolute "
+        "submodule import form (see comment in scip_clang.py)."
+    )
+    assert "import hmopt.indexing.backends._scip_translation as tx" in src

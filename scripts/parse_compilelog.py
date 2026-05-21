@@ -162,6 +162,66 @@ def parse_log(stream, transform) -> List[dict]:
     return entries
 
 
+def sanity_fix_entries(entries: List[dict]) -> Tuple[int, int]:
+    """Self-heal compile_commands.json entries after parsing.
+
+    Yocto/BiSheng-style build logs record `Entering directory` paths that,
+    after the recipe-to-repo-root mapping, can point at a directory that
+    doesn't exist on the indexing host. The most common cause is that a
+    Yocto recipe's `git-r0/build/<X>` workdir is flattened relative to the
+    source tree it mirrors (e.g. the recipe builds the `sysmgr` subtree
+    of `hm-verif-kernel`, so `git-r0/build/activation/` corresponds to
+    `hm-verif-kernel/sysmgr/activation/`, not `hm-verif-kernel/activation/`).
+    A single `--map recipe=...` cannot capture both `git/` (which mirrors
+    the source tree) and `build/` (which omits the wrapping subdir).
+
+    When that mismatch ships in a compile_commands.json, libclang's first
+    syscall is `chdir(directory)`, which fails with `unable to set
+    working directory`, and downstream scip-clang/clangd code dereferences
+    a NULL cwd handle and SIGSEGVs.
+
+    This routine fixes it deterministically: for every entry whose
+    `file` is an absolute path AND whose `directory` does NOT exist on
+    disk AND whose `os.path.dirname(file)` DOES exist on disk, replace
+    `directory` with `os.path.dirname(file)`. The file's containing
+    directory is always a valid chdir target and is what scip-clang and
+    clangd fall back to anyway when `directory` is missing.
+
+    Entries that already point at an existing directory are untouched.
+    Entries with relative `file` paths (rare in modern compdbs) are
+    skipped because the join semantics depend on `directory`, which we
+    can't second-guess.
+
+    Returns (fixed_count, dropped_count). dropped_count is reserved for
+    a future filter pass and is currently always 0.
+    """
+    isdir_cache: Dict[str, bool] = {}
+
+    def isdir_cached(path: str) -> bool:
+        if not path:
+            return False
+        cached = isdir_cache.get(path)
+        if cached is None:
+            cached = os.path.isdir(path)
+            isdir_cache[path] = cached
+        return cached
+
+    fixed = 0
+    for entry in entries:
+        directory = entry.get("directory", "")
+        file_path = entry.get("file", "")
+        if not directory or not file_path or not os.path.isabs(file_path):
+            continue
+        if isdir_cached(directory):
+            continue
+        fallback = os.path.dirname(file_path)
+        if isdir_cached(fallback):
+            entry["directory"] = fallback
+            fixed += 1
+
+    return fixed, 0
+
+
 def main():
     ap = argparse.ArgumentParser(description="Parse Yocto build log -> compile_commands.json")
     ap.add_argument("-i", "--input", default="-", help="build log path, or '-' for stdin")
@@ -179,6 +239,17 @@ def main():
         help=(
             "recipe=real_repo_root ; replaces "
             ".../<recipe>/git-r0/git/ and .../<recipe>/git-r0/build/ -> real_repo_root/"
+        ),
+    )
+    ap.add_argument(
+        "--no-sanity-fix",
+        action="store_true",
+        help=(
+            "Disable the post-parse sanity step that rewrites entries whose "
+            "`directory` does not exist on disk to `dirname(file)`. The fix is "
+            "on by default because compile_commands.json with non-existent "
+            "directories crashes scip-clang and libclang. Disable only when "
+            "running the parser somewhere the source tree is not mounted."
         ),
     )
     args = ap.parse_args()
@@ -203,6 +274,15 @@ def main():
     finally:
         if stream is not sys.stdin:
             stream.close()
+
+    if not args.no_sanity_fix:
+        fixed, _ = sanity_fix_entries(entries)
+        if fixed:
+            print(
+                f"sanity-fix: rewrote {fixed}/{len(entries)} entries' `directory` "
+                f"to dirname(file) (original directory did not exist on disk)",
+                file=sys.stderr,
+            )
 
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(entries, f, indent=2, ensure_ascii=False)

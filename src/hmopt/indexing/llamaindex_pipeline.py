@@ -287,6 +287,49 @@ def _delete_code_summary_nodes(vector_store: Neo4jVectorStore, node_label: str) 
     )
 
 
+_SYMBOL_ID_SUFFIX_RE = re.compile(r":(\d+):([a-z_][a-z_0-9]*)$")
+
+
+def _path_from_symbol_id(symbol_id: str) -> Optional[str]:
+    """Extract the source file path component from a chunk symbol_id.
+
+    Both backends construct symbol_id as `path:qualname:start_line:kind`
+    (clangd_indexer._symbol_id, scip_clang._build_chunk). Importantly,
+    `qualname` may contain `::` (C++ namespaces / nested types) which
+    is TWO single ':' characters in a row — a naive rsplit(":", 3)
+    would split inside the qualname and return a wrong path.
+
+    Layout-driven parse: scan left-to-right for the first ':' that is
+    NOT adjacent to another ':' on either side. That separates path
+    from qualname. Then validate the tail matches `:line:kind` to
+    reject malformed ids ("only:two:fields" should return None).
+
+    Returns None if the id is malformed so callers can fall back
+    safely (treating it as "out of scope") rather than mis-attributing.
+
+    Assumes Linux-style paths (no ':' inside path). Windows paths
+    like `C:\\foo` would currently be parsed with `C` as the path,
+    which is wrong — out of scope for this codebase.
+    """
+    n = len(symbol_id)
+    for i in range(n):
+        if symbol_id[i] != ":":
+            continue
+        adjacent_colon = (
+            (i + 1 < n and symbol_id[i + 1] == ":")
+            or (i > 0 and symbol_id[i - 1] == ":")
+        )
+        if adjacent_colon:
+            continue
+        # Candidate path/qualname separator. Verify the suffix from
+        # this point forward includes the `:line:kind` tail; otherwise
+        # the id is malformed and we treat it as out of scope.
+        if _SYMBOL_ID_SUFFIX_RE.search(symbol_id, i + 1) is None:
+            return None
+        return symbol_id[:i]
+    return None
+
+
 def _prepare_incremental_code_nodes(
     nodes: list[TextNode],
     previous_manifest: dict[str, str],
@@ -314,8 +357,55 @@ def _prepare_incremental_code_nodes(
         changed_symbol_ids.append(symbol_id)
         symbol_nodes.append(node)
 
-    removed_symbol_ids = [symbol_id for symbol_id in previous_manifest if symbol_id not in current_manifest]
-    return symbol_nodes, removed_symbol_ids, unchanged_symbol_ids, changed_symbol_ids, summary_nodes, current_manifest
+    # Scoped removal: a symbol counts as "removed" only if THIS indexing
+    # run touched its source file but didn't re-emit that particular
+    # symbol — i.e. the file is in scope but the function/type/macro
+    # was deleted or renamed. Symbols whose source file the current
+    # run didn't touch at all are out of scope (they belong to a
+    # different repo or subtree indexed in an earlier run) and MUST be
+    # preserved both in Neo4j and in the persisted manifest.
+    #
+    # Without this scoping, a fresh `hmopt index-kernel --repo-path B/`
+    # after a previous `--repo-path A/` would compute the entire A
+    # manifest as "removed" (none of A's symbol_ids appear in B's
+    # current_manifest), then `_delete_code_symbol_nodes` would
+    # DETACH DELETE every A node + edge from Neo4j.
+    current_paths = {
+        path
+        for sid in current_manifest
+        if (path := _path_from_symbol_id(sid)) is not None
+    }
+    removed_symbol_ids = [
+        symbol_id
+        for symbol_id in previous_manifest
+        if symbol_id not in current_manifest
+        and (
+            (path := _path_from_symbol_id(symbol_id)) is not None
+            and path in current_paths
+        )
+    ]
+
+    # Build the manifest that will be persisted to disk. It must be the
+    # ACCUMULATED state across all indexing runs ever — not just this
+    # run's output — otherwise the next run loads only this run's
+    # symbols as `previous_manifest`, sees every out-of-scope symbol as
+    # "unknown", and either silently drops the cross-repo fingerprint
+    # cache (causing pointless re-embedding) or, worse, future runs'
+    # scope-detection breaks because `current_paths` from the next run
+    # doesn't include this run's paths.
+    accumulated_manifest = dict(previous_manifest)
+    for sid in removed_symbol_ids:
+        accumulated_manifest.pop(sid, None)
+    accumulated_manifest.update(current_manifest)
+
+    return (
+        symbol_nodes,
+        removed_symbol_ids,
+        unchanged_symbol_ids,
+        changed_symbol_ids,
+        summary_nodes,
+        accumulated_manifest,
+    )
 
 
 def _infer_embedding_dimension(embed: OpenAIEmbeddingLike) -> int:
@@ -485,24 +575,38 @@ def _index_to_nodes(index: CodeIndex) -> list[TextNode]:
     for chunk in index.chunks:
         normalized_text = _normalized_chunk_text(chunk)
         body = f"{_code_header(chunk)}\n{normalized_text}"
+        chunk_metadata: dict[str, Any] = {
+            "type": "code",
+            "symbol_name": chunk.symbol_name,
+            "symbol_qualname": chunk.symbol_qualname,
+            "symbol_id": chunk.symbol_id,
+            "symbol_kind": chunk.kind,
+            "path": str(chunk.path),
+            "start_line": chunk.start_line,
+            "end_line": chunk.end_line,
+            "parser": chunk.parser,
+            "container": chunk.container,
+            "detail": chunk.detail,
+            "content_hash": _stable_text_hash(body),
+        }
+        # scip-clang-only enrichments. Only added to metadata when the
+        # backend actually populated them so clangd-origin chunks stay
+        # byte-identical to their pre-extension shape. content_hash above
+        # is over `body` (not metadata) so adding these doesn't invalidate
+        # the upsert hash for an already-embedded clangd chunk.
+        if chunk.backend_origin and chunk.backend_origin != "clangd":
+            chunk_metadata["backend_origin"] = chunk.backend_origin
+        if chunk.scip_symbol:
+            chunk_metadata["scip_symbol"] = chunk.scip_symbol
+        if chunk.signature:
+            chunk_metadata["signature"] = chunk.signature
+        if chunk.documentation:
+            chunk_metadata["documentation"] = chunk.documentation
         nodes.append(
             TextNode(
                 id_=chunk.symbol_id,
                 text=body,
-                metadata={
-                    "type": "code",
-                    "symbol_name": chunk.symbol_name,
-                    "symbol_qualname": chunk.symbol_qualname,
-                    "symbol_id": chunk.symbol_id,
-                    "symbol_kind": chunk.kind,
-                    "path": str(chunk.path),
-                    "start_line": chunk.start_line,
-                    "end_line": chunk.end_line,
-                    "parser": chunk.parser,
-                    "container": chunk.container,
-                    "detail": chunk.detail,
-                    "content_hash": _stable_text_hash(body),
-                },
+                metadata=chunk_metadata,
             )
         )
     for summary in index.file_summaries:
@@ -839,7 +943,10 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
         unchanged_symbol_ids,
         changed_symbol_ids,
         summary_nodes,
-        current_manifest,
+        # 6th element is the ACCUMULATED manifest (previous + current -
+        # removed) — what we persist back to disk. NOT just this run's
+        # output; see `_prepare_incremental_code_nodes` for why.
+        accumulated_manifest,
     ) = _prepare_incremental_code_nodes(nodes, previous_manifest)
 
     embed_dim = _infer_embedding_dimension(embed)
@@ -906,7 +1013,7 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
         _upsert_clangd_graph(storage, graph_index, nodes_to_insert)
 
     _safe_storage_persist(storage, paths.code_dir)
-    _persist_symbol_manifest(paths.code_dir, current_manifest)
+    _persist_symbol_manifest(paths.code_dir, accumulated_manifest)
     previous_embedding_meta = _load_embedding_metadata(paths.code_dir) or {}
     _persist_embedding_metadata(
         paths.code_dir,
@@ -1846,6 +1953,7 @@ def retrieve_code_context(
     output_format: str = "text",
     focus_symbols: Optional[list[str]] = None,
     graph_depth: Optional[int] = None,
+    backend: Optional[str] = None,
     scenario: str = "general",
 ) -> str | dict[str, Any]:
     """Retrieve forced kernel context (code + graph expansion + rerank)."""
@@ -1984,31 +2092,48 @@ def retrieve_code_context(
                 node_label=code_index_cfg.node_label,
             )
             per_hop_limit = 80 if scenario_name in {"call_graph", "impact_analysis", "patch_planning"} else 50
+            # Backend filter on the graph relation. Empty string when the
+            # caller didn't request filtering, so the existing SQL shape
+            # is preserved for clangd-only deployments. Cypher params are
+            # spliced in below via `**backend_params`.
+            backend_filter, backend_params = _backend_filter_for_relation(backend, "r")
             frontier = set(selected_focus_symbols)
             visited = set(selected_focus_symbols)
             for depth in range(1, used_graph_depth + 1):
                 if not frontier:
                     break
                 symbols_param = list(frontier)[:20]
+                # Pull scip-clang's optional edge enrichments alongside the
+                # core (src, rel, dst) projection. Returned values are NULL
+                # for clangd-origin edges and get stripped before reaching
+                # the markdown renderer by `_call_site_fields`.
                 outgoing = vector_store.database_query(
                     (
                         "MATCH (s:symbol)-[r]->(t) "
-                        "WHERE s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols "
+                        "WHERE (s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols)"
+                        f"{backend_filter} "
                         "RETURN s.symbol_name as src, s.symbol_qualname as src_qual, "
-                        "type(r) as rel, t.symbol_name as dst, t.symbol_qualname as dst_qual "
+                        "type(r) as rel, t.symbol_name as dst, t.symbol_qualname as dst_qual, "
+                        "r.call_site_path as cs_path, r.call_site_line as cs_line, "
+                        "r.call_site_col as cs_col, r.syntax_kind as cs_syntax_kind, "
+                        "r.is_write as cs_is_write, r.backend_origin as cs_backend_origin "
                         "LIMIT $limit"
                     ),
-                    {"symbols": symbols_param, "limit": per_hop_limit},
+                    {"symbols": symbols_param, "limit": per_hop_limit, **backend_params},
                 )
                 incoming = vector_store.database_query(
                     (
                         "MATCH (s:symbol)<-[r]-(t) "
-                        "WHERE s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols "
+                        "WHERE (s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols)"
+                        f"{backend_filter} "
                         "RETURN t.symbol_name as src, t.symbol_qualname as src_qual, "
-                        "type(r) as rel, s.symbol_name as dst, s.symbol_qualname as dst_qual "
+                        "type(r) as rel, s.symbol_name as dst, s.symbol_qualname as dst_qual, "
+                        "r.call_site_path as cs_path, r.call_site_line as cs_line, "
+                        "r.call_site_col as cs_col, r.syntax_kind as cs_syntax_kind, "
+                        "r.is_write as cs_is_write, r.backend_origin as cs_backend_origin "
                         "LIMIT $limit"
                     ),
-                    {"symbols": symbols_param, "limit": per_hop_limit},
+                    {"symbols": symbols_param, "limit": per_hop_limit, **backend_params},
                 )
                 new_frontier: set[str] = set()
                 for rec in (outgoing or []):
@@ -2016,9 +2141,14 @@ def retrieve_code_context(
                     dst = rec.get("dst") or rec.get("dst_qual")
                     if src and dst:
                         rel_name = str(rec.get("rel") or "related_to")
-                        graph_edges.append(
-                            {"src": src, "dst": dst, "rel": rel_name, "depth": depth}
-                        )
+                        edge_entry: dict[str, Any] = {
+                            "src": src, "dst": dst, "rel": rel_name, "depth": depth
+                        }
+                        # Add scip-clang's call-site enrichments when
+                        # present; clangd-origin edges contribute nothing
+                        # here (helper drops null values).
+                        edge_entry.update(_call_site_fields(rec))
+                        graph_edges.append(edge_entry)
                         dst_rel_counts = symbol_relation_counts.setdefault(dst, {})
                         dst_rel_counts[rel_name] = dst_rel_counts.get(rel_name, 0) + 1
                         rel_weight = relation_weights.get(rel_name, 0.2)
@@ -2034,9 +2164,11 @@ def retrieve_code_context(
                     dst = rec.get("dst") or rec.get("dst_qual")
                     if src and dst:
                         rel_name = str(rec.get("rel") or "related_to")
-                        graph_edges.append(
-                            {"src": src, "dst": dst, "rel": rel_name, "depth": depth}
-                        )
+                        edge_entry = {
+                            "src": src, "dst": dst, "rel": rel_name, "depth": depth
+                        }
+                        edge_entry.update(_call_site_fields(rec))
+                        graph_edges.append(edge_entry)
                         src_rel_counts = symbol_relation_counts.setdefault(src, {})
                         src_rel_counts[rel_name] = src_rel_counts.get(rel_name, 0) + 1
                         rel_weight = relation_weights.get(rel_name, 0.2)
@@ -2297,6 +2429,95 @@ def retrieve_code_context(
 _DEFAULT_EDGE_KINDS = ("calls", "uses_type", "uses_macro")
 _CALL_CHAIN_DEPTH_HARD_CAP = 6
 
+# Backend filter values accepted by MCP tools and internal retrieval
+# functions. "any" / "" / None all mean "no filter, return everything".
+# "clangd" matches clangd-origin AND legacy NULL (pre-backend_origin
+# schema) so users migrating from an old index don't suddenly lose data.
+# "scip-clang" is an exact match.
+_VALID_BACKEND_FILTERS = {"clangd", "scip-clang"}
+
+
+def _normalize_backend_filter(backend: Optional[str]) -> Optional[str]:
+    """Validate and lowercase the backend filter value.
+
+    Returns None when no filter is requested (so callers can short-
+    circuit). Raises ValueError on unrecognized values to surface
+    typos at the MCP API boundary instead of silently returning
+    empty results.
+    """
+    if backend is None:
+        return None
+    text = str(backend).strip().lower()
+    if text in ("", "any", "all", "*"):
+        return None
+    if text not in _VALID_BACKEND_FILTERS:
+        raise ValueError(
+            f"backend must be one of {sorted(_VALID_BACKEND_FILTERS)} "
+            f"or empty/'any' to disable filtering; got {backend!r}"
+        )
+    return text
+
+
+def _backend_filter_for_relation(
+    backend: Optional[str], alias: str = "r"
+) -> tuple[str, dict[str, Any]]:
+    """Cypher fragment + parameter map for filtering a relation by
+    backend_origin. Always returns a leading ' AND ' prefix so the
+    fragment can be appended to an existing WHERE clause; an empty
+    string when no filter is requested.
+
+    For backend='clangd' the filter includes legacy NULL values
+    (relations created before the backend_origin property existed),
+    so a user querying "clangd-era data" still sees everything that
+    isn't explicitly scip-clang.
+
+    Parameters
+    ----------
+    backend : optional
+        Already-normalized backend filter value.
+    alias : str
+        Cypher variable bound to the relation in the surrounding
+        MATCH. Defaults to 'r'.
+    """
+    normalized = _normalize_backend_filter(backend)
+    if normalized is None:
+        return "", {}
+    if normalized == "clangd":
+        return (
+            f" AND ({alias}.backend_origin IS NULL "
+            f"OR {alias}.backend_origin = $backend_origin)",
+            {"backend_origin": normalized},
+        )
+    return (
+        f" AND {alias}.backend_origin = $backend_origin",
+        {"backend_origin": normalized},
+    )
+
+
+def _backend_filter_for_node(
+    backend: Optional[str], alias: str, property_name: str = "backend_origin"
+) -> tuple[str, dict[str, Any]]:
+    """Same shape as `_backend_filter_for_relation` but for a node.
+
+    The node's backend-tagging property varies by label: `:CodeChunk`
+    nodes carry `parser` (historical clangd-era field name),
+    `:__Entity__` nodes carry `backend_origin`. Callers pass the
+    appropriate property_name.
+    """
+    normalized = _normalize_backend_filter(backend)
+    if normalized is None:
+        return "", {}
+    if normalized == "clangd":
+        return (
+            f" AND ({alias}.{property_name} IS NULL "
+            f"OR {alias}.{property_name} = $backend_origin)",
+            {"backend_origin": normalized},
+        )
+    return (
+        f" AND {alias}.{property_name} = $backend_origin",
+        {"backend_origin": normalized},
+    )
+
 
 def _call_site_fields(rec: dict[str, Any]) -> dict[str, Any]:
     """Extract per-edge call-site enrichments from a Cypher row.
@@ -2332,12 +2553,23 @@ def retrieve_call_chain(
     frontier_cap: int = 50,
     edge_kinds: Optional[list[str]] = None,
     output_format: str = "json",
+    backend: Optional[str] = None,
 ) -> dict[str, Any] | str:
     """Pure structural call-chain retrieval — no code bodies, no scoring.
 
     Returns symbol→symbol edges with optional call-site `path:line` and per-node metadata
     (path, lines, kind). Suitable for shaping the call graph before fetching bodies via
     `fetch_code_snippets`. Supports depth up to 6.
+
+    Parameters
+    ----------
+    backend : optional
+        When set to "scip-clang" or "clangd", only include edges whose
+        `backend_origin` matches (for "clangd" this also includes legacy
+        NULL-tagged edges from before backend_origin existed). When None
+        or "any", no filter is applied. Useful when both backends have
+        written to the same Neo4j graph and the caller wants to scope
+        results to one backend's data.
     """
     if not symbols:
         return {"roots": [], "edges": [], "nodes": {}, "stats": {}} if output_format != "text" else ""
@@ -2437,10 +2669,12 @@ def retrieve_call_chain(
     # backend_origin). On clangd-origin edges these properties are absent
     # and Cypher returns null — _call_site_fields() drops the nulls before
     # they reach the response payload.
+    backend_filter, backend_params = _backend_filter_for_relation(backend, "r")
     out_cypher = (
         "MATCH (s:symbol)-[r]->(t) "
         "WHERE (s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols) "
-        "AND type(r) IN $kinds "
+        "AND type(r) IN $kinds"
+        f"{backend_filter} "
         "RETURN s.symbol_name as src, s.symbol_qualname as src_qual, "
         "type(r) as rel, "
         "t.symbol_name as dst, t.symbol_qualname as dst_qual, "
@@ -2457,7 +2691,8 @@ def retrieve_call_chain(
     in_cypher = (
         "MATCH (s:symbol)<-[r]-(t) "
         "WHERE (s.symbol_name IN $symbols OR s.symbol_qualname IN $symbols) "
-        "AND type(r) IN $kinds "
+        "AND type(r) IN $kinds"
+        f"{backend_filter} "
         "RETURN t.symbol_name as src, t.symbol_qualname as src_qual, "
         "type(r) as rel, "
         "s.symbol_name as dst, s.symbol_qualname as dst_qual, "
@@ -2515,7 +2750,12 @@ def retrieve_call_chain(
             try:
                 rows = vector_store.database_query(
                     out_cypher,
-                    {"symbols": layer, "kinds": kinds_filter, "limit": per_hop},
+                    {
+                        "symbols": layer,
+                        "kinds": kinds_filter,
+                        "limit": per_hop,
+                        **backend_params,
+                    },
                 )
             except Exception as exc:
                 logger.warning("call_chain outgoing query failed at depth=%d: %s", current_depth, exc)
@@ -2555,7 +2795,12 @@ def retrieve_call_chain(
             try:
                 rows = vector_store.database_query(
                     in_cypher,
-                    {"symbols": layer, "kinds": kinds_filter, "limit": per_hop},
+                    {
+                        "symbols": layer,
+                        "kinds": kinds_filter,
+                        "limit": per_hop,
+                        **backend_params,
+                    },
                 )
             except Exception as exc:
                 logger.warning("call_chain incoming query failed at depth=%d: %s", current_depth, exc)
@@ -2689,6 +2934,7 @@ def fetch_code_snippets(
     per_symbol_max_chars: int = 4000,
     total_max_chars: Optional[int] = None,
     output_format: str = "json",
+    backend: Optional[str] = None,
 ) -> dict[str, Any] | str:
     """Batch fetch function bodies for an explicit symbol list.
 
@@ -2712,6 +2958,10 @@ def fetch_code_snippets(
             total_budget = max(per_max, int(total_max_chars))
         except (TypeError, ValueError):
             total_budget = None
+
+    # Validate backend filter eagerly so a typo surfaces as ValueError at
+    # the API boundary instead of silently returning zero snippets.
+    backend_norm = _normalize_backend_filter(backend)
 
     requested = [str(s).strip() for s in symbols if str(s).strip()]
     if not requested:
@@ -2746,6 +2996,15 @@ def fetch_code_snippets(
         meta = getattr(node, "metadata", {}) if node else {}
         if meta.get("type") != "code":
             continue
+        # Backend filter on docstore nodes uses `parser` (the historical
+        # field name on :CodeChunk metadata). "clangd" matches both
+        # explicit "clangd" parser and legacy missing/None values.
+        if backend_norm is not None:
+            node_parser = meta.get("parser")
+            if backend_norm == "scip-clang" and node_parser != "scip-clang":
+                continue
+            if backend_norm == "clangd" and node_parser == "scip-clang":
+                continue
         name = meta.get("symbol_name")
         qual = meta.get("symbol_qualname")
         if name and name in targets and name not in node_lookup:
@@ -2826,20 +3085,32 @@ def fetch_code_snippets(
             budget_hit = True
             continue
         out_meta = resolved_meta or meta or {}
-        snippets.append(
-            {
-                "symbol": symbol,
-                "symbol_id": out_meta.get("symbol_id"),
-                "symbol_name": out_meta.get("symbol_name"),
-                "symbol_qualname": out_meta.get("symbol_qualname"),
-                "path": out_meta.get("path"),
-                "start_line": out_meta.get("start_line"),
-                "end_line": out_meta.get("end_line"),
-                "truncated": truncated,
-                "char_count": char_count,
-                "text": text,
-            }
-        )
+        entry: dict[str, Any] = {
+            "symbol": symbol,
+            "symbol_id": out_meta.get("symbol_id"),
+            "symbol_name": out_meta.get("symbol_name"),
+            "symbol_qualname": out_meta.get("symbol_qualname"),
+            "path": out_meta.get("path"),
+            "start_line": out_meta.get("start_line"),
+            "end_line": out_meta.get("end_line"),
+            "truncated": truncated,
+            "char_count": char_count,
+            "text": text,
+        }
+        # scip-clang enrichments — only set when present so clangd-origin
+        # snippets stay byte-identical to their pre-extension shape and
+        # downstream consumers don't see noisy `null` fields.
+        for field_name in (
+            "parser",
+            "backend_origin",
+            "signature",
+            "documentation",
+            "scip_symbol",
+        ):
+            value = out_meta.get(field_name)
+            if value not in (None, ""):
+                entry[field_name] = value
+        snippets.append(entry)
         if truncated:
             truncated_count += 1
         total_chars += char_count

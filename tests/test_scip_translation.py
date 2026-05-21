@@ -200,6 +200,70 @@ def test_syntax_kind_punctuation_returns_none():
 
 
 # ---------------------------------------------------------------------------
+# infer_relation_kind_from_descriptor — fallback for when scip-clang
+# leaves syntax_kind=UnspecifiedSyntaxKind(0) on reference occurrences.
+# This was the root cause of ~80% of refs being silently dropped on
+# scip-clang 0.3.1 + BiSheng-generated compile_commands.
+# ---------------------------------------------------------------------------
+
+
+def test_infer_relation_kind_from_method_descriptor():
+    """`name().` ending → calls. Most function calls in C/C++ scip output."""
+    parsed = tx.parse_scip_symbol("cxx . . . foo().")
+    assert parsed is not None
+    assert tx.infer_relation_kind_from_descriptor(parsed) == "calls"
+
+
+def test_infer_relation_kind_from_namespaced_method_descriptor():
+    """Last descriptor's suffix wins; namespace prefix doesn't change kind."""
+    parsed = tx.parse_scip_symbol("cxx . . . MyClass#bar().")
+    assert parsed is not None
+    assert parsed.descriptors[-1].suffix == "method"
+    assert tx.infer_relation_kind_from_descriptor(parsed) == "calls"
+
+
+def test_infer_relation_kind_from_macro_descriptor():
+    """`name!` ending → uses_macro."""
+    parsed = tx.parse_scip_symbol("cxx . . . LOG_INFO!")
+    assert parsed is not None
+    assert tx.infer_relation_kind_from_descriptor(parsed) == "uses_macro"
+
+
+def test_infer_relation_kind_from_type_descriptor():
+    """`name#` ending → uses_type. Covers struct/union/enum/typedef refs."""
+    parsed = tx.parse_scip_symbol("cxx . . . task_struct#")
+    assert parsed is not None
+    assert tx.infer_relation_kind_from_descriptor(parsed) == "uses_type"
+
+
+def test_infer_relation_kind_from_type_parameter_descriptor():
+    parsed = tx.parse_scip_symbol("cxx . . . [T]")
+    assert parsed is not None
+    assert parsed.descriptors[-1].suffix == "type_parameter"
+    assert tx.infer_relation_kind_from_descriptor(parsed) == "uses_type"
+
+
+def test_infer_relation_kind_from_term_descriptor_falls_back_to_references():
+    """`name.` (bare term — variable, field, parameter) maps to the generic
+    `references` edge. We deliberately do NOT classify these as 'calls'
+    because we can't distinguish a function-pointer reference from a plain
+    variable read without more context."""
+    parsed = tx.parse_scip_symbol("cxx . . . jiffies.")
+    assert parsed is not None
+    assert tx.infer_relation_kind_from_descriptor(parsed) == "references"
+
+
+def test_infer_relation_kind_from_empty_descriptors_returns_none():
+    """A ParsedSymbol with no descriptors carries no symbolic identity —
+    the caller should skip the occurrence entirely."""
+    parsed = tx.parse_scip_symbol("cxx . . . ")
+    # Implementation choice: parse_scip_symbol returns None on empty
+    # descriptor path; we additionally guard infer_* in case the caller
+    # constructs ParsedSymbol manually.
+    assert parsed is None or tx.infer_relation_kind_from_descriptor(parsed) is None
+
+
+# ---------------------------------------------------------------------------
 # scip_symbol_kind_to_node_kind
 # ---------------------------------------------------------------------------
 

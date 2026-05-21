@@ -17,13 +17,24 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import monotonic
 from typing import Any, Optional
 
 from ..models import CodeChunk, CodeIndex, CodeRelation, FileSummary
-from . import _scip_translation as tx
+
+# Absolute submodule import (NOT `from . import _scip_translation`):
+# when `backends/__init__.py` re-exports ScipClangBackend, this module is
+# loaded while the `backends` package is still partially initialized.
+# Under Python 3.11+ the relative-attribute form raises
+#   ImportError: cannot import name '_scip_translation' from partially
+#   initialized module 'hmopt.indexing.backends'
+# because `getattr` on the in-flight package can't yet see the sibling.
+# Importing the submodule by its fully qualified name goes through
+# sys.modules directly and is safe even mid-init.
+import hmopt.indexing.backends._scip_translation as tx
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +143,12 @@ class ScipClangBackend:
         cmd = [
             self.config.binary,
             f"--compdb-path={compdb}",
-            f"-o={output_path}",
+            # scip-clang's output flag is `--index-output-path`, NOT `-o`.
+            # See https://github.com/sourcegraph/scip-clang `--help` —
+            # passing `-o ...` (or `-o=...`) is rejected with
+            # `error: unknown argument(s) ["-o", ...]` and scip-clang
+            # exits non-zero without producing any output.
+            f"--index-output-path={output_path}",
             *self.config.extra_args,
         ]
         logger.info("Running scip-clang: cwd=%s cmd=%s", repo_path, " ".join(cmd))
@@ -213,19 +229,21 @@ class ScipClangBackend:
             all_chunks.extend(doc_chunks)
             all_relations.extend(doc_relations)
 
-            # File summary mirrors the clangd backend's output for downstream
-            # vector-store compatibility.
-            file_path = repo_path / doc.relative_path
-            if file_path.exists():
-                try:
-                    text = (
-                        doc.text
-                        if doc.text
-                        else file_path.read_text(encoding="utf-8", errors="ignore")
-                    )
-                except OSError:
-                    text = doc.text or ""
-                file_summaries.append(FileSummary(path=file_path, text=text))
+            # File summary: a compact, embedding-friendly aggregate of the
+            # chunks emitted from this Document. PREVIOUSLY this branch put
+            # the whole file body into FileSummary.text, which on kernel
+            # C files (5-100 KB) translated to 1k-30k tokens per summary;
+            # batched with other summaries through OpenAIEmbedding it blew
+            # the 32k context window of small embedding servers (observed
+            # mid-indexing failure: 47559 input tokens > 32768 max,
+            # qwen3-embedding-8b). The structured form below matches what
+            # clangd_indexer._build_file_summaries produces (counts +
+            # name lists), so downstream consumers can handle either
+            # backend uniformly.
+            if doc_chunks:
+                file_path = repo_path / doc.relative_path
+                summary_text = _build_file_summary_text(file_path, doc_chunks)
+                file_summaries.append(FileSummary(path=file_path, text=summary_text))
 
         return CodeIndex(
             chunks=all_chunks,
@@ -332,6 +350,44 @@ def _process_document(
             def_extents.append(extent)
     def_extents.sort(key=lambda d: d.extent)
 
+    # ----- Layout fallback (per-chunk): when scip-clang doesn't populate
+    # Occurrence.enclosing_range on a definition, `_build_chunk` is forced
+    # to derive that chunk's extent from the identifier's own range, which
+    # collapses to a single line. find_enclosing_definition then fails for
+    # every in-body reference and `_build_relation` silently drops the
+    # would-be edge. On scip-clang 0.3.1 + BiSheng we see this on ~80% of
+    # definitions, distributed across documents — so the fallback MUST be
+    # per-chunk (an earlier per-document version was bypassed on any doc
+    # that contained even one multi-line scip-clang extent, leaving the
+    # narrow ones unwidened and refs to them still dropped).
+    #
+    # We additionally widen the chunk's `text` and `end_line` in-place so
+    # the body content embedded into the vector store is the actual
+    # function body rather than only the def-identifier line.
+    if chunks and source_lines:
+        layout_extents = _infer_def_extents_from_layout(
+            chunks, source_line_count=len(source_lines)
+        )
+        layout_by_symbol = {ext.symbol: ext for ext in layout_extents}
+        widened: list[tx.DefinitionExtent] = []
+        for chunk, ext in zip(chunks, def_extents):
+            is_narrow = ext.extent[0] == ext.extent[2]
+            layout_ext = layout_by_symbol.get(ext.symbol)
+            if is_narrow and layout_ext is not None:
+                widened.append(layout_ext)
+                # Rebuild this chunk's body text and end_line from the
+                # widened extent. chunk.start_line is already 1-based
+                # from `_build_chunk` and matches layout_ext.extent[0]+1.
+                start_line_0 = layout_ext.extent[0]
+                end_line_0 = layout_ext.extent[2]
+                body_lines = source_lines[start_line_0 : end_line_0 + 1]
+                chunk.text = "\n".join(body_lines)
+                chunk.end_line = end_line_0 + 1
+            else:
+                widened.append(ext)
+        def_extents = widened
+        def_extents.sort(key=lambda d: d.extent)
+
     # ----- Pass 2 (within this doc): reference occurrences → relations.
     relations: list[CodeRelation] = []
     for occ in doc.occurrences:
@@ -349,6 +405,99 @@ def _process_document(
             relations.append(relation)
 
     return chunks, relations
+
+
+# Kind classification — mirrors the same-named constants in
+# `clangd_indexer.py:69-73` so both backends' FileSummary entries have
+# identical shape. Duplicated rather than imported to keep each backend's
+# module self-contained (the backends shouldn't reach into each other).
+_KIND_FUNCTIONS = {"function", "method", "constructor"}
+_KIND_TYPES = {"class", "struct", "enum", "enum_member", "interface", "type_parameter", "type"}
+_KIND_FIELDS = {"field", "property"}
+_KIND_VARIABLES = {"variable"}
+_KIND_CONSTANTS = {"constant"}
+_KIND_MACROS = {"macro"}
+
+
+def _build_file_summary_text(
+    file_path: Path,
+    chunks: list[CodeChunk],
+    *,
+    max_items: int = 50,
+) -> str:
+    """Produce a compact, embedding-friendly summary of one Document.
+
+    Format matches `clangd_indexer._build_file_summaries` so the vector
+    store sees the same shape regardless of which backend produced the
+    summary. Total length is bounded by `max_items` per kind category,
+    so the resulting text is always a few KB at most — far below the
+    32k-token context window of the embedding server.
+
+    Replaces the previous "put the whole file body in here" approach,
+    which made FileSummary.text grow with the source file and would
+    push batched embed requests past 32k tokens on kernel-scale files.
+    """
+    kinds = Counter(chunk.kind for chunk in chunks)
+    kinds_dict = {kind: kinds[kind] for kind in sorted(kinds)}
+    functions = sorted({c.symbol_name for c in chunks if c.kind in _KIND_FUNCTIONS})
+    types = sorted({c.symbol_name for c in chunks if c.kind in _KIND_TYPES})
+    globals_ = sorted({c.symbol_name for c in chunks if c.kind in _KIND_VARIABLES})
+    constants = sorted({c.symbol_name for c in chunks if c.kind in _KIND_CONSTANTS})
+    fields = sorted({c.symbol_name for c in chunks if c.kind in _KIND_FIELDS})
+    macros = sorted({c.symbol_name for c in chunks if c.kind in _KIND_MACROS})
+    return (
+        f"file summary: {file_path}\n"
+        f"counts: {kinds_dict}\n"
+        f"functions: {functions[:max_items]}\n"
+        f"types: {types[:max_items]}\n"
+        f"globals: {globals_[:max_items]}\n"
+        f"constants: {constants[:max_items]}\n"
+        f"fields: {fields[:max_items]}\n"
+        f"macros: {macros[:max_items]}\n"
+    )
+
+
+def _infer_def_extents_from_layout(
+    chunks: list[CodeChunk],
+    *,
+    source_line_count: int,
+) -> list[tx.DefinitionExtent]:
+    """Reconstruct definition extents from neighbor layout.
+
+    Used when scip-clang's per-occurrence `enclosing_range` field is not
+    populated and every `_build_chunk`-derived extent collapses to the
+    identifier's own line. Each chunk's extent is widened to span from
+    its `start_line` (its identifier line) to the line BEFORE the next
+    chunk's `start_line` — or to EOF for the last chunk. This is the
+    correct shape for C / kernel code where definitions sit at file
+    scope and don't nest.
+
+    Notes:
+    - Chunks without a `scip_symbol` are skipped: the extent is what gets
+      compared back against occurrence symbols by
+      `find_enclosing_definition`, and a missing symbol can't be matched.
+    - `end_col` is set to a sentinel large value so any column on the
+      end line is considered contained.
+    """
+    sorted_by_start = sorted(chunks, key=lambda c: c.start_line)
+    extents: list[tx.DefinitionExtent] = []
+    for i, chunk in enumerate(sorted_by_start):
+        if not chunk.scip_symbol:
+            continue
+        start_line_0 = max(chunk.start_line - 1, 0)
+        if i + 1 < len(sorted_by_start):
+            next_start_0 = max(sorted_by_start[i + 1].start_line - 1, 0)
+            end_line_0 = max(next_start_0 - 1, start_line_0)
+        else:
+            end_line_0 = max(source_line_count - 1, start_line_0)
+        extents.append(
+            tx.DefinitionExtent(
+                symbol=chunk.scip_symbol,
+                extent=(start_line_0, 0, end_line_0, 1_000_000),
+            )
+        )
+    extents.sort(key=lambda d: d.extent)
+    return extents
 
 
 def _build_chunk(
@@ -430,9 +579,29 @@ def _build_relation(
     if not occ.symbol:
         return None
 
+    # Parse the destination symbol up front so we can also use it as the
+    # source of truth for relation-kind inference when syntax_kind is
+    # unspecified.
+    dst_parsed = tx.parse_scip_symbol(occ.symbol)
+    if dst_parsed is None or dst_parsed.is_local:
+        return None
+
     rel_kind = tx.scip_syntax_kind_to_relation_kind(occ.syntax_kind)
     if rel_kind is None:
-        return None
+        # Only fall back when scip-clang left syntax_kind unspecified (=0).
+        # Other table misses (Comment=1, PunctuationDelimiter=2, ...) are
+        # explicit "this is not a code reference" signals from scip-clang
+        # and must be respected — otherwise we'd manufacture spurious calls
+        # edges from incidental occurrences of identifier-shaped tokens.
+        #
+        # scip-clang 0.3.1 + BiSheng emits most genuine reference
+        # occurrences with syntax_kind=UnspecifiedSyntaxKind(0); without
+        # this fallback ~80% of refs silently fail to become graph edges.
+        if occ.syntax_kind != 0:
+            return None
+        rel_kind = tx.infer_relation_kind_from_descriptor(dst_parsed)
+        if rel_kind is None:
+            return None
 
     occ_range = tx.normalize_range(occ.range)
     if occ_range is None:
@@ -448,10 +617,7 @@ def _build_relation(
     dst_record = global_defs.get(occ.symbol)
 
     src_parsed = tx.parse_scip_symbol(src_def.symbol)
-    dst_parsed = tx.parse_scip_symbol(occ.symbol)
     if src_parsed is None or src_parsed.is_local:
-        return None
-    if dst_parsed is None or dst_parsed.is_local:
         return None
 
     # src is always defined in this doc (def_extents only holds local defs).

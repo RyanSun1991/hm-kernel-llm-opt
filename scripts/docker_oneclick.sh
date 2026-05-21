@@ -256,6 +256,7 @@ run_hmopt_container() {
   docker rm -f "$HMOPT_CONTAINER" >/dev/null 2>&1 || true
   docker run -d \
     --name "$HMOPT_CONTAINER" \
+    --shm-size="${HMOPT_SHM_SIZE:-2g}" \
     --env-file .env.docker \
     --add-host host.docker.internal:host-gateway \
     -p 7475:7474 -p 7688:7687 -p 7330:7330 -p 7332:7331 -p 7333:7333 -p 7334:7334 -p 7335:7335 -p 7336:7336 -p 8001:8000 \
