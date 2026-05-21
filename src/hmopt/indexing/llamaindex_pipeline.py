@@ -287,6 +287,49 @@ def _delete_code_summary_nodes(vector_store: Neo4jVectorStore, node_label: str) 
     )
 
 
+_SYMBOL_ID_SUFFIX_RE = re.compile(r":(\d+):([a-z_][a-z_0-9]*)$")
+
+
+def _path_from_symbol_id(symbol_id: str) -> Optional[str]:
+    """Extract the source file path component from a chunk symbol_id.
+
+    Both backends construct symbol_id as `path:qualname:start_line:kind`
+    (clangd_indexer._symbol_id, scip_clang._build_chunk). Importantly,
+    `qualname` may contain `::` (C++ namespaces / nested types) which
+    is TWO single ':' characters in a row — a naive rsplit(":", 3)
+    would split inside the qualname and return a wrong path.
+
+    Layout-driven parse: scan left-to-right for the first ':' that is
+    NOT adjacent to another ':' on either side. That separates path
+    from qualname. Then validate the tail matches `:line:kind` to
+    reject malformed ids ("only:two:fields" should return None).
+
+    Returns None if the id is malformed so callers can fall back
+    safely (treating it as "out of scope") rather than mis-attributing.
+
+    Assumes Linux-style paths (no ':' inside path). Windows paths
+    like `C:\\foo` would currently be parsed with `C` as the path,
+    which is wrong — out of scope for this codebase.
+    """
+    n = len(symbol_id)
+    for i in range(n):
+        if symbol_id[i] != ":":
+            continue
+        adjacent_colon = (
+            (i + 1 < n and symbol_id[i + 1] == ":")
+            or (i > 0 and symbol_id[i - 1] == ":")
+        )
+        if adjacent_colon:
+            continue
+        # Candidate path/qualname separator. Verify the suffix from
+        # this point forward includes the `:line:kind` tail; otherwise
+        # the id is malformed and we treat it as out of scope.
+        if _SYMBOL_ID_SUFFIX_RE.search(symbol_id, i + 1) is None:
+            return None
+        return symbol_id[:i]
+    return None
+
+
 def _prepare_incremental_code_nodes(
     nodes: list[TextNode],
     previous_manifest: dict[str, str],
@@ -314,8 +357,55 @@ def _prepare_incremental_code_nodes(
         changed_symbol_ids.append(symbol_id)
         symbol_nodes.append(node)
 
-    removed_symbol_ids = [symbol_id for symbol_id in previous_manifest if symbol_id not in current_manifest]
-    return symbol_nodes, removed_symbol_ids, unchanged_symbol_ids, changed_symbol_ids, summary_nodes, current_manifest
+    # Scoped removal: a symbol counts as "removed" only if THIS indexing
+    # run touched its source file but didn't re-emit that particular
+    # symbol — i.e. the file is in scope but the function/type/macro
+    # was deleted or renamed. Symbols whose source file the current
+    # run didn't touch at all are out of scope (they belong to a
+    # different repo or subtree indexed in an earlier run) and MUST be
+    # preserved both in Neo4j and in the persisted manifest.
+    #
+    # Without this scoping, a fresh `hmopt index-kernel --repo-path B/`
+    # after a previous `--repo-path A/` would compute the entire A
+    # manifest as "removed" (none of A's symbol_ids appear in B's
+    # current_manifest), then `_delete_code_symbol_nodes` would
+    # DETACH DELETE every A node + edge from Neo4j.
+    current_paths = {
+        path
+        for sid in current_manifest
+        if (path := _path_from_symbol_id(sid)) is not None
+    }
+    removed_symbol_ids = [
+        symbol_id
+        for symbol_id in previous_manifest
+        if symbol_id not in current_manifest
+        and (
+            (path := _path_from_symbol_id(symbol_id)) is not None
+            and path in current_paths
+        )
+    ]
+
+    # Build the manifest that will be persisted to disk. It must be the
+    # ACCUMULATED state across all indexing runs ever — not just this
+    # run's output — otherwise the next run loads only this run's
+    # symbols as `previous_manifest`, sees every out-of-scope symbol as
+    # "unknown", and either silently drops the cross-repo fingerprint
+    # cache (causing pointless re-embedding) or, worse, future runs'
+    # scope-detection breaks because `current_paths` from the next run
+    # doesn't include this run's paths.
+    accumulated_manifest = dict(previous_manifest)
+    for sid in removed_symbol_ids:
+        accumulated_manifest.pop(sid, None)
+    accumulated_manifest.update(current_manifest)
+
+    return (
+        symbol_nodes,
+        removed_symbol_ids,
+        unchanged_symbol_ids,
+        changed_symbol_ids,
+        summary_nodes,
+        accumulated_manifest,
+    )
 
 
 def _infer_embedding_dimension(embed: OpenAIEmbeddingLike) -> int:
@@ -839,7 +929,10 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
         unchanged_symbol_ids,
         changed_symbol_ids,
         summary_nodes,
-        current_manifest,
+        # 6th element is the ACCUMULATED manifest (previous + current -
+        # removed) — what we persist back to disk. NOT just this run's
+        # output; see `_prepare_incremental_code_nodes` for why.
+        accumulated_manifest,
     ) = _prepare_incremental_code_nodes(nodes, previous_manifest)
 
     embed_dim = _infer_embedding_dimension(embed)
@@ -906,7 +999,7 @@ def build_kernel_index(config: AppConfig, repo_path: Optional[str] = None) -> In
         _upsert_clangd_graph(storage, graph_index, nodes_to_insert)
 
     _safe_storage_persist(storage, paths.code_dir)
-    _persist_symbol_manifest(paths.code_dir, current_manifest)
+    _persist_symbol_manifest(paths.code_dir, accumulated_manifest)
     previous_embedding_meta = _load_embedding_metadata(paths.code_dir) or {}
     _persist_embedding_metadata(
         paths.code_dir,
