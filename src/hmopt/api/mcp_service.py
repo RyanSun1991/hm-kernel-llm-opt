@@ -350,11 +350,57 @@ def _render_markdown_payload(payload: dict[str, Any]) -> str:
         lines.append("")
         lines.append("## Graph Edges")
         for edge in edges:
+            # Append scip-clang call-site enrichments when present —
+            # `_call_site_fields` upstream only sets these fields on edges
+            # whose backend_origin produced them, so clangd-origin edges
+            # render exactly as before (no suffix).
+            suffix = ""
+            cs_path = edge.get("call_site_path")
+            cs_line = edge.get("call_site_line")
+            if cs_path and cs_line is not None:
+                cs_col = edge.get("call_site_col")
+                if cs_col is not None:
+                    suffix = f"  @{cs_path}:{cs_line}:{cs_col}"
+                else:
+                    suffix = f"  @{cs_path}:{cs_line}"
+                if edge.get("is_write") is True:
+                    suffix += " [write]"
             lines.append(
-                f"- {edge.get('src')} -[{edge.get('rel')}]-> {edge.get('dst')} (depth={edge.get('depth')})"
+                f"- {edge.get('src')} -[{edge.get('rel')}]-> {edge.get('dst')} "
+                f"(depth={edge.get('depth')}){suffix}"
             )
 
     return "\n".join(lines).strip()
+
+
+def _resolve_effective_backend(config: Any, requested: str | None) -> str | None:
+    """Decide which backend filter value to apply for an MCP request.
+
+    Resolution order:
+    1. If the caller explicitly passed `backend` (non-empty string), use
+       it. This includes "any" / "all" / "*" — the user is asking to
+       opt OUT of per-backend filtering even when app.yaml has one
+       configured.
+    2. Otherwise fall back to `config.indexing.backend` from app.yaml.
+       Users typically configure exactly one backend at a time; the
+       MCP layer should default to surfacing that backend's data so
+       graphs and snippets feel coherent with what the indexer wrote.
+    3. If app.yaml has neither field, return None — `_normalize_backend_filter`
+       downstream treats None as "no filter" and existing single-backend
+       deployments keep their current behavior.
+
+    Backward compatibility: a clangd-only deployment with
+    `config.indexing.backend = "clangd"` ends up filtering on "clangd"
+    by default, which `_backend_filter_for_relation` translates to
+    "backend_origin IS NULL OR backend_origin = 'clangd'". The IS NULL
+    branch picks up legacy nodes/edges written before the
+    backend_origin schema existed, so no historical data is hidden.
+    """
+    if requested is not None:
+        text = str(requested).strip()
+        if text:
+            return text
+    return getattr(getattr(config, "indexing", None), "backend", None) or None
 
 
 def retrieve_kernel_index_context(
@@ -369,6 +415,7 @@ def retrieve_kernel_index_context(
     runtime_hints: str = "",
     response_format: str = "markdown",
     config_path: str | None = None,
+    backend: str | None = None,
 ) -> str:
     scenario_name = _coerce_scenario(scenario, default="general")
     symbol_hints = _coerce_symbols(symbols or [])
@@ -382,6 +429,7 @@ def retrieve_kernel_index_context(
 
     config_file = resolve_mcp_config_path(config_path)
     config = load_app_config(config_file)
+    effective_backend = _resolve_effective_backend(config, backend)
     payload = retrieve_code_context(
         config,
         query_text,
@@ -392,6 +440,7 @@ def retrieve_kernel_index_context(
         focus_symbols=symbol_hints,
         graph_depth=graph_depth,
         scenario=scenario_name,
+        backend=effective_backend,
     )
     if not isinstance(payload, dict):
         # Defensive fallback in case an older retrieve_code_context implementation returns text.
@@ -418,6 +467,7 @@ def _call_general_tool(arguments: Mapping[str, Any], *, config_path: str | None 
         runtime_hints=parsed["runtime_hints"],
         response_format=parsed["response_format"],
         config_path=config_path,
+        backend=arguments.get("backend"),
     )
 
 
@@ -437,6 +487,7 @@ def _call_graph_tool(arguments: Mapping[str, Any], *, config_path: str | None = 
         runtime_hints=parsed["runtime_hints"],
         response_format=parsed["response_format"],
         config_path=config_path,
+        backend=arguments.get("backend"),
     )
 
 
@@ -456,6 +507,7 @@ def _call_hotspot_tool(arguments: Mapping[str, Any], *, config_path: str | None 
         runtime_hints=parsed["runtime_hints"],
         response_format=parsed["response_format"],
         config_path=config_path,
+        backend=arguments.get("backend"),
     )
 
 
@@ -565,9 +617,34 @@ def snippets_to_markdown(payload: dict[str, Any]) -> str:
         end = entry.get("end_line")
         lines.append("")
         lines.append(f"## {entry.get('symbol')} ({path}:{start}-{end})")
-        lines.append(
-            f"- chars={entry.get('char_count')} truncated={entry.get('truncated')}"
-        )
+        # scip-clang enrichments — only rendered when populated, so a
+        # clangd-origin snippet's output is identical to its pre-extension
+        # shape. backend tag goes on the stats line for auditability.
+        stats_parts = [
+            f"chars={entry.get('char_count')}",
+            f"truncated={entry.get('truncated')}",
+        ]
+        backend_tag = entry.get("backend_origin") or entry.get("parser")
+        if backend_tag:
+            stats_parts.append(f"backend={backend_tag}")
+        lines.append(f"- " + " ".join(stats_parts))
+        # Signature is short and high-signal: render it directly under
+        # the header so an LLM consumer sees the function shape before
+        # reading the body.
+        signature = entry.get("signature")
+        if signature:
+            lines.append(f"- Signature: `{signature}`")
+        # Documentation is a list of strings (one entry per doc comment
+        # block from SCIP). Render as a fenced docstring block so it
+        # reads as commentary rather than runnable code.
+        documentation = entry.get("documentation") or []
+        if documentation:
+            lines.append("- Documentation:")
+            lines.append("  ```")
+            for doc_line in documentation:
+                for raw in str(doc_line).splitlines():
+                    lines.append(f"  {raw}")
+            lines.append("  ```")
         lines.append("```c")
         lines.append(str(entry.get("text") or ""))
         lines.append("```")
@@ -590,6 +667,7 @@ def retrieve_kernel_call_chain(
     edge_kinds: list[str] | None = None,
     response_format: str = "markdown",
     config_path: str | None = None,
+    backend: str | None = None,
 ) -> str:
     coerced_symbols = _coerce_symbols(symbols, field_name="symbols")
     if not coerced_symbols:
@@ -610,6 +688,7 @@ def retrieve_kernel_call_chain(
 
     config_file = resolve_mcp_config_path(config_path)
     config = load_app_config(config_file)
+    effective_backend = _resolve_effective_backend(config, backend)
     payload = retrieve_call_chain(
         config,
         coerced_symbols,
@@ -619,6 +698,7 @@ def retrieve_kernel_call_chain(
         frontier_cap=cap,
         edge_kinds=kinds,
         output_format="json",
+        backend=effective_backend,
     )
     if not isinstance(payload, dict):
         return str(payload)
@@ -635,6 +715,7 @@ def retrieve_kernel_snippets(
     total_max_chars: int | None = None,
     response_format: str = "markdown",
     config_path: str | None = None,
+    backend: str | None = None,
 ) -> str:
     coerced = _coerce_symbols(symbols, field_name="symbols")
     if not coerced:
@@ -656,12 +737,14 @@ def retrieve_kernel_snippets(
 
     config_file = resolve_mcp_config_path(config_path)
     config = load_app_config(config_file)
+    effective_backend = _resolve_effective_backend(config, backend)
     payload = fetch_code_snippets(
         config,
         coerced,
         per_symbol_max_chars=per_max,
         total_max_chars=total_max,
         output_format="json",
+        backend=effective_backend,
     )
     if not isinstance(payload, dict):
         return str(payload)
@@ -681,6 +764,7 @@ def _call_call_chain_tool(arguments: Mapping[str, Any], *, config_path: str | No
         edge_kinds=arguments.get("edge_kinds"),
         response_format=arguments.get("response_format", "markdown"),
         config_path=config_path,
+        backend=arguments.get("backend"),
     )
 
 
@@ -691,6 +775,7 @@ def _call_snippets_tool(arguments: Mapping[str, Any], *, config_path: str | None
         total_max_chars=arguments.get("total_max_chars"),
         response_format=arguments.get("response_format", "markdown"),
         config_path=config_path,
+        backend=arguments.get("backend"),
     )
 
 
@@ -779,7 +864,16 @@ def build_fastmcp_server() -> Any | None:
         max_chars: int = 4000,
         graph_depth: int = 2,
         response_format: str = "markdown",
+        backend: str | None = None,
     ) -> str:
+        """Optional `backend` overrides the default backend filter.
+        When omitted, defaults to `config.indexing.backend` from
+        app.yaml so MCP queries surface the data produced by whichever
+        indexer the deployment is actually using — no explicit flag
+        needed for the common case. Pass "scip-clang" or "clangd" to
+        force one backend (useful when running A/B comparisons across
+        a graph that has both backends' data). Pass "any" / "all" /
+        "*" to disable filtering entirely."""
         arguments: dict[str, Any] = {
             "query": query,
             "scenario": scenario,
@@ -790,6 +884,7 @@ def build_fastmcp_server() -> Any | None:
             "max_chars": max_chars,
             "graph_depth": graph_depth,
             "response_format": response_format,
+            "backend": backend,
         }
         return _call_general_tool(arguments)
 
@@ -808,7 +903,9 @@ def build_fastmcp_server() -> Any | None:
         max_snippets: int = 12,
         max_chars: int = 5000,
         response_format: str = "markdown",
+        backend: str | None = None,
     ) -> str:
+        """See `kernel_index_code` for `backend` semantics."""
         arguments: dict[str, Any] = {
             "query": query,
             "symbols": symbols,
@@ -817,6 +914,7 @@ def build_fastmcp_server() -> Any | None:
             "max_snippets": max_snippets,
             "max_chars": max_chars,
             "response_format": response_format,
+            "backend": backend,
         }
         return _call_graph_tool(arguments)
 
@@ -834,7 +932,9 @@ def build_fastmcp_server() -> Any | None:
         top_k: int | None = None,
         graph_depth: int = 3,
         response_format: str = "markdown",
+        backend: str | None = None,
     ) -> str:
+        """See `kernel_index_code` for `backend` semantics."""
         arguments: dict[str, Any] = {
             "query": query,
             "symbols": symbols,
@@ -842,6 +942,7 @@ def build_fastmcp_server() -> Any | None:
             "top_k": top_k,
             "graph_depth": graph_depth,
             "response_format": response_format,
+            "backend": backend,
         }
         return _call_hotspot_tool(arguments)
 
@@ -862,7 +963,9 @@ def build_fastmcp_server() -> Any | None:
         frontier_cap: int = 50,
         edge_kinds: list[str] | None = None,
         response_format: str = "markdown",
+        backend: str | None = None,
     ) -> str:
+        """See `kernel_index_code` for `backend` semantics."""
         arguments: dict[str, Any] = {
             "symbols": symbols,
             "direction": direction,
@@ -871,6 +974,7 @@ def build_fastmcp_server() -> Any | None:
             "frontier_cap": frontier_cap,
             "edge_kinds": edge_kinds,
             "response_format": response_format,
+            "backend": backend,
         }
         return _call_call_chain_tool(arguments)
 
@@ -887,10 +991,13 @@ def build_fastmcp_server() -> Any | None:
         per_symbol_max_chars: int = 4000,
         total_max_chars: int | None = None,
         response_format: str = "markdown",
+        backend: str | None = None,
     ) -> str:
+        """See `kernel_index_code` for `backend` semantics."""
         arguments: dict[str, Any] = {
             "symbols": symbols,
             "per_symbol_max_chars": per_symbol_max_chars,
+            "backend": backend,
             "total_max_chars": total_max_chars,
             "response_format": response_format,
         }
