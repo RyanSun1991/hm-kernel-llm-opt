@@ -2,748 +2,493 @@
 
 | 项 | 值 |
 |---|---|
-| 文档状态 | Draft v1.1（待团队评审） |
+| 文档状态 | Draft v2.0（待团队评审） |
 | 日期 | 2026-05-27 |
 | 适用范围 | `.opencode/` harness 的团队化演进；新增独立中央仓 `hm-skill-hub` |
-| 语言策略 | 散文 zh-CN；路径 / 字段名 / 代码 / CLI / commit 一律英文（遵循 `.opencode/config.yaml`）|
-| 关联文档 | `.opencode/docs/harness_engineer_system.md`、`.opencode/docs/memory_system.md`、`docs/HMOPT_Three_Layer_Architecture_CN.md` |
-| 修订 | v1.1：补全 §4.5（产物归宿三原型轴）、§6.1 procedural 目录、§6.2 完整消费端布局、§6.3 目录迁移归宿表 + 两仓视图、路径兼容迁移项（§15/§16）|
+| 语言策略 | 散文 zh-CN；路径 / 字段名 / 代码 / CLI / commit 一律英文 |
+| 关联文档 | `.opencode/docs/harness_engineer_system.md`、`.opencode/docs/memory_system.md` |
+| 修订 | v2.0：新增 §6.2「skills/ 内部布局」；中后段整体精简（删比对脚注、压缩 schema、合并治理/稳定/可用） |
 
 ---
 
-## 0. TL;DR（一页结论）
+## 0. TL;DR
 
-现有 `.opencode/` 把**两类性质完全不同的资产**混在一个目录里：
+现有 `.opencode/` 把**两类性质不同的资产**混在一起：
 
 - **Skills（过程性指令）**——可被 eval 衡量、可被优化的「程序」。
-- **Knowledge（事实 / 记忆）**——不断追加、需去重与冲突消解的「学习到的状态」。
+- **Knowledge（事实/记忆）**——不断追加、需去重与冲突消解的「学习到的状态」。
 
-**本方案的脊柱：把这两类拆开，用两套不同的「合并引擎」和「质量门」分别治理，再通过一条带验证门的「沉淀漏斗」把团队每个成员的本地经验汇入一个独立的、语义化版本管理的中央仓 `hm-skill-hub`，并以 pinned 版本反向喂回 pipeline，形成闭环。**
+**方案脊柱**：把两类拆开、用两套合并引擎分治，再通过一条带验证门的「沉淀漏斗」把每个成员的本地经验汇入一个独立、semver 版本化的中央仓 `hm-skill-hub`，并以 pinned 版本反向喂回 pipeline，形成闭环。
 
-- 过程性 **Skills** → 用 **SkillOpt** 思路治理：技能文档 = 冻结模型的「可训练外部参数」，任何修改必须通过**留出验证集（eval 套件）严格变好才接受**；用 **GEPA Pareto 前沿**解决「多成员互补但互斥的编辑」塌缩问题。
-- 事实性 **Knowledge** → 用 **memU / Mem0 / Zep** 思路治理：分层、类型化、稳定 ID、**追加 + 去重 + 冲突消解**（而非 git 行级合并）、双时态保留被取代记录。
+- **Skills** → 用 **SkillOpt** 治理：技能文档 = 冻结模型的「可训练外部参数」，改动必须在留出 eval 套件上**严格变好**才接受；用 **GEPA Pareto** 解决多成员编辑塌缩。
+- **Knowledge** → 用 **memU/Mem0/Zep** 治理：分层、类型化、稳定 ID、**追加+去重+冲突消解**（非 git 行级合并）、双时态保留被取代记录。
 
-四个核心保证：**可迭代**（定时 SkillOpt 优化作业）、**可沉淀**（三层 + L0–L3 成熟度阶梯）、**可闭环**（消费→蒸馏→晋升→eval 发布→再消费）、**稳定可用**（semver + lockfile + eval-gate + 本地兜底 + 脱敏门）。
-
----
-
-## 1. 背景与问题陈述
-
-### 1.1 现状（as-is）
-
-`.opencode/` 已具备「流程编排 + 记忆沉淀 + 技能复用」的雏形：
-
-- **多 Agent 分阶段流水线**（`docs/harness_engineer_system.md`）：
-  `intake → research → plan review(GATE) → implement → code review(GATE) → test(A/B) → decision`，
-  hub-and-spoke 委派（仅 `os-opt-manager` 持 `delegate`），每阶段强制 handoff packet，硬门禁不可跳过。
-- **Skills = 路径加载的指令包**（非厂商 API），`@`-inline 进上下文后传播给所有子代理。
-- **记忆系统已是分层 + 追加 + 去重的雏形**：
-
-  | 存储 | 粒度 | 角色 |
-  |---|---|---|
-  | `memory/targets/<t>.md` | 每目标 | 稳定结构事实 |
-  | `memory/subsystems/<s>.md` | 每子系统 | 跨任务复用知识 |
-  | `memory/global_lessons.md` | 全局 | 启发式 / 反模式 |
-  | `memory/human_decisions/<slug>.md` | 每目标、按轮次 | 人机决策时间线（实时落盘、抗压缩）|
-  | `memory/idea_ledger/<slug>.md` | 每条机制 | 稳定 ID（`L001`，永不复用/删除），状态机 `approved/landed/rejected/reverted/deferred` |
-  | `state/bad_plans.md` | 全局/子系统 | 反向去重 |
-
-- **已有闭环意识**：`iterative-optimization.md`（auto-iterate 多轮）、`optimization-funnel.md`（5-想法漏斗 + 强制去重）、`harness-engineer-instruction-count-upgrade_plan.md`（系统已在用自己的流水线优化自己的 harness）。
-
-### 1.2 缺口（gap）
-
-现状距离「团队级可沉淀、可复用、可闭环」还差三件事：
-
-1. **跨成员汇聚机制**——每个成员的沉淀只活在本地 `.opencode/`，无法统一。
-2. **统一质量门禁标准**——晋升为 memory 的判据是人工、口头、不可机器校验的。
-3. **自动化迭代优化闭环**——技能靠手工改文案，没有 SkillOpt 式的「验证门 + 有界编辑 + 拒绝缓冲」。
-
-### 1.3 关键观察
-
-现有的「idea_ledger 行（追加 / 稳定 ID / 状态机）→ 蒸馏 → global_lessons」这条**本地晋升链**，正是要放大到**跨成员、跨仓库**的那条链。本方案不是推倒重来，而是**把这条链外置、加门、加合并器**。
+四个保证：**可迭代**（定时优化作业）、**可沉淀**（三层 + L0–L3）、**可闭环**（消费→蒸馏→晋升→发布→再消费）、**稳定可用**（semver + lockfile + eval-gate + 本地兜底 + 脱敏门）。
 
 ---
 
-## 2. 设计目标与非目标
+## 1. 背景与缺口
 
-### 2.1 目标
+`.opencode/` 已有「流程编排 + 记忆沉淀 + 技能复用」的雏形：分阶段流水线（`research → plan review → implement → code review → test → decision`，硬门禁）、路径加载的指令包（skills）、分层记忆：
 
-| 目标 | 含义 | 主要支撑机制 |
+| 存储 | 角色 |
+|---|---|
+| `memory/targets/` `memory/subsystems/` | 结构事实 |
+| `memory/global_lessons.md` | 启发式 / 反模式 |
+| `memory/human_decisions/` | 人机决策时间线（实时落盘）|
+| `memory/idea_ledger/` | 每机制裁决，稳定 ID（`L001`），状态机 `approved/landed/rejected/...` |
+| `state/bad_plans.md` | 反向去重 |
+
+**距离团队级闭环还差三件事**：① 跨成员汇聚机制（沉淀只活在本地）；② 统一的、可机器校验的质量门；③ 自动化迭代（技能靠手工改文案，无验证门）。
+
+**关键观察**：现有「idea_ledger 行 → 蒸馏 → global_lessons」这条本地晋升链，正是要放大到跨成员、跨仓库的那条链。本方案是把它**外置 + 加门 + 加合并器**，而非推倒重来。
+
+---
+
+## 2. 目标与非目标
+
+| 目标 | 主要支撑 |
+|---|---|
+| 可迭代 | 定时优化作业（§11）|
+| 可沉淀 | 三层 + L0–L3（§4）|
+| 可闭环 | 闭环架构（§5）+ eval-gate（§9）|
+| 可复用 | SKILL.md 标准 + hub/local 叠加（§12）|
+| 稳定可用 | eval-gate + semver + lockfile + 本地兜底（§13）|
+
+**非目标**：不整体搬走 `.opencode/`（执行面贴近代码）；首期不引入重型基础设施（优先 git + 文件 + 轻量索引）；不做模型微调（沿用 SkillOpt 零推理开销）；不追实时同步（分钟～天级批量）。
+
+---
+
+## 3. 业界调研映射
+
+| 来源 | 核心机制 | 角色 |
 |---|---|---|
-| 可迭代 | 技能/知识能随使用持续演进 | 定时 SkillOpt 优化作业（§11）|
-| 可沉淀 | 经验能被结构化、分级、固化 | 三层 + L0–L3 成熟度阶梯（§8）|
-| 可闭环优化 | 消费→产出→晋升→发布→再消费 | 闭环架构（§5）+ eval-gate（§9）|
-| 可复用 | 跨成员、跨子团队、跨工具复用 | SKILL.md 标准 + hub/local 叠加（§12）|
-| 稳定性 | 发布不回归、可回滚、可审计 | eval-gate + semver/tag + scorecard（§14）|
-| 可用性 | 中央仓故障不阻塞本地优化 | lockfile + vendored 本地兜底（§12.3）|
+| **SkillOpt**（arXiv 2605.23904）| 技能=可训练外部状态；有界 add/delete/replace 编辑；留出验证集严格变好才接受；文本学习率 + 被拒编辑缓冲 + 慢更新；产出 `best_skill.md` | Skills 引擎 B + 质量门 |
+| **memU** | 三层 Resource→Item→Category；Memory-as-File-System；RAG + LLM 双检索；`where` 作用域 | Knowledge 分层与检索；hub/local 叠加 |
+| **Mem0 / Mem0g** | 两阶段抽取→冲突检测+消解；Conflict Detector → LLM 消解 | Curator 合并器 |
+| **Zep / Graphiti** | 双时态，事实带失效时间 | 被取代记录不删除（`superseded`）|
+| **ExpeL** | 成败池 → 抽取洞见 ADD/UPVOTE/DOWNVOTE/EDIT | 晋升打分与衰减 |
+| **GEPA** | 反思式进化 + Pareto 前沿（保留互补候选，非单一最优）| 避免多成员编辑塌缩 |
+| **Voyager** | 增长式技能库，入库前自验证，可组合 | 技能库范式 + 组合复用 |
+| **Anthropic Agent Skills** | SKILL.md 开放标准；plugin 分发；project-scope 版本控制共享；marketplace 安全扫描 | 分发与互操作标准 + 治理 |
 
-### 2.2 非目标
-
-- **不**追求把 `.opencode/` 整体搬走——执行面继续贴近代码与任务上下文。
-- **不**在第一阶段引入重型基础设施（图数据库集群等）；优先 git + 文件 + 轻量索引。
-- **不**做模型微调——沿用 SkillOpt「冻结模型、训练文档」的零推理开销路线。
-- **不**追求实时秒级同步——团队知识以「分钟～天」级批量沉淀为节奏。
-
----
-
-## 3. 业界调研与映射
-
-| 来源 | 核心机制 | 在本方案中的角色 |
-|---|---|---|
-| **Microsoft SkillOpt**（arXiv 2605.23904, 2026-05）| 技能=冻结模型的可训练外部状态；优化器把打分 rollout 转成**有界 add/delete/replace 编辑**；编辑只有在**留出验证集严格变好**时才接受；稳定性靠「文本学习率预算 + 被拒编辑缓冲 + epoch 慢更新」；产出 `best_skill.md`，跨模型/harness 可迁移 | **Skills 合并引擎 B + 质量门**：CI eval-gate=发布门；有界编辑=每次发布的文本学习率；被拒编辑缓冲=`bad_edits` 注册表；`best_skill.md`=发布制品 |
-| **memU**（NevaMind-AI）| 三层 Resource→Item→Category；Memory-as-File-System；自动归类 + 交叉引用成知识图；RAG（快）+ LLM（深）双检索；多智能体 `where` 作用域过滤 | **Knowledge 分层与检索**：Tier 0/1/2；hub（团队）vs local（个人）= `where` 作用域叠加 |
-| **Mem0 / Mem0g**（2026-04）| 两阶段：抽取 → 冲突检测 + 图更新；三作用域（user/session/agent）；Conflict Detector 标记重叠 → LLM 消解 | **Curator 合并器**：去重 + 矛盾检测 + LLM 消解 |
-| **Zep / Graphiti**（2025-01）| 双时态知识图，事实带「发生时间 + 失效时间」 | **被取代记录不删除**（打 `superseded` + 有效期，可审计）|
-| **ExpeL**（arXiv 2308.10144）| 成败经验池 → 抽取跨任务洞见，对洞见做 ADD/UPVOTE/DOWNVOTE/EDIT；正向迁移 | **晋升打分与衰减**：confirmations 多→升权，反例→降权 |
-| **GEPA**（arXiv 2507.19457, ICLR'26 Oral）| 反思式 prompt 进化 + **Pareto 前沿**（保留在某实例上最优的一组候选，而非单一全局最优）；用自然语言反馈而非标量奖励 | **避免多成员编辑塌缩**：技能候选保留为 Pareto 前沿，定期合并互补 lesson |
-| **Voyager**（arXiv 2305.16291）| 永不停止增长的技能库；入库前**自验证**；按 embedding 检索、可组合 | **技能库范式**：入库前必过验证；组合式复用；抗灾难性遗忘 |
-| **Anthropic Agent Skills / SKILL.md**（2025-12 开放标准）| SKILL.md=YAML frontmatter + 指令；plugin=分发、skill=内容；project-scope 经版本控制共享；marketplace 带安全扫描与策展 | **分发与互操作标准 + 治理**：submodule=project-scope 共享；secret-scan/lint CI=marketplace 安全扫描；跨 OpenCode/Claude Code/Codex 复用 |
-
-**研究结论**：SkillOpt 给「技能优化工程化范式」（有界编辑 / 验证门 / 拒绝缓冲 / 慢更新），memU 给「记忆资产组织范式」（层级化 / 结构化 / 可追溯 / 可迁移）；与本系统最契合的做法是——**保留 `.opencode/` 作为执行面，新增 hub 作为组织资产面，用 CI + eval 把「经验沉淀」变成「可验证迭代」**。
+**结论**：SkillOpt 给「技能优化工程化范式」，memU 给「记忆资产组织范式」；最契合做法——保留 `.opencode/` 为执行面，新增 hub 为资产面，用 CI + eval 把「经验沉淀」变成「可验证迭代」。
 
 ---
 
 ## 4. 核心设计原则（脊柱）
 
-### 4.1 原则一：两类资产必须分治（全案最重要决定）
+### 4.1 两类资产分治（最重要决定）
 
 | | **Skills（过程性）** | **Knowledge（事实/记忆）** |
 |---|---|---|
-| 业界对应 | SkillOpt / Anthropic SKILL.md / Voyager | memU / Mem0 / Zep / ExpeL / idea_ledger |
-| 基数 | 少、密、可人工审 | 多、稀疏、需索引 |
-| 增长方式 | **就地编辑**（add/delete/replace）| **追加 + 合并 + 去重** |
-| 质量门 | **eval 套件回归门**（留出验证）| **证据 + 出处 + 去重/冲突消解** |
-| 消费方式 | `@`-inline 进上下文 | 按需检索（RAG + ledger 查表）|
-| 节奏 | 慢、批量、epoch 式发布 | 持续 |
-| 合并引擎 | **引擎 B**：验证门竞争式编辑 + Pareto | **引擎 A**：集合并 + 去重 + 冲突消解 |
+| 增长 | 就地编辑（add/delete/replace）| 追加 + 合并 + 去重 |
+| 质量门 | eval 套件回归门 | 证据 + 出处 + 冲突消解 |
+| 消费 | `@`-inline 进上下文 | 按需检索（RAG + ledger）|
+| 合并引擎 | **B**：验证门竞争式编辑 + Pareto | **A**：集合并 + 去重 + 冲突消解 |
 
-> **反模式警告**：用同一套 git 行级合并治理两者，是绝大多数「团队记忆仓」失败的根因——知识会重复/自相矛盾，技能会被某人一周的坏经验覆盖。**两套引擎、两种节奏、两道门，分开走。**
+> **反模式**：用同一套 git 行级合并治理两者——知识会重复/自相矛盾，技能会被某人一周的坏经验覆盖。**两套引擎、两道门，分开走。**
 
-### 4.2 原则二：三层知识层级（memU raw→item→category 的工程化）
+### 4.2 三层 + L0–L3 成熟度
 
-- **Tier 0 — 运行轨迹**（本地、每成员）：raw rollout = live session 制品（`current_task.json`、live `human_decisions` 追加、`*_design.md`、`plans/`、`reviews/`、`bench/`）。高量低信噪、可能含设备序列号/密钥。**不直接共享**，是蒸馏输入。durability 按产物分（纯运行态可易失；证据类建议提交业务仓留存——见 §6.3）。
-- **Tier 1 — 候选沉淀**（本地→暂存）：从 Tier 0 蒸馏出的**带 schema 的结构化单元**（idea_ledger 行、target/subsystem 笔记、validated delta、bad_plan）。每条带出处 + 证据 + 置信分。**被提议晋升**。
-- **Tier 2 — 核心共享资产**（中央仓、团队级）：经验证、去重、合并后的 `best_skill.md` / 策展知识。**反向喂回 pipeline**。
+三层（memU raw→item→category 的工程化）：
 
-### 4.3 原则三：L0–L3 成熟度阶梯（与三层正交）
+- **Tier 0 运行轨迹**（本地、每成员）：live session 制品（`current_task.json`、`*_design.md`、`plans/reviews/bench`）。低信噪、可能含密钥，**不直接共享**，是蒸馏输入。
+- **Tier 1 候选沉淀**（本地→staging）：从 Tier 0 蒸馏出的带 schema 结构化单元，附出处+证据+置信分，**被提议晋升**。
+- **Tier 2 核心共享**（中央仓）：经验证、去重、合并后的 `best_skill.md` / 策展知识，**反向喂回**。
 
-成熟度刻画「一条沉淀有多可信、可被多大范围复用」，叠加在三层之上：
+成熟度（与三层正交，刻画「多可信、可复用多广」）：
 
-| 等级 | 名称 | 判据 | 所在层 | 可见范围 |
-|---|---|---|---|---|
-| **L0** | draft 草稿 | 仅本地、未结构化 | Tier 0/1 | 仅本人项目 |
-| **L1** | candidate 候选 | 结构化完整（字段齐全）+ 初始证据 | Tier 1（staging）| PR 评审中 |
-| **L2** | stable 稳定 | 通过团队评审 + eval 套件达标 | Tier 2 | 全团队 |
-| **L3** | core 核心 | 跨子团队复用成功 | Tier 2 / `skills/core` | 组织级金标准 |
+| 等级 | 判据 | 范围 |
+|---|---|---|
+| **L0** draft | 本地草稿 | 本人项目 |
+| **L1** candidate | 结构化完整 + 初始证据 | PR 评审中 |
+| **L2** stable | 团队评审 + eval 达标 | 全团队 |
+| **L3** core | 跨子团队复用成功 | 组织金标准（`skills/core/`）|
 
-晋升只能逐级（L0→L1→L2→L3），且每级有明确门（§9）。降级与废弃见 §13.3。
+晋升逐级（L0→L1→L2→L3），每级有门（§9）。
 
-### 4.4 原则四：可追溯优先（provenance-first）
+### 4.3 三原型轴：每个产物的唯一归宿
 
-每条 Tier 2 记录必须回链到产生它的 run / 成员 / 证据（commit、review、bench 输出、scorecard）。**无出处 = 不可入库**。这是可信、可审计、可调试「agent 当初为何这么做」的基础。
+「两类资产」落到目录时展开成**三个原型**——决定每个文件去哪的唯一一条轴：
 
-### 4.5 原则五：每个产物只有一个归宿（procedural / knowledge / evidence 三原型）
+> **它是「程序」（过程、团队共享、可被 eval 优化），还是某次「运行的产物」（证据/轨迹、个人本地）？**
 
-§4.1 的「两类资产」落到目录时展开成**三个原型**——决定每个文件去哪的唯一一条轴是：
+| 原型 | 含义 | 归宿 |
+|---|---|---|
+| **procedural-shared** | agents / skills / commands / pipelines / harness 规范 / `*_template.md` | **hub** |
+| **knowledge-curated** | facts / rules / patterns / anti_patterns / idea_ledger | **hub** `knowledge/`（只放蒸馏精华）|
+| **run-evidence-local** | plans / reviews / bench / patches / 每次 design / current_task | **业务仓** `local/`；纯运行态 gitignore |
 
-> **它是「程序」（过程性、团队共享、可被 eval 优化），还是某次「运行的产物」（证据/轨迹、个人本地）？**
+互斥且穷尽：`.opencode/` 每个文件恰好落入其一（详见 §6.4）。**关键推论**：`agents/` 与 `skills/` 同属 procedural-shared，一起进 hub；`bench/`/`reviews/` 属 run-evidence-local，留业务仓，只有蒸馏精华晋升 hub。
 
-| 原型 | 含义 | 增长/合并 | 归宿 |
-|---|---|---|---|
-| **procedural-shared** | 程序：agents / skills / commands / pipelines / harness 规范 / 各类 `*_template.md` | 就地编辑（引擎 B）| **hub**（经 `.opencode/hub/` 只读拉回）|
-| **knowledge-curated** | 策展事实：facts / rules / patterns / anti_patterns / idea_ledger | 追加+去重+冲突（引擎 A）| **hub** `knowledge/`（只放蒸馏后的精华）|
-| **run-evidence-local** | 运行产物：plans / reviews / bench / patches / 每次 `*_design.md` / current_task | 不合并、按 run 归档 | **业务仓** `.opencode/local/`；纯运行态 gitignore |
+### 4.4 可追溯优先
 
-三原型互斥且穷尽：`.opencode/` 里每个文件恰好落入其一（详见 §6.3 迁移表）。**关键推论**：`agents/` 与 `skills/` 同属 procedural-shared（agent 定义也是「可被 SkillOpt 优化的文本」），所以一起进 hub；`bench/` / `reviews/` 属 run-evidence-local，留业务仓，只有其蒸馏出的 validated delta / 反模式才晋升到 hub。
+每条 Tier 2 记录必须回链产生它的 run/成员/证据。**无出处 = 不可入库**。
 
 ---
 
 ## 5. 总体架构与闭环
 
 ```
-   ┌────────────────────── hm-skill-hub (Tier 2, 团队共享, semver) ──────────────────────┐
-   │                                                                                      │
-   │   skills/  (引擎 B: SkillOpt 门 + GEPA Pareto)     knowledge/ (引擎 A: memU 合并)     │
-   │      └─ best_skill.md / candidates/ / evals/          └─ 类型化记录 / idea_ledger     │
-   │                                                                                      │
-   └───────▲─────────────────────────────────────────────────────────────┬──────────────┘
-           │ (4) 发布: eval-gate 通过 → 升版本 + tag + scorecard            │ (1) 消费:
-           │                                                                │   submodule pin
-   (3) 晋升/合并 (Curator-agent + CI)                                       │   + skill-memory.lock
-       去重 / 冲突消解 / eval-gate / Pareto-merge / 脱敏                     │   + RAG/ledger 检索
-           ▲                                                                ▼
-           │                                                   ┌──────────────────────────┐
-       staging/ (Tier 1 候选, 类型化 + 证据)                    │  pipeline 运行 (每成员)    │
-           ▲                                                   │  manager→research→plan-rev │
-           │ (2) 收口点蒸馏 Tier0→1 (hmopt sediment)            │  →code→code-rev→test→dec   │
-           │     idea_ledger 行 / target 笔记 /                 └────────────┬─────────────┘
-           └───────────────  validated delta / bad plan ◄───────────────────┘ Tier 0 本地沉淀
+   ┌──────────────── hm-skill-hub (Tier 2, 团队共享, semver) ────────────────┐
+   │   skills/ (引擎 B: SkillOpt + Pareto)     knowledge/ (引擎 A: memU 合并) │
+   └──────▲────────────────────────────────────────────────┬───────────────┘
+          │ (4) 发布: eval-gate 通过 → 升版本+tag+scorecard   │ (1) 消费: submodule pin
+          │                                                   │   + skill-memory.lock + 检索
+   (3) 晋升/合并 (Curator + CI)                               ▼
+      去重/冲突/eval/Pareto/脱敏                  ┌──────────────────────────┐
+          ▲                                       │  pipeline 运行 (每成员)    │
+      staging/ (Tier 1 候选)                       └────────────┬─────────────┘
+          ▲                                                     │ (2) 收口点蒸馏 Tier0→1
+          └──────────  validated delta / 反模式 / ledger 行 ◄───┘
 ```
 
-**闭环四步**：
+1. **消费**：pipeline 启动从 hub 拉 pinned 版本（submodule + lock）。
+2. **蒸馏**：运行中在收口点产出 Tier 0→1 候选（`hmopt sediment`）。
+3. **晋升/合并**：候选打包成 PR；Curator + CI 跑去重/冲突/eval/脱敏，分引擎合并。
+4. **发布**：eval-gate 通过则升版本、打 tag、出 scorecard；pipeline 重新 pin。
 
-1. **消费**：pipeline 启动时从 hub 拉取 pinned 版本的稳定技能与知识快照（submodule + `skill-memory.lock`）。
-2. **蒸馏**：运行中在收口点产出 Tier 0 → Tier 1 候选（`hmopt sediment`）。
-3. **晋升/合并**：`hmopt sediment` 把符合条件的候选打包成 PR；Curator-agent + CI 跑去重/冲突/eval/脱敏门，分引擎合并。
-4. **发布**：eval-gate 通过则升 hub 版本、打 tag、生成 scorecard 与 release notes；pipeline 重新 pin。
-
-每一环都有门，脏数据不会滚雪球。
+每环有门，脏数据不滚雪球。
 
 ---
 
 ## 6. 仓库布局
 
-### 6.1 中央技能仓 `hm-skill-hub`（独立 git 仓、semver 打标）
+### 6.1 中央仓 `hm-skill-hub`（semver 打标）
 
 ```text
 hm-skill-hub/
-  README.md
-  CONTRIBUTING.md                  # 沉淀协议: 何时/如何贡献
-  GOVERNANCE.md                    # CODEOWNERS / 评审规则 / 发布节奏
-  registry.yaml                    # 清单: skill 列表 + 版本 + eval 状态 + owner
-  CHANGELOG.md                     # 全仓发布日志
-
-  schemas/                         # 每种记录的 JSON-Schema (lint 门)
-    memory_item.schema.json
-    idea.schema.json
-    skill_frontmatter.schema.json
-    skill_patch.schema.json
-    scorecard.schema.json
-
-  skills/                          # Tier 2 过程性技能 (引擎 B, SKILL.md 标准)
-    core/                          # L3 金标准 (跨子团队验证)
-      optimization-funnel/
-        SKILL.md                   # YAML frontmatter + 正文
-        best_skill.md              # 当前验证通过制品 (SkillOpt 产出)
-        CHANGELOG.md
-        evals/                     # ★本技能的留出验证集 (全案最关键资产)
-          cases/*.yaml
-          rubric.md
-        candidates/                # GEPA Pareto 前沿候选 (待合并互补 lesson)
-        scorecards/                # 每版本一张评测卡
-      stage-gate-enforcement/
-    domain/                        # L2 领域技能
-      kernel/
-        flash-device-operations/
-        ab-test-comparison/
-      storage/
-
-  # —— 以下与 skills/ 同属 procedural-shared (引擎 B), 一并由 hub 统一版本化 ——
-  agents/                          # agent 定义 (os-opt-manager / kernel-research / ...): 团队共享, 同受 SkillOpt 优化
-  commands/                        # slash-command 入口
-  pipelines/                       # 一键 pipeline 预设卡
-  docs/                            # harness 规范 (harness_engineer_system.md 等) + 各类 *_template.md (产物模板属程序)
-
-  knowledge/                       # Tier 2 策展记忆 (引擎 A, memU/Mem0 分层)
-    global/
-      lessons/G001-*.md            # global_lessons.md 拆成"每 lesson 一文件"
-      anti_patterns/A001-*.md
-    subsystems/
-      mm/<s>.md
-      fs/<s>.md
-    targets/
-      <target_slug>/
-        facts/F001-*.md
-        decisions/                 # 来自 human_decisions 的稳定摘要
-        idea_ledger.md             # 合并后的权威 ledger (追加, 稳定 ID)
-    index/                         # 向量索引清单 (faiss/pgvector) 或重建配方
-
-  evidence/                        # 可验证证据 (防"口头经验")
-    benchmarks/
-    regressions/
-
-  eval/                            # SkillOpt 式验证门资产
-    task_suites/                   # 留出任务集 (按场景组织)
-    scorecards/                    # 全局评测卡汇总
-
-  policies/                        # 一等治理文档
-    promotion_policy.md            # 何时可沉淀 / 晋升判据
-    merge_policy.md                # 两套合并引擎规则
-    deprecation_policy.md          # 废弃与失效治理
-
-  staging/                         # Tier 1 入站候选 (成员 PR 落区, 策展前)
-    <member>/<date>/*.json
-
-  tools/                           # 沉淀/合并/评测 CLI + curator 提示词
-    sediment.py
-    merge_curator.md               # Curator-agent 提示词
-    run_evals.py
-    lint.py
-    dedup.py
-    redact.py                      # 脱敏
-
-  releases/
-    skill-memory-<semver>/         # 发布快照 (供 lock 引用)
-
-  .github/workflows/               # CI: lint + secret-scan + eval-gate + index-build
-    ci.yml
+  registry.yaml                # 清单: skill 列表 + 版本 + eval 状态 + owner
+  schemas/                     # 每种记录的 JSON-Schema (lint 门)
+  skills/                      # Tier 2 过程性技能 (引擎 B) —— 内部布局见 §6.2
+  knowledge/                   # Tier 2 策展记忆 (引擎 A, memU/Mem0 分层)
+    global/lessons/  global/anti_patterns/
+    subsystems/<s>.md
+    targets/<slug>/{facts/, decisions/, idea_ledger.md}
+    index/                     # 向量索引清单或重建配方
+  evidence/{benchmarks/, regressions/}    # 可验证证据
+  eval/{task_suites/, scorecards/}        # SkillOpt 验证门资产
+  policies/{promotion,merge,deprecation}.md
+  staging/<member>/<date>/*.json          # Tier 1 入站候选
+  tools/{sediment,run_evals,lint,dedup,redact}.py  merge_curator.md
+  .github/workflows/ci.yml     # lint + secret-scan + eval-gate + index-build
 ```
 
-**为何把 `global_lessons.md` / ledger 拆成「每条一文件 / 稳定 ID 一行」？** 这是让合并可行的关键：不同 ID = 不同文件/不同行 ⇒ git 行级冲突几乎消失，合并退化为「集合并」，真正的去重/冲突交给 Curator 语义处理（§10.1）。
+`knowledge/` 把 `global_lessons.md`/ledger 拆成「每条一文件 / 稳定 ID 一行」——不同 ID = 不同文件，git 行级冲突几乎消失，去重/冲突交给 Curator 语义处理（§10）。
 
-### 6.2 消费端：`.opencode/` 瘦身为「共享 + 本地」叠加
+### 6.2 skills/ 内部布局
+
+kernel 工作横跨**目录/子模块/文件/函数/招式**等多个维度。若按拓扑建树会组合爆炸，且 rebase 即烂。**唯一原则**：
+
+> skill 树只按「技能种类/稳定性」分层；**比 subsystem 更细的维度（dir/file/function）不是 skill，而是 knowledge**，运行时由 selector 挂载。
+
+每个维度的归宿：
+
+| kernel 维度 | 归宿 |
+|---|---|
+| 流程 / 跨切面 | `skills/core/<name>/` |
+| 优化招式（mechanism）| `skills/technique/<name>/` |
+| 子系统（subsystem）| `skills/domain/<subsystem>/` ← **skills 里唯一触及拓扑的层** |
+| 目录（dir glob）| domain skill 的 `applies_to.path_globs`（不单独建目录）|
+| 文件（file）| `knowledge/targets/<slug>/facts/` + selector |
+| 函数（function/symbol）| `knowledge/` idea_ledger + `symbol_selectors` |
+
+只有 3 个维度是真正的 skill 文件夹；file/function 全部沉到 `knowledge/`，从根上消灭爆炸：
+
+```text
+skills/
+  core/                          # 过程性·拓扑无关·跨所有子系统 (L3, SkillOpt 重点)
+    optimization-funnel/  instruction-count-first/  stage-gate-enforcement/
+    handoff-contract/  research-discipline/  ab-test-comparison/  ...
+  technique/                     # 可复用"优化招式"·拓扑无关·按 mechanism 命名 (非按 target)
+    hoist-loop-invariant/  batch-coalescing/  lock-granularity-reduction/
+    branch-elimination/  redundant-load-elimination/  inline-tradeoff/  ...
+  domain/                        # 唯一触及拓扑·只到 subsystem 粒度
+    mm-reclaim/   { SKILL.md, references/ }     # ← 现 memmgr-reclaim 系列
+    hyperhold-io/  workqueue-threadpool/  sync-primitives/  sched/  fs/  ...
+  _registry/
+    skills.yaml                  # 全量索引: name/kind/version/maturity/eval_id/applies_to
+    subsystem_selectors.yaml     # subsystem → {path_globs, symbol_selectors} 集中绑定 (单点维护 volatile)
+```
+
+每个 skill 是一个文件夹（Anthropic SKILL.md 标准）：`SKILL.md`（简短「何时用+怎么用」，选中即加载）+ `best_skill.md`（SkillOpt 制品）+ `evals/` + `candidates/`（Pareto 前沿）+ `scorecards/` + `references/`（重材料，按需加载）。
+
+**拓扑用 selector 挂载，不写死路径**（domain skill frontmatter）：
+
+```yaml
+name: mm-reclaim
+kind: domain
+applies_to:
+  subsystems: [mm/reclaim]
+  path_globs: ["mm/vmscan.c", "mm/*reclaim*"]
+  symbol_selectors: ["shrink_*", "*_reclaim", "kswapd*"]
+requires: [core/optimization-funnel, technique/hoist-loop-invariant, technique/batch-coalescing]
+eval_id: eval/task_suites/mm_reclaim_suite
+```
+
+`resolver.py`（§12）拿到 target（如 `mm/vmscan.c::shrink_node`）：① selector 匹配 `domain/mm-reclaim`；② 顺 `requires` 拉入 core+technique；③ 检索该函数的 `knowledge/` 挂上。selector 对照**当前 clangd/scip 索引**解析，rebase 后自动重解析、skill 本体不动。
+
+**组合而非枚举**（Voyager 式）：不为每个 `(子系统×招式)` 预制大技能，由 pipeline preset 在加载期组合小技能。`(subsystem × technique)` 矩阵由**加载期组合**消化，不在树里枚举。
+
+**防爆炸：skill vs knowledge 判定三铁律**（三条全过才是 skill，否则归 knowledge）：
+
+1. **可复用**：跨 ≥2 target？只对一个 file/function 成立 → knowledge。
+2. **有 eval 信号**：改它能在 eval 上测出行为变化？只是一条事实/裁决 → knowledge。
+3. **稳定**：rebase 后不变（招式/流程）？随文件/符号移动 → knowledge。
+
+→ **永不建 per-file / per-function 的 skill。**
+
+**各层 eval**：core 用跨子系统大 suite（最广信号、最难，§15 长杆）；technique 用该招式适用的任务子集；domain 用该 subsystem 代表性任务。三者 `evals/` 独立、互不污染。
+
+### 6.3 消费端 `.opencode/`（共享 + 本地叠加）
 
 ```text
 .opencode/                # (在业务仓 hm-kernel-llm-opt 内)
-  hub/                    # git submodule (或 vendored release), pin 到 hm-skill-hub 某版本 (运行时只读)
-                          #   提供 procedural-shared (skills/agents/commands/pipelines/docs) + curated knowledge
-  local/                  # 本成员的执行面产物 (run-evidence-local + Tier 1 在途记忆)
-    runs/<run_id>/        # 每次运行的证据, 建议提交业务仓留存 (可审计/可复现)
-      plans/              # 本次计划
-      reviews/            # 本次 plan/code 评审
-      bench/              # 本次 A/B 验证证据
-      patches/            # 本次导出补丁
-      <target>_design.md  # 本次研究产出
-    memory/               # 在途工作记忆 (Tier 1): targets/ human_decisions/ idea_ledger/ ...
-    sediment_staging/     # hmopt sediment 产出的待提交候选包 (→ PR 到 hub)
-  state/
-    current_task.json     # 纯运行态, gitignore (可重生)
-  skill-memory.lock       # 锁定 hub 版本 (semver + commit SHA), 防漂移, 保可复现
-  resolver.py             # 加载技能/查记忆时: 先 hub(共享) 再叠加 local(个人在途)
-  .gitignore              # 忽略 state/current_task.json 等纯运行态; runs/ 默认提交
+  hub/                    # git submodule, pin 到 hm-skill-hub 某版本 (只读)
+  local/                  # 本成员执行面产物 (run-evidence + Tier 1 在途记忆)
+    runs/<run_id>/{plans,reviews,bench,patches, <target>_design.md}  # 证据, 建议提交留存
+    memory/               # 在途工作记忆 (Tier 1): targets/ human_decisions/ idea_ledger/
+    sediment_staging/     # hmopt sediment 产出的候选包 (→ PR 到 hub)
+  state/current_task.json # 纯运行态, gitignore
+  skill-memory.lock       # 锁定 hub 版本 (semver + SHA)
+  resolver.py             # 加载时: 先 hub(共享) 再叠加 local(个人在途)
 ```
 
-这正是 memU 的 `where` 作用域（team vs personal）与 Anthropic 的 project-scope vs personal-scope。**可用性保证**见 §12.3。
+这正是 memU `where` 作用域（team vs personal）与 Anthropic project-scope vs personal-scope。
 
-### 6.3 原 `.opencode/` 目录迁移归宿表 + 两仓视图
+### 6.4 目录迁移归宿表 + 两仓视图
 
-原来扁平的 `.opencode/` 被拆成两半，**没有目录"原样留在老地方"**——每个目录按 §4.5 的轴指派到唯一归宿。
+原扁平 `.opencode/` 拆成两半，**无目录原样留老地方**，每个按 §4.3 轴指派：
 
-| 原 `.opencode/` 目录 | 原型 | 新位置 |
+| 原目录 | 原型 | 新位置 |
 |---|---|---|
-| `skills/` | procedural | **hub** `skills/` |
-| `agents/` | procedural | **hub** `agents/` |
-| `commands/` | procedural | **hub** `commands/` |
-| `pipelines/` | procedural | **hub** `pipelines/` |
-| `docs/`（harness 规范，如 `harness_engineer_system.md`）| procedural | **hub** `docs/` |
-| `*_template.md`（plan/review/bench/target 模板）| procedural（模板是程序）| **hub**（填好的实例落 local）|
-| `memory/idea_ledger/` | knowledge | 权威版 **hub** `knowledge/targets/<slug>/idea_ledger.md`；本地在途副本 `local/memory/` |
-| `memory/targets/` `memory/subsystems/` `memory/global_lessons.md` | knowledge | 蒸馏合并→ **hub** `knowledge/`；本地在途副本 `local/memory/` |
-| `memory/human_decisions/` | run-evidence→knowledge | 原始时间线留 **业务仓** `local/memory/`（含原始对话，需脱敏）；稳定摘要→hub `knowledge/targets/<slug>/decisions/` |
+| `skills/` `agents/` `commands/` `pipelines/` `docs/`(harness 规范) | procedural | **hub** 对应目录 |
+| `*_template.md` | procedural（模板是程序）| **hub**（实例落 local）|
+| `memory/idea_ledger/` | knowledge | 权威版 **hub** `knowledge/targets/<slug>/`；在途副本 `local/memory/` |
+| `memory/targets|subsystems|global_lessons` | knowledge | 蒸馏→ **hub** `knowledge/`；在途副本 `local/memory/` |
+| `memory/human_decisions/` | run-evidence→knowledge | 原始时间线留 `local/`（需脱敏）；稳定摘要→hub `decisions/` |
 | `state/bad_plans.md` | knowledge | 蒸馏→ **hub** `knowledge/global/anti_patterns/` |
-| `state/current_task.json` | run-evidence（纯运行态）| **仅本地** gitignore，可重生 |
-| `plans/` | run-evidence | **业务仓** `local/runs/<run_id>/plans/`；精华→hub |
-| `reviews/` | run-evidence | **业务仓** `local/runs/<run_id>/reviews/`；结论/反模式→hub |
-| `bench/` | run-evidence | **业务仓** `local/runs/<run_id>/bench/`；validated delta→hub `evidence/`+`knowledge/` |
+| `state/current_task.json` | run-evidence（纯态）| **仅本地** gitignore |
+| `plans/` `reviews/` `bench/` | run-evidence | **业务仓** `local/runs/`；validated delta/反模式→hub |
 | `patches/` | run-evidence | **业务仓**（随代码），不入 hub |
 
-**模板 vs 实例**：`*_template.md`（产物的"形状"）是 procedural，进 hub；填好的实例（某次 plan/review/bench）是 run-evidence，留 local。
-
-两仓「东西放哪」一图（与 §5 闭环图互补，这张按"位置"组织）：
-
 ```
-┌─ hm-skill-hub  (资产面 · 团队共享 · semver) ────────────────────────────┐
-│   PROCEDURAL (engine B / SkillOpt)            KNOWLEDGE (engine A)       │
-│     skills/  agents/  commands/                 knowledge/   evidence/   │
-│     pipelines/  docs(harness 规范+模板)/         ▲ 只放"蒸馏后的精华"      │
-└──────────▲──────────────────────────────────────┼──────────────────────┘
-           │ (1) pin 拉回: submodule + skill-memory.lock    │ (3) promote: 蒸馏+eval 门
-           │  只读                                           │
-┌─ 业务仓 /.opencode/  (执行面)  ─────────────────────┴────────────────────┐
-│   hub/            ← submodule, 只读, pinned                                │
-│   local/                                                                  │
-│     runs/<run_id>/  plans/ reviews/ bench/ patches/  <target>_design.md   │ ← run-evidence
-│     memory/         (在途工作副本, Tier 1)                                 │ ← 蒸馏→hub
-│     sediment_staging/                                ← (2) 候选→PR 到 hub  │
-│   state/current_task.json   ← 纯运行态, gitignore                          │
-│   skill-memory.lock     resolver.py (先读 hub 再叠加 local)                │
+┌─ hm-skill-hub  (资产面 · 共享 · semver) ─────────────────────────────────┐
+│   PROCEDURAL (引擎 B)                       KNOWLEDGE (引擎 A)            │
+│     skills/{core,technique,domain}  agents/   knowledge/   evidence/      │
+│     commands/  pipelines/  docs/              ▲ 只放"蒸馏精华"            │
+└──────────▲─────────────────────────────────────┼────────────────────────┘
+           │ (1) pin: submodule + lock (只读)      │ (3) promote: 蒸馏 + eval 门
+┌─ 业务仓 /.opencode/ (执行面) ────────────────────┴───────────────────────┐
+│   hub/  ← submodule 只读 pinned                                           │
+│   local/  runs/<id>/{plans,reviews,bench,patches}  memory/  sediment_staging/ │
+│   state/current_task.json (gitignore)   skill-memory.lock   resolver.py   │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**路径兼容（迁移风险，须在 Phase 0 处理）**：现有 harness 硬编码了 `.opencode/skills/X.md`、`.opencode/docs/...` 等相对路径，且 `CLAUDE.md` 已警告子代理 CWD 不稳。把这些目录移到 `.opencode/hub/` 下会改变路径。Phase 0 必须二选一：① 在 `.opencode/` 下建 `skills→hub/skills`、`agents→hub/agents` 等 symlink 保持旧路径可用（改动最小）；② 脚本批量改写所有引用为 `hub/` 前缀 + 由 `resolver.py` 统一解析。推荐先 ① symlink 兜底、再逐步迁移到 ②。
+**路径兼容（Phase 0 必处理）**：现 harness 硬编码 `.opencode/skills/X.md` 等相对路径，移入 `hub/` 会破坏。二选一：① symlink `.opencode/skills→hub/skills` 保旧路径（最小改动）；② 批量改写 + `resolver.py` 统一解析。推荐先 ① 兜底再迁 ②。
 
 ---
 
 ## 7. 数据模型与 Schema
 
-### 7.1 类型化记忆体系（memory item types）
+**类型化记忆**——每条 Knowledge 记录声明 `type`，五类之一：
 
-每条 Knowledge 记录必须声明 `type`，五类之一：
+| type | 含义 |
+|---|---|
+| `fact` | 稳定结构事实 |
+| `rule` | 操作规则 |
+| `pattern` | 可复用正向模式 |
+| `anti_pattern` | 反模式 |
+| `playbook_step` | 流程步骤片段 |
 
-| type | 含义 | 示例 |
-|---|---|---|
-| `fact` | 稳定结构事实 | "`hyperhold_write_eid` 在 iotab.c:312，热路径每次写 16B eid" |
-| `rule` | 操作规则 | "改 `process_one_work` 前必须确认 wq lock 跨调用语义" |
-| `pattern` | 可复用正向模式 | "把 loop-invariant 锁检查 hoist 出热循环" |
-| `anti_pattern` | 反模式 | "对 kworker 入口盲目 inline 会撑爆 i-cache（phone X 实测回归）" |
-| `playbook_step` | 流程步骤片段 | "A/B 测试：先 flash stock 跑测，再 flash feature 跑测，再比对" |
+**`memory_item` 关键字段**（完整 JSON-Schema 在 `schemas/`）：
 
-### 7.2 `memory_item.schema.json`（核心 schema 草案）
-
-```json
-{
-  "$id": "memory_item.schema.json",
-  "type": "object",
-  "required": ["id", "type", "title", "body", "scope", "source", "created_at", "maturity"],
-  "properties": {
-    "id":        {"type": "string", "pattern": "^[FGAR][0-9]{3,}$"},
-    "type":      {"enum": ["fact", "rule", "pattern", "anti_pattern", "playbook_step"]},
-    "title":     {"type": "string", "maxLength": 120},
-    "body":      {"type": "string"},
-    "scope":     {"type": "object", "required": ["level"],
-                  "properties": {
-                    "level":      {"enum": ["function", "call-site", "data-flow", "subsystem", "architectural", "global"]},
-                    "subsystem":  {"type": "string"},
-                    "target_slug":{"type": "string"}}},
-    "source":    {"type": "array", "minItems": 1,
-                  "items": {"type": "object",
-                    "required": ["kind", "ref"],
-                    "properties": {
-                      "kind": {"enum": ["commit", "review", "bench", "doc", "run_id"]},
-                      "ref":  {"type": "string"}}}},
-    "evidence":  {"type": "object",
-                  "properties": {
-                    "delta_pct":     {"type": "number"},
-                    "compare_level": {"enum": ["total", "process", "thread", "lib", "function"]},
-                    "confirmations": {"type": "integer", "minimum": 1}}},
-    "maturity":  {"enum": ["L0", "L1", "L2", "L3"]},
-    "status":    {"enum": ["active", "superseded", "deprecated"]},
-    "invalidation": {"type": "string",
-                     "description": "失效条件, e.g. 'kernel rebase 后须重校 offset'"},
-    "supersedes":   {"type": "array", "items": {"type": "string"}},
-    "valid_from":   {"type": "string", "format": "date-time"},
-    "valid_until":  {"type": "string", "format": "date-time"},
-    "score":        {"type": "number"},
-    "contributor":  {"type": "string"},
-    "created_at":   {"type": "string", "format": "date-time"},
-    "updated_at":   {"type": "string", "format": "date-time"}
-  }
-}
+```
+id(稳定,前缀 F/G/A/R) · type · title · body
+scope{level: function|call-site|data-flow|subsystem|architectural|global, subsystem, target_slug}
+source[]{kind: commit|review|bench|doc|run_id, ref}   ← 必填, 无出处即拒
+evidence{delta_pct, compare_level, confirmations}
+maturity(L0-L3) · status(active|superseded|deprecated) · score
+invalidation(失效条件, 如 "rebase 后须重校 offset")
+supersedes[] · valid_from · valid_until · contributor · created_at
 ```
 
-ID 前缀约定：`F`=fact、`G`=global lesson、`A`=anti_pattern、`R`=rule/playbook。沿用 idea_ledger 的「稳定 ID、永不复用、永不删除」纪律。
+**skill frontmatter**（兼容 SKILL.md，详见 §6.2）：`name/kind/version/maturity/applies_to/requires/eval_id/owners/status`。
 
-### 7.3 `skill_frontmatter.schema.json` 与「技能更新清单」
+**技能更新清单**（每个 skill PR 必附，否则 CI 拒）：绑定 `edit_ops` + `task_suite` + `metrics{pass_rate, instr_count_delta, regression_rate}` + `baseline_version`。
 
-技能 `SKILL.md` 的 YAML frontmatter（兼容 Anthropic SKILL.md 标准）：
-
-```yaml
----
-name: optimization-funnel
-version: 2.3.1                 # semver
-scope: [kernel, generic]
-maturity: L3
-eval_id: eval/task_suites/funnel_suite_v2
-owners: [@kernel-perf-team]
-status: active
----
-```
-
-**每次技能更新（PR）必须附「更新清单」**（`skill_patch.schema.json`），强制绑定三元组：
-
-```json
-{
-  "skill": "optimization-funnel",
-  "edit_ops": [{"op": "replace", "anchor": "## Ranking Questions", "rationale": "..."}],
-  "task_suite": "eval/task_suites/funnel_suite_v2",
-  "metrics": {"pass_rate": 0.0, "instr_count_delta": 0.0, "regression_rate": 0.0},
-  "baseline_version": "2.3.0",
-  "rejected_buffer_ref": "skills/.../bad_edits.jsonl"
-}
-```
-
-无 `task_suite` + `metrics` 的技能 PR 直接被 CI 拒绝。
-
-### 7.4 idea_ledger（沿用现有结构，仅外置 + 合并）
-
-现有 `.opencode/memory/idea_ledger/template.md` 的结构（`id / mechanism / scope / status / verdicted_by / delta_pct / validation_path / reopen_trigger …`）**完整保留**，只是：① 字段固化为 JSON（`idea.schema.json`）便于机器合并；② 从本地外置到 `hub/knowledge/targets/<slug>/idea_ledger.md`；③ 由 Curator 做跨成员合并（§10.1）。
+**idea_ledger**：沿用现有结构（稳定 ID、状态机、永不删除），仅 ① 字段 JSON 化便于机器合并；② 外置到 hub；③ 由 Curator 跨成员合并。
 
 ---
 
-## 8. 沉淀时机与成熟度晋升
+## 8. 沉淀时机与晋升
 
-### 8.1 Tier 0 → Tier 1（蒸馏）— 何时触发
+**Tier 0→1（蒸馏）触发**：复用已有收口点——pipeline decision 阶段、人机会话 "done"、每个 auto-iterate pass 末。产物落 `local/sediment_staging/*.json`（标 `maturity: L1`）。
 
-复用系统已有的自然收口点（现 `memory-accumulation.md` 已在做，本方案只固化输出 schema）：
+**Tier 1→2（晋升）触发**（满足其一 + 过 §9 三门）：① ≥2 个独立任务复现收益；② 单任务收益显著且有 bench 证据；③ 高复用失败教训（→ anti_pattern）。
 
-- pipeline 的 **decision 阶段**结束；
-- 人机会话（`kernel-plan` / `kernel-research`）**"done"**；
-- 每个 **auto-iterate pass** 末（`iterative-optimization.md`）。
-
-产物：`.opencode/local/sediment_staging/*.json`，每条符合 §7 schema，标 `maturity: L1`。
-
-### 8.2 Tier 1 → Tier 2（晋升）— 促发条件（Promotion Triggers）
-
-**不是每次 run 都晋升**。一条候选可被提议晋升，当且仅当满足以下之一：
-
-1. 在 **≥2 个独立任务**中复现收益；
-2. **单任务收益显著**且有 bench 证据（如指令数/时延/正确率改善，附 `validation_path`）；
-3. **失败教训**具高复用价值（可防止重复踩坑 → `anti_pattern` / bad_plan）。
-
-且必须同时通过 §9 的三道门。
-
-### 8.3 贡献节奏
-
-推荐 **自动暂存（持续、廉价）+ 批量 PR（每周或里程碑）**：`hmopt sediment` 把符合条件的 Tier 1 候选打包成单个「沉淀 PR」投向 hub —— 批量便于统一去重、避免 PR 刷屏。
-
-### 8.4 成熟度晋升路径
-
-```
-L0 (本地草稿) ──结构化+初始证据──▶ L1 (候选, 入 staging/)
-L1 ──团队评审 + eval 达标──▶ L2 (stable, 入 knowledge/ 或 skills/domain/)
-L2 ──跨子团队复用成功 (≥2 子团队 / ≥N 次正向引用)──▶ L3 (core, 入 skills/core/)
-```
+**贡献节奏**：自动暂存（持续）+ 批量 PR（每周/里程碑），`hmopt sediment` 打包候选成单个「沉淀 PR」，便于统一去重、避免刷屏。
 
 ---
 
-## 9. 质量保证体系（三道门）
+## 9. 质量门（三道）
 
 ```
-候选(L1) ──▶ [门1: Schema/Lint/脱敏] ──▶ [门2: 证据门] ──▶ [门3: 策展/评审 + eval] ──▶ 稳定(L2/L3)
-              廉价/自动/CI                  自动校验           Curator-agent + 人 + eval-gate
+候选(L1) → [门1 Schema/Lint/脱敏] → [门2 证据] → [门3 策展+eval] → 稳定(L2/L3)
+            CI 自动                    自动        Curator + 人 + eval-gate
 ```
 
-### 9.1 门 1：Schema / Lint / 脱敏（廉价、自动、CI/pre-commit）
+1. **Schema/Lint/脱敏**：过 §7 schema；`redact.py` + CI secret-scan 强扫设备序列号/key，命中即拒（团队仓泄密是放大事故）。
+2. **证据**：知识需引用（`validation_path`/`delta_pct`/`confirmations≥N`）；技能编辑需 eval 结果。无证据 → 留 L1。
+3. **策展 + eval**：Curator 预处理去重/冲突/泛化（§10），再由**双评审人**签字（1 领域 + 1 流程）。技能额外过 eval-gate（留出 suite 严格变好）。**不设豁免**：破例只能降级为 L1 候选 + owner 签字 + 复核。
 
-- **Schema 校验**：每条记录/技能过 §7 JSON-Schema（必填字段、出处、type 合法）。畸形即拒。
-- **脱敏门（★它方案缺失，必须有）**：内核 flash/测试场景会带**设备序列号、签名 key**。`tools/redact.py` + CI `secret-scan` 强制扫描；命中即拒并 `[REDACTED]`（复用 `human-interaction-memory.md` 既有脱敏规则）。团队仓泄密是放大事故，此门不可省。
-
-### 9.2 门 2：证据门（自动）
-
-- 知识声明需引用（`validation_path` / `delta_pct` / `confirmations ≥ N`）；技能编辑需 eval 结果。
-- 无证据 → 留在 L1（候选），不得进 L2。（ExpeL 成败接地 + SkillOpt 留出验证）
-
-### 9.3 门 3：策展 + eval（Curator-agent + 人 + eval-gate）
-
-- **去重 / 冲突 / 范围 / 泛化性**由 Curator-agent 预处理（§10.1），再由**双评审人**签字：1 名**领域 reviewer**（结论对不对）+ 1 名**流程 reviewer**（是否合规、可复用）。
-- 技能类额外过 **eval-gate**：候选技能在留出 task suite 上 A/B，**严格变好**才可合入（§10.2）。
-- **不设"显式豁免"口子**（★修正它方案的风险点）：要破例只能「降级为 L1 候选 + owner 签字 + 下周期复核」，不得直接合入生产。
-
-### 9.4 打分函数（排序 + 衰减）
-
-```
-score = w1·evidence_strength      # delta 幅度 / bench 质量
-      + w2·confirmations          # 独立复现次数 (ExpeL UPVOTE)
-      + w3·recency                # 新近度
-      + w4·generality             # scope 越宽越高 (subsystem/architectural > function)
-      - w5·counter_evidence       # 反例 (ExpeL DOWNVOTE)
-      - w6·staleness              # invalidation 触发 (如 rebase) 后衰减
-```
-
-score 用于晋升排序、检索排序与废弃判定。
+**打分**（晋升/检索排序 + 衰减）：`score = w1·证据强度 + w2·确认数 + w3·新近度 + w4·泛化范围 − w5·反例 − w6·陈旧度(invalidation 触发后衰减)`。
 
 ---
 
 ## 10. 合并机制（两套引擎）
 
-### 10.1 引擎 A — Knowledge（追加型）：集合并 + 去重 + 冲突消解
-
-**绝不用 git 行级合并。** 每条记录是不可变、内容寻址、带稳定 ID 的单元，合并 = 集合并。Curator-agent（Mem0g Conflict Detector + LLM 消解的落地）在 PR 上运行：
+### 10.1 引擎 A — Knowledge：集合并 + 去重 + 冲突消解（绝不行级合并）
 
 ```
-def curate_knowledge(incoming_items, hub_items):
-    for item in incoming_items:
-        # 1) 去重: embedding 相似度聚类 (memU/Mem0)
-        dup = find_near_duplicate(item, hub_items, threshold=0.92)
-        if dup:
-            merge_provenance(dup, item)        # 合并出处, confirmations += 1, 重算 score
-            continue
-        # 2) 矛盾检测: 同一 (target, mechanism) 断言相反
-        conflict = find_contradiction(item, hub_items)
-        if conflict:
-            # 3) 消解: 证据/新近度加权 (Zep 双时态)
-            if stronger_evidence(item, conflict):
-                conflict.status = "superseded"   # 不删除!
-                conflict.valid_until = now()
-                item.supersedes = [conflict.id]
-                add(item)
-            elif high_risk(conflict):
-                escalate_to_human(item, conflict)  # 高风险升级
-            else:
-                drop_with_citation(item, conflict)
-        else:
-            add(item)
+for item in incoming:
+    dup = near_duplicate(item, hub)        # embedding 相似度
+    if dup: merge_provenance(dup, item); confirmations += 1; continue
+    conflict = contradiction(item, hub)    # 同 (target, mechanism) 断言相反
+    if conflict:
+        if stronger_evidence(item):        # 证据/新近度加权 (Zep 双时态)
+            conflict.status = "superseded"; item.supersedes = [conflict.id]; add(item)
+        elif high_risk: escalate_to_human()
+        else: drop_with_citation(item)
+    else: add(item)
 ```
 
-**CRDT 式纪律**：追加 + tombstone（状态位 `active/superseded/deprecated`）而非删除——沿用 ledger 现有规则。双时态（`valid_from/valid_until`）接住「内核 rebase 使 offset 事实失效」。
+**CRDT 纪律**：追加 + tombstone（`active/superseded/deprecated`）而非删除；双时态 `valid_from/until` 接住「rebase 使 offset 失效」。
 
-### 10.2 引擎 B — Skills（编辑型）：SkillOpt 验证门 + GEPA Pareto
-
-**绝不用集合并。** 某成员经验提议的技能改动 = 一个**编辑候选**（有界 add/delete/replace），只有在 eval 套件上**严格变好**才接受：
+### 10.2 引擎 B — Skills：SkillOpt 验证门 + GEPA Pareto（绝不集合并）
 
 ```
-def merge_skill_edit(skill, edit, eval_suite, pareto_frontier, bad_edits):
-    if edit in bad_edits:                       # 被拒编辑缓冲 (SkillOpt)
-        return REJECT("known-bad edit")
-    edit = clip_to_budget(edit, textual_lr)     # 文本学习率: 有界编辑预算
-    candidate = apply(skill, edit)
-    score = run_evals(candidate, eval_suite)    # 留出验证集
-    if score.strictly_better_than(skill.score): # 严格变好才接受
-        skill = candidate                        # 更新 best_skill.md
-        write_scorecard(skill, score)
-    else:
-        bad_edits.append(edit)                   # 进拒绝缓冲
-    # GEPA Pareto: 保留"在某些 eval 实例上最优"的候选 (★它方案缺失)
-    pareto_frontier = update_pareto(pareto_frontier, candidate, per_instance_scores)
-    return skill, pareto_frontier
+def merge_skill_edit(skill, edit):
+    if edit in bad_edits: return REJECT          # 被拒编辑缓冲
+    edit = clip_to_budget(edit, textual_lr)      # 文本学习率: 有界编辑
+    cand = apply(skill, edit); s = run_evals(cand, suite)
+    if s.strictly_better_than(skill.score):      # 严格变好才接受
+        skill = cand; write_scorecard(s)
+    else: bad_edits.append(edit)
+    pareto = update_pareto(pareto, cand, per_instance_scores)   # 保留互补候选
+    return skill, pareto
 ```
 
-**为何需要 Pareto（★核心）**：当 N 个成员各提编辑时，单一全局 eval 分会让「互补但互斥」的编辑塌缩到一个局部最优。GEPA Pareto 前沿保留「各自在某些实例上最优」的一组候选（放 `skills/<n>/candidates/`），定期合并互补 lesson。**这才是「团队人人沉淀、统一汇入而不互相覆盖」的正解。**
+**为何 Pareto**：N 个成员各提编辑时，单一全局 eval 分会让「互补但互斥」的编辑塌缩到局部最优。Pareto 前沿保留「各自在某些实例上最优」的候选（`candidates/`），定期合并互补 lesson——**这才是「人人沉淀、统一汇入而不互相覆盖」的正解**。文本学习率 = 每次发布的有界编辑预算；慢更新 = 按发布周期批量合并。
 
-- **文本学习率** = 每次发布的有界编辑预算（别让某人一周的坏经验重写整篇技能）。
-- **epoch 慢更新** = 按发布周期批量合并，而非每 PR 即时重写。
-
-### 10.3 一句话区分
-
-> **知识靠「集合并 + 去重 + 冲突消解」合并；技能靠「验证门竞争式编辑（SkillOpt）+ Pareto（GEPA）」合并。** 两类资产，两台引擎。
+> **一句话**：知识靠「集合并+去重+冲突消解」；技能靠「验证门竞争式编辑 + Pareto」。两类资产，两台引擎。
 
 ---
 
-## 11. 闭环优化流水线（定时作业）
+## 11. 闭环优化作业（定时）
 
-新增 nightly/weekly「Skill/Memory 优化作业」（`tools/` + CI 调度）：
+nightly/weekly「Skill/Memory 优化作业」：
 
 ```
-(1) Collect    聚合各项目 .opencode/local/sediment_staging 候选 → staging/
-(2) Normalize  按 §7 schema 标准化字段 + 去噪 + 脱敏
-(3) Cluster    embedding 聚类相似经验 (引擎 A 去重前置)
-(4) Optimize   对 skills/*.md 跑 SkillOpt 有界编辑 (引擎 B), 早期半自动: 自动提 PR, 人工合并
-(5) Validate   在 held-out task suites 跑 A/B, 出 scorecard
-(6) Promote    仅提升收益版本, 升 semver + 打 tag, 更新 registry.yaml
-(7) Broadcast  自动生成 release notes, 供业务仓 pin 新版本
+(1) Collect    聚合各项目候选 → staging/
+(2) Normalize  按 schema 标准化 + 去噪 + 脱敏
+(3) Cluster    embedding 聚类 (引擎 A 去重前置)
+(4) Optimize   对 skills 跑 SkillOpt 有界编辑 (引擎 B)；早期半自动: 自动提 PR + 人工合并
+(5) Validate   留出 suite A/B, 出 scorecard
+(6) Promote    仅升收益版本, semver + tag, 更 registry.yaml
+(7) Broadcast  生成 release notes, 供业务仓 pin
 ```
 
-**早期安全约束**：第 (4) 步的自动优化必须接入 `bad_edits` 拒绝缓冲 + Pareto + 脱敏，且**默认半自动**（自动提 PR、人工合并），积累信任后再逐步放开为全自动。
+**早期安全约束**：第 (4) 步必须接 `bad_edits` + Pareto + 脱敏，**默认半自动**（自动提 PR、人工合并），积累信任后再放开。
 
 ---
 
 ## 12. 消费与集成
 
-### 12.1 版本锁定（`skill-memory.lock`）
-
-业务仓通过 `skill-memory.lock`（semver + commit SHA）固定 hub 版本，等价 package lockfile，做可复现 + 防漂移。运行中的技能不会在脚下悄悄变（SkillOpt `best_skill.md` 是发布制品）。每次 run 记录消费了哪个 hub 版本。
-
-### 12.2 hub/local 运行时叠加（resolver）
-
-`.opencode/resolver.py` 加载技能/查记忆时：**先读 hub（共享）再叠加 local（个人在途）**。这支持「成员使用中沉淀自己的」——本地在途记忆叠加在共享之上，互不污染（memU `where` 作用域）。
-
-### 12.3 可用性：故障优雅降级（★它方案缺失）
-
-- hub 以 submodule pin 在本地（vendored 副本），**中央仓宕机绝不阻塞**本地优化工作。
-- resolver 检测 hub 不可达时，回退到上次成功 pin 的本地快照并告警，不中断 pipeline。
-
-### 12.4 跨工具复用
-
-技能采用 Anthropic SKILL.md 开放标准，可同时被 OpenCode / Claude Code / Codex 消费，hub 即「团队私有 skill marketplace」。
+- **版本锁定**：`skill-memory.lock`（semver + SHA）固定 hub 版本，等价 package lockfile，可复现、防漂移；每次 run 记录消费版本。
+- **运行时叠加**：`resolver.py` 先读 hub（共享）再叠加 local（个人在途），互不污染（memU `where`）。
+- **故障降级（可用性）**：hub 以 submodule pin 在本地（vendored 副本），**中央仓宕机不阻塞**；resolver 检测不可达即回退上次成功快照并告警。
+- **跨工具**：SKILL.md 开放标准，可同时被 OpenCode / Claude Code / Codex 消费，hub 即「团队私有 skill marketplace」。
 
 ---
 
-## 13. 治理与策略
+## 13. 治理 · 稳定 · 可用（汇总）
 
-### 13.1 `promotion_policy.md`
-
-固化 §8.2 触发条件 + §9 三道门 + §8.4 晋升路径。明确「谁能提议、谁能晋升」。
-
-### 13.2 `merge_policy.md`
-
-固化 §10 两套引擎规则 + 双评审人（领域 + 流程）+ 无豁免原则 + CODEOWNERS（`skills/core/` 需 owner 团队批准）。
-
-### 13.3 `deprecation_policy.md`（失效治理）
-
-- **废弃状态**：`active → superseded`（被更优记录取代）/ `→ deprecated`（失效条件触发）。
-- **触发**：`invalidation` 命中（如 kernel rebase）、score 衰减低于阈值、连续反例。
-- **定期清理作业**：标 `deprecated` 的记录从检索/inline 中排除，但**保留可审计**（不物理删除）。
-
-### 13.4 发布节奏
-
-每周小版本（patch/minor）、每月稳定版（minor/major）。`skills/core/` 变更走更严评审。
-
----
-
-## 14. 稳定性与可用性保障（汇总）
+`policies/` 三份一等文档固化规则：`promotion`（§8 触发 + §9 三门 + 晋升路径）、`merge`（§10 两引擎 + 双评审 + 无豁免 + CODEOWNERS）、`deprecation`（失效治理）。发布节奏：每周小版本、每月稳定版，`skills/core/` 走更严评审。
 
 | 保障 | 机制 |
 |---|---|
-| 可回滚 | 每次技能更新有 tag + 对应 scorecard；`git revert` 即回退 |
-| 抗回归 | **CI eval-gate**：eval 不达标禁止发布（让反喂安全的根本机制）|
-| 抗破坏性改写 | 文本学习率（有界编辑）+ 被拒编辑缓冲 + epoch 慢更新（SkillOpt 三件套）|
-| 可审计 | 每条记录回链来源 + reviewer + scorecard（§4.4）|
-| 抗污染 | 候选层（staging/L1）与稳定层（L2/L3）物理隔离 |
-| 多版本共存 | 不同项目可 pin 不同版本，逐步升级 |
-| 高可用 | lockfile + vendored 本地兜底 + resolver 降级（§12.3）|
-| 失效治理 | deprecation 状态 + 定期清理 + 双时态有效期（§13.3）|
-| 防泄密 | 脱敏门 + CI secret-scan（§9.1）|
+| 可回滚 | 每次更新有 tag + scorecard；`git revert` 即回退 |
+| 抗回归 | **CI eval-gate**：不达标禁止发布（反喂安全的根本机制）|
+| 抗破坏改写 | 文本学习率 + 被拒编辑缓冲 + 慢更新（SkillOpt 三件套）|
+| 可审计 | 每条回链来源 + reviewer + scorecard |
+| 抗污染 | 候选层（L1）与稳定层（L2/L3）物理隔离 |
+| 多版本共存 | 不同项目 pin 不同版本，逐步升级 |
+| 高可用 | lockfile + 本地兜底 + resolver 降级 |
+| 失效治理 | `superseded/deprecated` 状态 + 双时态 + 定期清理（保留可审计，不物删）|
+| 防泄密 | 脱敏门 + CI secret-scan |
 
 ---
 
-## 15. 分阶段落地路线图
+## 14. 分阶段路线图
 
 | 阶段 | 周期 | 目标 | 交付物 | 风险 |
 |---|---|---|---|---|
-| **Phase 0｜抽取** | 1–2w | 零行为变更地双仓接口跑通 | 把 `skills/agents/pipelines/commands/docs` 切到 `hm-skill-hub`，submodule 接回并 pin；**路径兼容**（symlink `.opencode/skills→hub/skills` 等，或批量改写引用 + `resolver.py`，见 §6.3）；建仓骨架 + schemas + `registry.yaml` + PR 模板 | 低 |
-| **Phase 1｜蒸馏** | 2–3w | Tier0→Tier1 结构化 | `hmopt sediment`（pipeline 末输出候选包）；`memory export` 把现有 memory/plans/reviews 转标准对象 | 低 |
-| **Phase 2｜策展+合并** | 3–6w | 知识合并上线（引擎 A）| Curator-agent + lint/secret-scan/dedup CI；人工审批基线；`policies/` 三文档 | 中 |
-| **Phase 3｜eval 门** ★ | 6–10w | 安全反喂（引擎 B）| **建 core task suite**（最难长杆）+ CI eval-gate + scorecard；半自动 bounded-edit 优化器 | **高** |
-| **Phase 4｜自动优化** | 10w+ | 闭环自动迭代 | nightly/weekly 优化作业（§11）；每周小版本 / 每月稳定版；业务仓 `skill-memory.lock` 防漂移 | 中 |
+| **0 抽取** | 1–2w | 零行为变更跑通双仓 | 切 `skills/agents/pipelines/commands/docs` 到 hub + submodule pin；**路径兼容**（symlink/改写，§6.4）；仓骨架 + schemas + registry | 低 |
+| **1 蒸馏** | 2–3w | Tier0→1 结构化 | `hmopt sediment`；`memory export` 转标准对象 | 低 |
+| **2 策展+合并** | 3–6w | 知识合并上线（引擎 A）| Curator + lint/secret-scan/dedup CI；`policies/` 三文档 | 中 |
+| **3 eval 门** ★ | 6–10w | 安全反喂（引擎 B）| **建 core task suite**（长杆）+ CI eval-gate + scorecard；半自动优化器 | **高** |
+| **4 自动优化** | 10w+ | 闭环自动迭代 | 定时作业（§11）；发布节奏；`skill-memory.lock` 防漂移 | 中 |
 
 ---
 
-## 16. 风险与缓解
+## 15. 风险与缓解
 
-| 风险 | 说明 | 缓解 |
-|---|---|---|
-| **eval 套件是长杆** ★ | 内核优化 ground truth = 真机 A/B 指令数 delta（慢/贵/噪声大）；没它技能合并退化成「凭感觉」 | Phase 3 重点投入；先用代理指标（编译期静态指令数估计 + 小样本真机）起步，逐步加密真机验证；诚实标注这是关键路径 |
-| 过度沉淀（噪声）vs 不足（陈旧）| 沉淀太多变噪声，太少变陈旧 | 打分 + 衰减 + N 次确认阈值调；L0–L3 阶梯过滤 |
-| 密钥泄露 | 设备序列号/key 入库 | 脱敏门 + CI secret-scan（强制）|
-| 热点文件合并争用 | 多人改同一 memory 文件 | 每记录一文件 + 稳定 ID，规避行级合并 |
-| 两类资产混用一台引擎 | 知识自相矛盾 / 技能被覆盖 | §4.1 强制分治 |
-| 多成员编辑塌缩 | 单一全局 eval 分丢失互补策略 | GEPA Pareto 前沿（§10.2）|
-| eval「豁免」漏洞 | 未验证编辑混入生产 | 无豁免原则；破例只能降级为候选 + owner 签字 + 复核（§9.3）|
-| 自动优化过激 | nightly 自动改技能失控 | 早期半自动 + 拒绝缓冲 + Pareto + 人工合并（§11）|
-| submodule 摩擦 | 子模块更新繁琐 | 提供 vendored-release 兜底 + lockfile |
-| 路径硬编码迁移 | `agents/skills` 移入 `hub/` 破坏 `.opencode/skills/...` 等硬编码相对路径；子代理 CWD 不稳放大风险 | Phase 0 用 symlink 保旧路径，或批量改写 + `resolver.py` 统一解析（§6.3）|
+| 风险 | 缓解 |
+|---|---|
+| **eval 套件是长杆**（真机 A/B 慢/贵/噪声）| Phase 3 重点；先静态代理指标 + 小样本真机起步，逐步加密；诚实标注为关键路径 |
+| 过度/不足沉淀 | 打分 + 衰减 + N 次确认阈值；L0–L3 过滤 |
+| 密钥泄露 | 脱敏门 + CI secret-scan（强制）|
+| 热点文件合并争用 | 每记录一文件 + 稳定 ID，规避行级合并 |
+| 两类资产混用一引擎 | §4.1 强制分治 |
+| 多成员编辑塌缩 | GEPA Pareto（§10.2）|
+| skills 维度爆炸 | core/technique/domain 三层 + file/function 归 knowledge + selector（§6.2）|
+| eval 豁免漏洞 | 无豁免；破例只能降级候选 + 签字 + 复核 |
+| 路径硬编码迁移 | Phase 0 symlink 或改写 + resolver（§6.4）|
 
 ---
 
-## 17. 附录
+## 16. 附录
 
-### 17.1 关键 CLI（拟新增到 `hmopt`）
+**关键 CLI（拟新增到 `hmopt`）**
 
 ```bash
-hmopt sediment                       # 收口点: Tier0→Tier1 蒸馏, 产出候选包到 local/sediment_staging
-hmopt sediment --bundle --open-pr    # 打包符合条件候选 → 提 PR 到 hub
-hmopt skill-lock --update <semver>   # 更新 skill-memory.lock 到指定 hub 版本
-hmopt skill-eval <skill> --suite <s> # 本地跑技能 eval (A/B), 出 scorecard
-hub: tools/run_evals.py / dedup.py / merge_curator.md  # hub 侧 CI 调用
+hmopt sediment [--bundle --open-pr]    # Tier0→1 蒸馏 / 打包候选提 PR
+hmopt skill-lock --update <semver>     # 更新 skill-memory.lock
+hmopt skill-eval <skill> --suite <s>   # 本地跑技能 eval, 出 scorecard
 ```
 
-### 17.2 示例记录（`anti_pattern`）
-
-```yaml
-id: A007
-type: anti_pattern
-title: 盲目 inline kworker 入口撑爆 i-cache
-body: 对 process_one_work 等 kworker 热入口做无差别 inline, 在 phone X 实测 i-cache miss 上升, 净回归。
-scope: {level: function, subsystem: workqueue, target_slug: wq_threadpool}
-source: [{kind: bench, ref: .opencode/bench/wq_threadpool_validation.md},
-         {kind: review, ref: reviews/wq_threadpool__iter2_code_review.md}]
-evidence: {delta_pct: 1.4, compare_level: function, confirmations: 2}
-maturity: L2
-status: active
-invalidation: "i-cache 容量翻倍的新平台需重测"
-contributor: "@dev-a"
-created_at: "2026-05-20T10:00:00Z"
-```
-
-### 17.3 术语表
+**术语表**
 
 | 术语 | 含义 |
 |---|---|
-| Tier 0/1/2 | 运行轨迹 / 候选沉淀 / 核心共享资产（memU raw→item→category）|
-| L0–L3 | 成熟度：draft / candidate / stable / core |
-| 引擎 A / B | 知识合并（集合并+去重+冲突）/ 技能合并（SkillOpt 门 + GEPA Pareto）|
+| Tier 0/1/2 | 运行轨迹 / 候选沉淀 / 核心共享 |
+| L0–L3 | draft / candidate / stable / core |
+| 引擎 A / B | 知识合并 / 技能合并 |
+| 三原型 | procedural-shared / knowledge-curated / run-evidence-local |
 | 文本学习率 | 每次发布的有界编辑预算（SkillOpt）|
-| 被拒编辑缓冲 | 已验证为坏的编辑，不再重试（SkillOpt）|
-| Pareto 前沿 | 「各自在某些 eval 实例上最优」的一组技能候选（GEPA）|
-| eval-gate | 发布前的留出验证集回归门——让反喂安全的根本机制 |
-| 双时态 | 记录带 valid_from/valid_until，被取代不删除（Zep）|
+| Pareto 前沿 | 各自在某些 eval 实例上最优的一组候选（GEPA）|
+| eval-gate | 发布前留出验证回归门——反喂安全的根本机制 |
+| selector | skill frontmatter 里对照代码索引解析的拓扑绑定（subsystem/glob/symbol）|
 
 ---
 
-## 18. 待团队拍板的开放问题
+## 17. 待团队拍板
 
-1. hub 仓命名与归属（`hm-skill-hub` vs `org/opencode-skill-memory`）、放在哪个 GitHub org。
-2. eval task suite 的 ground truth 策略：纯真机 A/B vs 静态代理指标 vs 混合（直接影响 Phase 3 工期）。
-3. 沉淀贡献节奏：每周批量 vs 里程碑触发 vs 持续自动。
-4. 检索后端：起步用 faiss 本地文件，还是直接上 pgvector（与现有 `storage/` 对齐）。
-5. `skills/core` 的 owner 团队与晋升评审人选。
+1. hub 仓命名与归属、放哪个 GitHub org。
+2. eval ground truth：纯真机 A/B vs 静态代理 vs 混合（决定 Phase 3 工期）。
+3. 是否采用 `technique/` 层（现招式隐含在 funnel scope 标签里）。
+4. 检索后端：faiss 本地文件 vs pgvector（对齐现有 `storage/`）。
+5. `skills/core/` owner 团队与晋升评审人。
