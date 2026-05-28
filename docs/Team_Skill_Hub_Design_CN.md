@@ -7,6 +7,7 @@
 | 适用范围 | `.opencode/` harness 的团队化演进；新增独立中央仓 `hm-skill-hub` |
 | 语言策略 | 散文 zh-CN；路径 / 字段名 / 代码 / CLI / commit 一律英文 |
 | 关联文档 | `.opencode/docs/harness_engineer_system.md`、`.opencode/docs/memory_system.md` |
+| 图示 | `docs/Team_Skill_Hub_Design_Diagrams_CN.md`（6 张 Mermaid：闭环 / 双引擎 / 沉淀漏斗 / skills 布局 / 运行时组合 / 路线图）|
 | 修订 | v2.0：新增 §6.2「skills/ 内部布局」；中后段整体精简（删比对脚注、压缩 schema、合并治理/稳定/可用） |
 
 ---
