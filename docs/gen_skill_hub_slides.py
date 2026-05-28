@@ -155,7 +155,7 @@ def header(slide, title, sub, page):
     textbox(slide, 12.2, 0.30, 0.9, 0.5, [(page, 12, LIGHTTXT, True)], align=PP_ALIGN.RIGHT)
 
 
-def footer(slide, txt="Team Skill Hub · Draft v2.0 · 2026-05"):
+def footer(slide, txt="Team Skill Hub · Draft v2.1 · 2026-05"):
     textbox(slide, 0.5, 7.15, 12.3, 0.3, [(txt, 9, MUT, False)])
 
 
@@ -187,7 +187,7 @@ def build():
         b = box(s, px, 5.55, w, 0.5, NAVY2, line=TEAL, radius=0.5, lw=1.0)
         settext(b, [(p, 12, WHITE, True)])
         px += w + 0.25
-    textbox(s, 0.9, 6.7, 8, 0.4, [("Draft v2.0  ·  2026-05  ·  研究 + 方案设计", 11, LIGHTTXT, False)])
+    textbox(s, 0.9, 6.7, 8, 0.4, [("Draft v2.1  ·  2026-05  ·  研究 + 方案设计", 11, LIGHTTXT, False)])
 
     # S2 closed loop (hero) -----------------------------------------------
     s = prs.slides.add_slide(blank)
@@ -285,34 +285,36 @@ def build():
 
     # S5 skills layout -----------------------------------------------------
     s = prs.slides.add_slide(blank)
-    header(s, "skills/ 内部布局：消灭组合爆炸", "只有 3 个维度是真正的 skill 文件夹；file / function → knowledge", "05")
+    header(s, "skills/ 内部布局：消灭组合爆炸", "首要判据：做法/流程=skill，事实/教训=knowledge；只有 3 个维度是真正的 skill 文件夹", "05")
+    crit = box(s, 0.6, 1.15, 12.13, 0.42, L_INDIGO, line=INDIGO, radius=0.12)
+    settext(crit, [("判定：做法/流程 → skill（照着执行·改措辞调优·eval 衡量）　｜　事实/结论/教训 → knowledge（查阅·增删纠错条目）", 11, INDIGO, True)])
     dims = ["流程 / 跨切面", "优化招式 mechanism", "子系统 subsystem", "目录 dir", "文件 file", "函数 function / symbol"]
-    dy = 1.45
+    dy = 1.78
     dim_boxes = []
     for d in dims:
-        b = box(s, 0.6, dy, 3.0, 0.62, L_GRAY, line=LINE)
+        b = box(s, 0.6, dy, 3.0, 0.56, L_GRAY, line=LINE)
         settext(b, [(d, 11, INK, True)], align=PP_ALIGN.LEFT)
-        dim_boxes.append((b, dy + 0.31))
-        dy += 0.78
+        dim_boxes.append((b, dy + 0.28))
+        dy += 0.72
     # skill targets (blue)
-    t_core = box(s, 8.3, 1.5, 4.4, 0.7, L_BLUE, line=BLUE)
+    t_core = box(s, 8.3, 1.78, 4.4, 0.62, L_BLUE, line=BLUE)
     settext(t_core, [("skills/core/   流程·跨切面", 11.5, BLUE, True)])
-    t_tech = box(s, 8.3, 2.45, 4.4, 0.7, L_BLUE, line=BLUE)
+    t_tech = box(s, 8.3, 2.62, 4.4, 0.62, L_BLUE, line=BLUE)
     settext(t_tech, [("skills/technique/   优化招式", 11.5, BLUE, True)])
-    t_dom = box(s, 8.3, 3.40, 4.4, 0.7, L_BLUE, line=BLUE)
+    t_dom = box(s, 8.3, 3.46, 4.4, 0.62, L_BLUE, line=BLUE)
     settext(t_dom, [("skills/domain/ 按子系统/  ← 唯一拓扑层", 11, BLUE, True)])
     # knowledge targets (orange)
-    k_f = box(s, 8.3, 4.65, 4.4, 0.7, L_ORANGE, line=ORANGE)
+    k_f = box(s, 8.3, 4.62, 4.4, 0.62, L_ORANGE, line=ORANGE)
     settext(k_f, [("knowledge/targets/facts/", 11.5, ORANGE, True)])
-    k_l = box(s, 8.3, 5.60, 4.4, 0.7, L_ORANGE, line=ORANGE)
+    k_l = box(s, 8.3, 5.46, 4.4, 0.62, L_ORANGE, line=ORANGE)
     settext(k_l, [("knowledge/ idea_ledger + symbol_selectors", 10.5, ORANGE, True)])
-    targets = {0: (t_core, 1.85, BLUE, False), 1: (t_tech, 2.80, BLUE, False), 2: (t_dom, 3.75, BLUE, False),
-               3: (t_dom, 3.75, MUT, True), 4: (k_f, 5.0, ORANGE, False), 5: (k_l, 5.95, ORANGE, False)}
+    targets = {0: (t_core, 2.09, BLUE, False), 1: (t_tech, 2.93, BLUE, False), 2: (t_dom, 3.77, BLUE, False),
+               3: (t_dom, 3.77, MUT, True), 4: (k_f, 4.93, ORANGE, False), 5: (k_l, 5.77, ORANGE, False)}
     for i, (db, dcy) in enumerate(dim_boxes):
         tb, tcy, col, dash = targets[i]
         arrow(s, 3.6, dcy, 8.3, tcy, col, 1.75, dash=dash)
-    textbox(s, 4.0, 3.95, 4.2, 0.5, [("目录: applies_to.path_globs", 9.5, MUT, True), ("（不单独建目录）", 9, MUT, False)])
-    takeaway(s, 6.55, "组合而非枚举：resolver 按 selector 解析 domain，requires 拉入 core+technique，knowledge 按符号检索挂载。")
+    textbox(s, 3.95, 4.05, 4.2, 0.5, [("目录: applies_to.path_globs", 9.5, MUT, True), ("（不单独建目录）", 9, MUT, False)])
+    takeaway(s, 6.45, "组合而非枚举：resolver 按 selector 解析 domain，requires 拉入 core+technique，knowledge 按符号检索挂载。")
     footer(s)
 
     # S6 roadmap -----------------------------------------------------------

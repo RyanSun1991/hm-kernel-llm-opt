@@ -2,13 +2,13 @@
 
 | 项 | 值 |
 |---|---|
-| 文档状态 | Draft v2.0（待团队评审） |
+| 文档状态 | Draft v2.1（待团队评审） |
 | 日期 | 2026-05-27 |
 | 适用范围 | `.opencode/` harness 的团队化演进；新增独立中央仓 `hm-skill-hub` |
 | 语言策略 | 散文 zh-CN；路径 / 字段名 / 代码 / CLI / commit 一律英文 |
 | 关联文档 | `.opencode/docs/harness_engineer_system.md`、`.opencode/docs/memory_system.md` |
 | 图示 | `docs/Team_Skill_Hub_Design_Diagrams_CN.md`（6 张 Mermaid：闭环 / 双引擎 / 沉淀漏斗 / skills 布局 / 运行时组合 / 路线图）|
-| 修订 | v2.0：新增 §6.2「skills/ 内部布局」；中后段整体精简（删比对脚注、压缩 schema、合并治理/稳定/可用） |
+| 修订 | v2.1：修正 §6.2 skill/knowledge 判定（补「做法 vs 事实」首要判据，三条降为排除项，补 bad_plans/global_lessons 归属与毕业通道）。v2.0：新增 §6.2 skills 布局 + 中后段精简 |
 
 ---
 
@@ -24,7 +24,7 @@
 - **Skills** → 用 **SkillOpt** 治理：技能文档 = 冻结模型的「可训练外部参数」，改动必须在留出 eval 套件上**严格变好**才接受；用 **GEPA Pareto** 解决多成员编辑塌缩。
 - **Knowledge** → 用 **memU/Mem0/Zep** 治理：分层、类型化、稳定 ID、**追加+去重+冲突消解**（非 git 行级合并）、双时态保留被取代记录。
 
-四个保证：**可迭代**（定时优化作业）、**可沉淀**（三层 + L0–L3）、**可闭环**（消费→蒸馏→晋升→发布→再消费）、**稳定可用**（semver + lockfile + eval-gate + 本地兜底 + 脱敏门）。
+四个保证：**可迭代**（定时优化作业）、**可沉淀**（三层 + L0–L3）、**可闭环**（消费→蒸馏→晋升→发布→再消费）、**可复用 + 稳定可用**（SKILL.md 标准 + semver + lockfile + eval-gate + 本地兜底 + 脱敏门）。
 
 ---
 
@@ -118,7 +118,7 @@
 | 原型 | 含义 | 归宿 |
 |---|---|---|
 | **procedural-shared** | agents / skills / commands / pipelines / harness 规范 / `*_template.md` | **hub** |
-| **knowledge-curated** | facts / rules / patterns / anti_patterns / idea_ledger | **hub** `knowledge/`（只放蒸馏精华）|
+| **knowledge-curated** | facts / rules / patterns / anti_patterns / idea_ledger（稳定招式可毕业为 technique skill，§6.2）| **hub** `knowledge/`（只放蒸馏精华）|
 | **run-evidence-local** | plans / reviews / bench / patches / 每次 design / current_task | **业务仓** `local/`；纯运行态 gitignore |
 
 互斥且穷尽：`.opencode/` 每个文件恰好落入其一（详见 §6.4）。**关键推论**：`agents/` 与 `skills/` 同属 procedural-shared，一起进 hub；`bench/`/`reviews/` 属 run-evidence-local，留业务仓，只有蒸馏精华晋升 hub。
@@ -232,11 +232,17 @@ eval_id: eval/task_suites/mm_reclaim_suite
 
 **组合而非枚举**（Voyager 式）：不为每个 `(子系统×招式)` 预制大技能，由 pipeline preset 在加载期组合小技能。`(subsystem × technique)` 矩阵由**加载期组合**消化，不在树里枚举。
 
-**防爆炸：skill vs knowledge 判定三铁律**（三条全过才是 skill，否则归 knowledge）：
+**防爆炸：skill vs knowledge 判定**
 
-1. **可复用**：跨 ≥2 target？只对一个 file/function 成立 → knowledge。
-2. **有 eval 信号**：改它能在 eval 上测出行为变化？只是一条事实/裁决 → knowledge。
-3. **稳定**：rebase 后不变（招式/流程）？随文件/符号移动 → knowledge。
+**首要判据（先问这条）**：**做法/流程**（AI 照着*执行*，靠*改写措辞*调优、eval 衡量好坏）→ **skill**；**事实/结论/教训**（AI *查阅*，靠*增删纠错条目*维护，不靠改措辞）→ **knowledge**。一刀切：「查清单」是 skill，「清单内容」是 knowledge。
+
+下面三条只是**排除项**（任一不满足 → 必是 knowledge；三条全过也不直接等于 skill，仍以首要判据为准）：
+
+1. **可复用**：只对一个 file/function 成立 → knowledge。
+2. **稳定**：随文件/符号移动（rebase 即变）→ knowledge。
+3. **可优化**：措辞不是你会反复调、eval 测不出差异 → knowledge。
+
+例：`bad_plans` / `global_lessons` 三条都过、却仍是 **knowledge**（被查阅的教训；"出方案前先查 bad_plans 去重"这条*流程*写在 `optimization-funnel` 技能里）。某条教训若稳定成"固定步骤 + 可复用 + eval 可测"的招式，可**毕业**升入 `technique/`（knowledge 是原矿，technique 是提纯成品）。
 
 → **永不建 per-file / per-function 的 skill。**
 
@@ -303,6 +309,8 @@ eval_id: eval/task_suites/mm_reclaim_suite
 | `pattern` | 可复用正向模式 |
 | `anti_pattern` | 反模式 |
 | `playbook_step` | 流程步骤片段 |
+
+> `pattern` / `playbook_step` 是被*查阅*的记录条目（"有这么个招式/步骤"）；当它稳定成可*执行*、eval 可测的流程，毕业为 `technique` / `core` 技能（§6.2 首要判据）。
 
 **`memory_item` 关键字段**（完整 JSON-Schema 在 `schemas/`）：
 
