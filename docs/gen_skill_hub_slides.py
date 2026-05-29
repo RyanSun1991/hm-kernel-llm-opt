@@ -39,6 +39,7 @@ LINE = RGBColor(0xCB, 0xD5, 0xE1)
 LIGHTTXT = RGBColor(0xC8, 0xD2, 0xE0)
 
 FONT = "Microsoft YaHei"
+MONO = "Consolas"
 EW, EH = 13.333, 7.5
 
 
@@ -164,6 +165,42 @@ def takeaway(slide, y, txt, fill=L_INDIGO, line=INDIGO, color=INDIGO):
     settext(b, [(txt, 12.5, color, True)])
 
 
+def code_lines(shape, rows, size=8.6, space=1.6, width=36):
+    """Render a monospace directory-tree block: each row = (path, comment).
+
+    `path` keeps tree alignment (monospace, INK); `comment` is a muted zh-CN
+    gloss (YaHei). Path is padded to `width` so comments line up in a column.
+    """
+    tf = shape.text_frame
+    tf.word_wrap = False
+    tf.vertical_anchor = MSO_ANCHOR.TOP
+    tf.margin_left = Inches(0.14)
+    tf.margin_right = Inches(0.06)
+    tf.margin_top = Inches(0.10)
+    tf.margin_bottom = Inches(0.05)
+    first = True
+    for path, comment in rows:
+        p = tf.paragraphs[0] if first else tf.add_paragraph()
+        first = False
+        p.alignment = PP_ALIGN.LEFT
+        p.space_after = Pt(space)
+        p.space_before = Pt(0)
+        pad = path if len(path) >= width or not comment else path.ljust(width)
+        r = p.add_run()
+        r.text = pad
+        set_run(r, size, INK, False, font=MONO)
+        if comment:
+            r2 = p.add_run()
+            r2.text = "# " + comment
+            set_run(r2, size - 0.4, MUT, False, font=FONT)
+
+
+def minicard(slide, x, y, w, h, head, body, fill, line, hcolor):
+    b = box(slide, x, y, w, h, fill, line=line, radius=0.1)
+    settext(b, [(head, 11, hcolor, True), (body, 9.5, INK, False)], anchor=MSO_ANCHOR.TOP)
+    return b
+
+
 # ---- deck ------------------------------------------------------------------
 def build():
     prs = Presentation()
@@ -180,31 +217,32 @@ def build():
     textbox(s, 0.92, 3.45, 11.4, 0.6, [("Team Skill Hub  ·  本地沉淀 → 团队技能仓 → 反哺 Pipeline → 闭环迭代", 17, TEAL, False)])
     textbox(s, 0.92, 4.45, 11.4, 0.5,
             [("可迭代  ·  可沉淀  ·  可闭环优化  ·  可复用  ·  稳定可用", 16, LIGHTTXT, False)])
+    textbox(s, 0.9, 5.25, 11.4, 0.3, [("方法来源（业界研究参考）：", 11, TEAL, False)])
     pills = ["SkillOpt", "memU", "Mem0 / Zep", "GEPA", "Voyager", "Agent Skills"]
     px = 0.9
     for p in pills:
         w = 0.45 + 0.16 * len(p)
-        b = box(s, px, 5.55, w, 0.5, NAVY2, line=TEAL, radius=0.5, lw=1.0)
+        b = box(s, px, 5.62, w, 0.5, NAVY2, line=TEAL, radius=0.5, lw=1.0)
         settext(b, [(p, 12, WHITE, True)])
         px += w + 0.25
     textbox(s, 0.9, 6.7, 8, 0.4, [("Draft v2.1  ·  2026-05  ·  研究 + 方案设计", 11, LIGHTTXT, False)])
 
     # S2 closed loop (hero) -----------------------------------------------
     s = prs.slides.add_slide(blank)
-    header(s, "闭环全景 · 两仓协同", "消费 → 蒸馏 → 沉淀合并 → eval 发布 → 再消费（每环都有质量门）", "02")
+    header(s, "闭环全景 · 两仓协同", "消费 → 蒸馏 → 沉淀合并 → 评测后发布 → 再消费（每个环节都有质量关卡）", "02")
     by, bh = 2.55, 1.75
     A = box(s, 0.55, by, 2.75, bh, L_INDIGO, line=INDIGO, radius=0.1)
-    settext(A, [("hm-skill-hub", 14, INDIGO, True), ("团队资产面 · semver", 10, MUT, False),
-                ("skills/ (引擎B)", 11, INK, False), ("knowledge/ (引擎A)", 11, INK, False)])
+    settext(A, [("hm-skill-hub", 14, INDIGO, True), ("团队资产库 · 版本化(semver)", 9.5, MUT, False),
+                ("skills/ 技能·引擎B", 11, INK, False), ("knowledge/ 知识·引擎A", 11, INK, False)])
     B = box(s, 3.85, by, 2.95, bh, L_TEAL, line=TEAL, radius=0.1)
-    settext(B, [("pipeline 运行", 14, TEAL, True), ("（每成员）", 10, MUT, False),
+    settext(B, [("pipeline 运行", 14, TEAL, True), ("（每位成员各自跑）", 10, MUT, False),
                 ("research→plan→code→", 10.5, INK, False), ("review→test→decision", 10.5, INK, False)])
     C = box(s, 7.35, by, 2.55, bh, L_GRAY, line=LINE, radius=0.1)
-    settext(C, [("local/ 运行证据", 13, INK, True), ("+ sediment_staging", 11, INK, False),
-                ("（Tier1 候选）", 10, MUT, False)])
+    settext(C, [("local/ 运行证据", 13, INK, True), ("+ sediment_staging 暂存", 10.5, INK, False),
+                ("（Tier1 候选沉淀）", 10, MUT, False)])
     D = box(s, 10.45, by, 2.35, bh, L_AMBER, line=AMBER, radius=0.1)
-    settext(D, [("Curator + CI 门", 13, AMBER, True), ("去重 · 冲突 · eval-gate", 10, INK, False),
-                ("脱敏 · Pareto", 10, INK, False)])
+    settext(D, [("策展器 + CI 关卡", 13, AMBER, True), ("去重·消解冲突·评测闸门", 9.5, INK, False),
+                ("去敏(清密钥)·保留互补候选", 9.5, INK, False)])
     midy = by + bh / 2
     for x1, x2, lab, cx in [(3.30, 3.85, "① 消费", 3.575), (6.80, 7.35, "② 蒸馏", 7.075),
                             (9.90, 10.45, "③ 沉淀PR", 10.175)]:
@@ -212,58 +250,58 @@ def build():
         badge(s, cx, by - 0.32, lab, color=INDIGO, w=1.25)
     # loop back
     la = shape(s, MSO_SHAPE.LEFT_ARROW, 0.6, 4.75, 12.2, 0.72, L_BLUE, line=INDIGO)
-    settext(la, [("④ 发布：eval-gate 通过才回灌 pipeline（闭环·pinned 版本）", 13, INDIGO, True)])
-    takeaway(s, 5.9, "每一环都有质量门，脏数据不滚雪球；hub 以 pinned 版本反向喂回，可复现、可回滚。")
+    settext(la, [("④ 发布：评测闸门通过才回灌 pipeline（锁定版本 · 可复现 · 可回滚）", 13, INDIGO, True)])
+    takeaway(s, 5.9, "每个环节都有质量关卡，脏数据不会滚雪球；hub 以“锁定版本”反向喂回，可复现、可回滚。")
     footer(s)
 
     # S3 two engines -------------------------------------------------------
     s = prs.slides.add_slide(blank)
-    header(s, "脊柱：两类资产 · 两套合并引擎", "用同一套 git 行级合并治理两者 = 团队记忆仓失败根因；分开走", "03")
+    header(s, "脊柱：两类资产 · 两套合并引擎", "团队记忆仓失败的根因：用同一套 git 行级合并治理两类资产 → 必须分开走", "03")
     # left: Skills / engine B
     box(s, 0.55, 1.45, 6.0, 4.05, L_INDIGO, line=INDIGO, radius=0.05)
-    textbox(s, 0.7, 1.55, 5.7, 0.4, [("Skills（过程性）— 引擎 B：验证门竞争式编辑", 13.5, INDIGO, True)])
+    textbox(s, 0.7, 1.55, 5.7, 0.4, [("Skills 技能（做法/流程）— 引擎 B：改动须通过验证才合并", 13, INDIGO, True)])
     e1 = box(s, 0.85, 2.10, 5.4, 0.6, WHITE, line=LINE)
-    settext(e1, [("成员提议：有界编辑 add / del / replace（文本学习率裁剪）", 10.5, INK, False)])
+    settext(e1, [("成员提议有界改动 增/删/改（单次改动量受“文本学习率”约束）", 10, INK, False)])
     e2 = box(s, 1.55, 2.95, 4.0, 0.6, L_AMBER, line=AMBER)
-    settext(e2, [("留出 eval 套件：严格变好？", 11, AMBER, True)])
+    settext(e2, [("在留出的评测套件上：分数严格变好？", 10.5, AMBER, True)])
     arrow(s, 3.55, 2.70, 3.55, 2.95, INK, 2)
     e3 = box(s, 0.85, 3.80, 2.55, 0.62, L_GREEN, line=GREEN)
-    settext(e3, [("是 → 更新", 10, GREEN, True), ("best_skill.md + scorecard", 9.5, INK, False)])
+    settext(e3, [("是 → 采纳", 10, GREEN, True), ("更新技能正本 + 评分卡", 9, INK, False)])
     e4 = box(s, 3.70, 3.80, 2.55, 0.62, RGBColor(0xFD, 0xE7, 0xE9), line=RED)
-    settext(e4, [("否 → 进 bad_edits", 10, RED, True), ("缓冲（不再重试）", 9.5, INK, False)])
+    settext(e4, [("否 → 记入被拒改动表", 9.5, RED, True), ("（bad_edits·不再重试）", 9, INK, False)])
     arrow(s, 2.7, 3.55, 2.1, 3.80, GREEN, 1.75)
     arrow(s, 4.4, 3.55, 5.0, 3.80, RED, 1.75)
     e5 = box(s, 0.85, 4.65, 5.4, 0.66, RGBColor(0xE6, 0xE2, 0xFF), line=INDIGO)
-    settext(e5, [("GEPA Pareto：保留互补候选，防多人编辑塌缩到局部最优", 10.5, INDIGO, True)])
+    settext(e5, [("保留互补候选（Pareto 前沿）：防多人改动互相覆盖、塌缩为局部最优", 10, INDIGO, True)])
     # right: Knowledge / engine A
     box(s, 6.78, 1.45, 6.0, 4.05, L_ORANGE, line=ORANGE, radius=0.05)
-    textbox(s, 6.93, 1.55, 5.7, 0.4, [("Knowledge（事实/记忆）— 引擎 A：集合并 + 去重 + 冲突消解", 13, ORANGE, True)])
+    textbox(s, 6.93, 1.55, 5.7, 0.4, [("Knowledge 知识（事实/教训）— 引擎 A：按条目合并 + 去重 + 消解矛盾", 12, ORANGE, True)])
     k1 = box(s, 7.05, 2.10, 5.5, 0.55, WHITE, line=LINE)
-    settext(k1, [("稳定 ID · 集合并（绝不 git 行级合并）", 11, INK, True)])
+    settext(k1, [("每条一稳定 ID · 按条目合并（绝不做 git 行级合并）", 11, INK, True)])
     k2 = box(s, 7.05, 2.85, 5.5, 0.6, WHITE, line=LINE)
-    settext(k2, [("近似重复？→ 合并出处，confirmations + 1", 10.5, INK, False)])
+    settext(k2, [("近似重复？→ 合并来源，确认次数 +1", 10.5, INK, False)])
     k3 = box(s, 7.05, 3.60, 5.5, 0.7, WHITE, line=LINE)
-    settext(k3, [("矛盾？→ 证据/新近度加权（Zep 双时态）", 10.5, INK, False),
-                 ("旧记录标 superseded，不删除，可审计", 9.5, MUT, False)])
+    settext(k3, [("互相矛盾？→ 按证据强弱与新旧裁决", 10.5, INK, False),
+                 ("旧记录标“已被取代”，保留不删、可追溯", 9.5, MUT, False)])
     k4 = box(s, 7.05, 4.45, 5.5, 0.55, WHITE, line=LINE)
-    settext(k4, [("否则 → 新增（带出处 + 证据，无出处即拒）", 10.5, INK, False)])
+    settext(k4, [("都不是 → 新增入库（须带来源 + 证据，无来源即拒）", 10.5, INK, False)])
     for yy in (2.65, 3.45, 4.30):
         arrow(s, 9.8, yy, 9.8, yy + 0.15, ORANGE, 1.75)
-    takeaway(s, 5.75, "知识靠『集合并 + 去重 + 冲突消解』；技能靠『验证门竞争式编辑 + Pareto』。两类资产，两台引擎。")
+    takeaway(s, 5.75, "知识靠『按条目合并 + 去重 + 消解矛盾』；技能靠『验证后才合并 + 保留互补候选』。两类资产，两台引擎，分开治理。")
     footer(s)
 
     # S4 funnel ------------------------------------------------------------
     s = prs.slides.add_slide(blank)
-    header(s, "沉淀漏斗：三层 · 三道门 · L0–L3", "一条原始轨迹如何层层过门、晋升为团队资产", "04")
+    header(s, "沉淀漏斗：三层 · 三道关卡 · 成熟度 L0–L3", "一条原始运行轨迹，如何层层过关、晋升为团队共享资产", "04")
     rows = [
-        (2.4, 8.5, L_GRAY, LINE, [("Tier0 运行轨迹", 12.5, INK, True),
+        (2.4, 8.5, L_GRAY, LINE, [("Tier0 原始运行轨迹", 12.5, INK, True),
             ("plans · reviews · bench · design（本地，可能含密钥）", 10, MUT, False)]),
-        (3.1, 7.6, L_BLUE, BLUE, [("Tier1 候选 = L1 — 类型化 + 出处 + 证据（staging）", 11.5, BLUE, True)]),
-        (3.7, 6.8, L_AMBER, AMBER, [("门1 · Schema / Lint / 脱敏", 11.5, AMBER, True)]),
-        (3.7, 6.0, L_AMBER, AMBER, [("门2 · 证据门：引用 · delta · ≥N 确认", 11.5, AMBER, True)]),
-        (3.7, 5.2, L_AMBER, AMBER, [("门3 · 策展 + eval：Curator + 双评审 + eval-gate", 11.5, AMBER, True)]),
-        (3.7, 4.4, L_GREEN, GREEN, [("Tier2 = L2 stable → knowledge/ 或 skills/domain/", 11.5, GREEN, True)]),
-        (4.5, 3.4, RGBColor(0xC7, 0xEC, 0xD6), GREEN, [("L3 core → skills/core/（组织金标准）", 11.5, GREEN, True)]),
+        (3.1, 7.6, L_BLUE, BLUE, [("Tier1 候选 = L1 — 结构化 + 来源 + 证据（暂存区 staging）", 11, BLUE, True)]),
+        (3.7, 6.8, L_AMBER, AMBER, [("关卡1 · 格式校验 / 规范检查 / 去敏", 11.5, AMBER, True)]),
+        (3.7, 6.0, L_AMBER, AMBER, [("关卡2 · 证据门：有引用 · 有收益数据 · ≥N 次确认", 11, AMBER, True)]),
+        (3.7, 5.2, L_AMBER, AMBER, [("关卡3 · 策展 + 评测：去重合并 + 双人评审 + 评测闸门", 10.5, AMBER, True)]),
+        (3.7, 4.4, L_GREEN, GREEN, [("Tier2 = L2 稳定版 → 进 knowledge/ 或 skills/domain/", 11, GREEN, True)]),
+        (4.5, 3.4, RGBColor(0xC7, 0xEC, 0xD6), GREEN, [("L3 核心 → skills/core/（组织级金标准）", 11.5, GREEN, True)]),
     ]
     ys = [1.35, 2.15, 2.95, 3.75, 4.55, 5.35, 6.15]
     cx = EW / 2
@@ -280,15 +318,15 @@ def build():
     # reject side-notes
     textbox(s, 10.7, 2.95, 2.4, 0.9,
             [("拒 → 打回 / 留本地", 10, RED, True), ("无证据 → 留 L1", 10, RED, False),
-             ("破例 → 降级 + 签字", 10, RED, False), ("（无豁免口子）", 9, MUT, False)])
+             ("破例 → 降级 + 签字", 10, RED, False), ("（不设豁免口子）", 9, MUT, False)])
     footer(s)
 
     # S5 skills layout -----------------------------------------------------
     s = prs.slides.add_slide(blank)
-    header(s, "skills/ 内部布局：消灭组合爆炸", "首要判据：做法/流程=skill，事实/教训=knowledge；只有 3 个维度是真正的 skill 文件夹", "05")
+    header(s, "skills/ 内部布局：消灭组合爆炸", "首要判据：做法/流程 = 技能，事实/教训 = 知识；只有 3 个维度是真正的技能文件夹", "05")
     crit = box(s, 0.6, 1.15, 12.13, 0.42, L_INDIGO, line=INDIGO, radius=0.12)
-    settext(crit, [("判定：做法/流程 → skill（照着执行·改措辞调优·eval 衡量）　｜　事实/结论/教训 → knowledge（查阅·增删纠错条目）", 11, INDIGO, True)])
-    dims = ["流程 / 跨切面", "优化招式 mechanism", "子系统 subsystem", "目录 dir", "文件 file", "函数 function / symbol"]
+    settext(crit, [("判定：做法/流程 → 技能（照着执行·靠改措辞调优·评测能衡量）　｜　事实/结论/教训 → 知识（供查阅·靠增删纠错条目维护）", 10.5, INDIGO, True)])
+    dims = ["流程 / 跨切面", "优化招式（mechanism）", "子系统（subsystem）", "目录（dir）", "文件（file）", "函数（function/符号）"]
     dy = 1.78
     dim_boxes = []
     for d in dims:
@@ -302,29 +340,93 @@ def build():
     t_tech = box(s, 8.3, 2.62, 4.4, 0.62, L_BLUE, line=BLUE)
     settext(t_tech, [("skills/technique/   优化招式", 11.5, BLUE, True)])
     t_dom = box(s, 8.3, 3.46, 4.4, 0.62, L_BLUE, line=BLUE)
-    settext(t_dom, [("skills/domain/ 按子系统/  ← 唯一拓扑层", 11, BLUE, True)])
+    settext(t_dom, [("skills/domain/ 按子系统/  ← 唯一触及代码结构的层", 9.5, BLUE, True)])
     # knowledge targets (orange)
     k_f = box(s, 8.3, 4.62, 4.4, 0.62, L_ORANGE, line=ORANGE)
-    settext(k_f, [("knowledge/targets/facts/", 11.5, ORANGE, True)])
+    settext(k_f, [("knowledge/targets/facts/  文件级事实", 10.5, ORANGE, True)])
     k_l = box(s, 8.3, 5.46, 4.4, 0.62, L_ORANGE, line=ORANGE)
-    settext(k_l, [("knowledge/ idea_ledger + symbol_selectors", 10.5, ORANGE, True)])
+    settext(k_l, [("knowledge/ idea_ledger + 符号选择器", 10, ORANGE, True)])
     targets = {0: (t_core, 2.09, BLUE, False), 1: (t_tech, 2.93, BLUE, False), 2: (t_dom, 3.77, BLUE, False),
                3: (t_dom, 3.77, MUT, True), 4: (k_f, 4.93, ORANGE, False), 5: (k_l, 5.77, ORANGE, False)}
     for i, (db, dcy) in enumerate(dim_boxes):
         tb, tcy, col, dash = targets[i]
         arrow(s, 3.6, dcy, 8.3, tcy, col, 1.75, dash=dash)
-    textbox(s, 3.95, 4.05, 4.2, 0.5, [("目录: applies_to.path_globs", 9.5, MUT, True), ("（不单独建目录）", 9, MUT, False)])
-    takeaway(s, 6.45, "组合而非枚举：resolver 按 selector 解析 domain，requires 拉入 core+technique，knowledge 按符号检索挂载。")
+    textbox(s, 3.95, 4.05, 4.2, 0.5, [("目录：写进 domain 技能的“适用路径”", 9.5, MUT, True), ("（不单独建目录）", 9, MUT, False)])
+    takeaway(s, 6.45, "组合而非枚举：加载时按目标解析出 domain 技能，顺 requires 拉入 core+technique，再按符号检索挂上对应 knowledge。")
     footer(s)
 
-    # S6 roadmap -----------------------------------------------------------
+    # S6 full directory layout (NEW) --------------------------------------
     s = prs.slides.add_slide(blank)
-    header(s, "分阶段路线图", "Phase 3（建 eval 套件）是关键长杆，红色标注", "06")
+    header(s, "完整工程目录 Layout：两仓职责划清",
+           "两仓分工：hm-skill-hub = 团队共享资产（版本化、只读消费）｜ .opencode/ = 各成员执行面（本地叠加 + 在途沉淀）", "06")
+    # left card: central hub repo
+    box(s, 0.45, 1.22, 7.05, 3.92, WHITE, line=INDIGO, radius=0.03)
+    textbox(s, 0.62, 1.30, 6.8, 0.34,
+            [("① 中央资产仓 hm-skill-hub/ — 团队共享 · 版本化（只读消费）", 11.5, INDIGO, True)])
+    hub_rows = [
+        ("hm-skill-hub/", "团队共享 · 语义化版本(semver)"),
+        ("├─ registry.yaml", "总清单:技能/版本/评测状态/负责人"),
+        ("├─ schemas/", "各类记录的格式约束(校验关卡用)"),
+        ("├─ skills/", "技能(引擎B)·内部布局见上一页"),
+        ("│   core/ technique/ domain/", "三个真正的技能层 + _registry/"),
+        ("├─ knowledge/", "知识(引擎A·分层·每条一文件)"),
+        ("│   global/{lessons,anti_patterns}/", ""),
+        ("│   subsystems/<s>.md", ""),
+        ("│   targets/<slug>/{facts,decisions,idea_ledger}", ""),
+        ("│   index/", "向量检索索引"),
+        ("├─ evidence/{benchmarks,regressions}/", "可复核的证据"),
+        ("├─ eval/{task_suites,scorecards}/", "评测套件 + 评分卡"),
+        ("├─ policies/*.md", "promotion/merge/deprecation 规则"),
+        ("├─ staging/<member>/<date>/*.json", "入站候选(Tier1)"),
+        ("├─ tools/*.py", "sediment/run_evals/lint/dedup..."),
+        ("└─ .github/workflows/ci.yml", "校验+去敏+评测闸门+建索引"),
+    ]
+    hub_tb = s.shapes.add_textbox(Inches(0.5), Inches(1.68), Inches(7.0), Inches(3.42))
+    code_lines(hub_tb, hub_rows, size=8.8, space=1.5, width=36)
+    # right card: consumer repo
+    box(s, 7.7, 1.22, 5.18, 3.92, WHITE, line=TEAL, radius=0.03)
+    textbox(s, 7.87, 1.30, 4.9, 0.34,
+            [("② 业务仓 .opencode/ — 每成员执行面（本地叠加 + 在途沉淀）", 11, TEAL, True)])
+    oc_rows = [
+        (".opencode/", "在业务仓 hm-kernel-llm-opt 内"),
+        ("├─ hub/", "子模块,锁定 hub 版本(只读)"),
+        ("├─ local/", "本成员执行面产物"),
+        ("│   runs/<run_id>/", "plans·reviews·bench·patches"),
+        ("│     <target>_design.md", "运行证据(建议留存)"),
+        ("│   memory/", "在途工作记忆(Tier1)"),
+        ("│   sediment_staging/", "候选包 → PR 到 hub"),
+        ("├─ state/current_task.json", "纯运行态(gitignore)"),
+        ("├─ skill-memory.lock", "锁定 hub 版本(semver+SHA)"),
+        ("└─ resolver.py", "先 hub 共享,再叠加 local"),
+    ]
+    oc_tb = s.shapes.add_textbox(Inches(7.75), Inches(1.68), Inches(5.1), Inches(2.5))
+    code_lines(oc_tb, oc_rows, size=8.8, space=2.2, width=27)
+    # right card: archetype routing note under the tree
+    note = box(s, 7.87, 4.30, 4.84, 0.74, L_GRAY, line=LINE, radius=0.08)
+    settext(note, [("三类资产 → 唯一归宿", 10.5, INK, True),
+                   ("做法/流程→hub skills；事实/教训→hub knowledge；运行证据→local/", 9, MUT, False)],
+            anchor=MSO_ANCHOR.TOP)
+    # bottom: layout design rationale
+    textbox(s, 0.5, 5.22, 8, 0.28, [("布局设计要点", 11, NAVY, True)])
+    minicard(s, 0.45, 5.52, 4.0, 1.18, "资产面 / 执行面分离",
+             "hub 只读·共享·版本化；local 个人·在途·可丢弃。共享与个人互不污染。",
+             L_INDIGO, INDIGO, INDIGO)
+    minicard(s, 4.66, 5.52, 4.0, 1.18, "每条知识 = 一文件 + 一稳定 ID",
+             "从根上规避 git 行级冲突；热点文件不再争用，合并全交给引擎 A。",
+             L_ORANGE, ORANGE, ORANGE)
+    minicard(s, 8.87, 5.52, 4.0, 1.18, "子模块锁定 + 版本锁文件",
+             "锁定版本可复现、防漂移；本地留有副本，中央仓宕机也不阻塞。",
+             L_GREEN, GREEN, GREEN)
+    footer(s)
+
+    # S7 roadmap -----------------------------------------------------------
+    s = prs.slides.add_slide(blank)
+    header(s, "分阶段路线图", "Phase 3（搭建 eval 评测套件）是关键瓶颈（长杆），红色标注", "07")
     phases = [
-        ("Phase 0\n抽取\n1–2w", INDIGO, "双仓 pin + 路径兼容"),
-        ("Phase 1\n蒸馏\n2–3w", BLUE, "hmopt sediment"),
-        ("Phase 2\n策展+合并\n3–6w", TEAL, "引擎A + CI + policies"),
-        ("Phase 3\neval 门 ★\n6–10w", RED, "core suite + 引擎B"),
+        ("Phase 0\n抽取\n1–2w", INDIGO, "双仓锁定 + 路径兼容"),
+        ("Phase 1\n蒸馏\n2–3w", BLUE, "hmopt sediment 沉淀"),
+        ("Phase 2\n策展+合并\n3–6w", TEAL, "引擎A + CI + 规则文档"),
+        ("Phase 3\n评测门 ★\n6–10w", RED, "core 评测套件 + 引擎B"),
         ("Phase 4\n自动优化\n10w+", GREEN, "定时作业 + 发布节奏"),
     ]
     cw, cx0, cyy = 2.62, 0.45, 2.55
@@ -335,7 +437,7 @@ def build():
         settext(ch, lines)
         d = box(s, x + 0.15, cyy + 1.95, cw - 0.2, 0.85, L_GRAY, line=LINE)
         settext(d, [(deliv, 10.5, INK, False)])
-    takeaway(s, 5.95, "先 symlink 兜底跑通双仓（Phase 0）；eval 套件最难也最值；优化作业半自动 → 全自动。")
+    takeaway(s, 5.95, "先用 symlink 软链兜底、跑通双仓（Phase 0）；评测套件最难也最值；优化作业从半自动逐步走向全自动。")
     footer(s)
 
     out = Path(__file__).resolve().parent / "Team_Skill_Hub_Design_Slides.pptx"
