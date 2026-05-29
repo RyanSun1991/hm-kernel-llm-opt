@@ -195,12 +195,6 @@ def code_lines(shape, rows, size=8.6, space=1.6, width=36):
             set_run(r2, size - 0.4, MUT, False, font=FONT)
 
 
-def minicard(slide, x, y, w, h, head, body, fill, line, hcolor):
-    b = box(slide, x, y, w, h, fill, line=line, radius=0.1)
-    settext(b, [(head, 11, hcolor, True), (body, 9.5, INK, False)], anchor=MSO_ANCHOR.TOP)
-    return b
-
-
 # ---- deck ------------------------------------------------------------------
 def build():
     prs = Presentation()
@@ -355,25 +349,30 @@ def build():
     takeaway(s, 6.45, "组合而非枚举：加载时按目标解析出 domain 技能，顺 requires 拉入 core+technique，再按符号检索挂上对应 knowledge。")
     footer(s)
 
-    # S6 full directory layout (NEW) --------------------------------------
+    # S6 full directory layout (NEW) — frameless, full-canvas detailed listing
     s = prs.slides.add_slide(blank)
-    header(s, "完整工程目录 Layout：两仓职责划清",
-           "两仓分工：hm-skill-hub = 团队共享资产（版本化、只读消费）｜ .opencode/ = 各成员执行面（本地叠加 + 在途沉淀）", "06")
-    # left card: central hub repo (expanded with concrete examples)
-    box(s, 0.45, 1.13, 7.55, 5.86, WHITE, line=INDIGO, radius=0.03)
-    textbox(s, 0.62, 1.18, 7.3, 0.30,
-            [("① 中央资产仓 hm-skill-hub/ — 团队共享 · 版本化（举例展开）", 11, INDIGO, True)])
+    # slim header (no footer on this slide → maximize vertical space)
+    rect(s, 0, 0, EW, 0.58, NAVY)
+    rect(s, 0, 0.58, EW, 0.045, TEAL)
+    textbox(s, 0.28, 0.03, 11.8, 0.5,
+            [("完整工程目录 Layout · hm-skill-hub（团队共享） + .opencode（执行面）", 16, WHITE, True)],
+            anchor=MSO_ANCHOR.MIDDLE)
+    textbox(s, 12.5, 0.08, 0.6, 0.4, [("06", 12, LIGHTTXT, True)], align=PP_ALIGN.RIGHT, anchor=MSO_ANCHOR.MIDDLE)
+
+    # ---- left: full hub tree (frameless) ----
+    textbox(s, 0.28, 0.64, 7.9, 0.24,
+            [("① 中央资产仓 hm-skill-hub/  ·  团队共享 · 版本化(semver) · 只读消费", 10.5, INDIGO, True)])
     hub_rows = [
         ("hm-skill-hub/", "团队共享 · 版本化(semver)"),
-        ("├─ registry.yaml", "总清单:技能/版本/评测/负责人"),
-        ("├─ schemas/", "各类记录的格式约束(校验用)"),
-        ("├─ skills/", "技能(引擎B·过 eval-gate 优化) · 三层见上页"),
+        ("├─ registry.yaml", "总清单:技能/版本/评测状态/负责人"),
+        ("├─ schemas/", "各类记录的 JSON-Schema(校验门)"),
+        ("├─ skills/", "技能(引擎B · 过 eval-gate 竞争式优化)"),
         ("│  ├─ core/", "流程·跨切面(全子系统通用)"),
-        ("│  │  ├─ optimization-funnel/", "例:优化漏斗主流程 — 文件夹内容如下"),
+        ("│  │  ├─ optimization-funnel/", "例:优化漏斗主流程 — 内容如下"),
         ("│  │  │   ├─ SKILL.md", "选中即读:何时用 + 怎么用"),
         ("│  │  │   ├─ best_skill.md", "SkillOpt 优化出的“正本”"),
         ("│  │  │   ├─ evals/", "技能内·私有评测:用哪套题 + 留出用例"),
-        ("│  │  │   ├─ candidates/", "Pareto 前沿:互补候选"),
+        ("│  │  │   ├─ candidates/", "Pareto 前沿:互补候选(防塌缩)"),
         ("│  │  │   ├─ scorecards/", "本技能历次 A/B 跑分"),
         ("│  │  │   └─ references/", "重材料(按需加载)"),
         ("│  │  └─ stage-gate-enforcement/", "例:阶段门禁强制"),
@@ -381,60 +380,78 @@ def build():
         ("│  │  ├─ hoist-loop-invariant/", "例:循环不变量外提"),
         ("│  │  └─ batch-coalescing/", "例:批量合并写"),
         ("│  ├─ domain/", "按子系统(唯一触及代码结构)"),
-        ("│  │  ├─ mm-reclaim/", "例:内存回收(含 references/)"),
+        ("│  │  ├─ mm-reclaim/", "例:内存回收(SKILL.md + references/)"),
         ("│  │  └─ hyperhold-io/", "例:hyperhold I/O 路径"),
         ("│  └─ _registry/skills.yaml", "全量索引 + 子系统选择器"),
-        ("├─ agents/  ·  commands/", "角色定义 + slash 命令(评审制·非 eval)"),
-        ("├─ pipelines/  ·  docs/", "流水线预设 + harness 规范(原 CLAUDE.md)"),
-        ("├─ knowledge/", "知识(引擎A·分层·每条一文件)"),
-        ("│  ├─ global/", "全局教训 / 反模式"),
-        ("│  │  ├─ lessons/", "例:G012_reclaim-twice.md"),
-        ("│  │  └─ anti_patterns/", "例:A007_busy-wait.md"),
-        ("│  ├─ subsystems/<s>.md  ·  targets/<slug>/{facts,decisions,idea_ledger}", ""),
+        ("├─ agents/", "角色定义(procedural · 评审制·非 eval)"),
+        ("│  ├─ os-opt-manager.md", "Conductor 总调度"),
+        ("│  ├─ kernel-code-agent.md", "Coder 改代码"),
+        ("│  ├─ kernel-reviewer.md", "Reviewer 代码评审"),
+        ("│  ├─ kernel-research.md", "研究 / 溯源"),
+        ("│  └─ kernel-tester-agent.md · *-opt.md", "Verifier + 各子系统角色"),
+        ("├─ commands/", "slash 命令入口(procedural)"),
+        ("│  ├─ optimize_*.md", "generic/hyperhold/memmgr/workqueue"),
+        ("│  └─ research.md · plan.md · review_sync.md · function_detail.md", ""),
+        ("├─ pipelines/", "流水线预设 profile(procedural)"),
+        ("│  └─ generic_full · hyperhold_full · memmgr_reclaim_full · sync_review · workqueue_full", ""),
+        ("├─ docs/", "harness 规范(procedural · 原 .opencode/CLAUDE.md)"),
+        ("│  ├─ harness_engineer_system.md", "工程系统规范"),
+        ("│  └─ memory_system.md", "记忆系统规范"),
+        ("├─ knowledge/", "知识(引擎A · 分层 · 每条一文件)"),
+        ("│  ├─ global/{lessons,anti_patterns}/", "例:G012_* / A007_*"),
+        ("│  ├─ subsystems/<s>.md · targets/<slug>/{facts,decisions,idea_ledger}", ""),
         ("│  └─ index/", "向量检索索引"),
         ("├─ evidence/", "可复核证据(每条回链来源)"),
         ("│  ├─ benchmarks/", "例:mm-reclaim_2026Q2.json"),
         ("│  └─ regressions/", "例:R031_shrink_node.json"),
-        ("├─ eval/", "顶层·团队共享评测(区别于技能内 evals/)"),
+        ("├─ eval/", "顶层·团队共享评测(≠ 技能内 evals/)"),
         ("│  ├─ task_suites/", "可复用任务集 例:mm_reclaim_suite/"),
         ("│  └─ scorecards/", "发布级评分 例:funnel_v3_*.md"),
-        ("└─ policies/ staging/ tools/ .github/", "规则·入站候选·脚本·CI 门"),
+        ("├─ policies/", "promotion / merge / deprecation 规则"),
+        ("├─ staging/<member>/<date>/*.json", "入站候选(Tier1)"),
+        ("└─ tools/ · .github/workflows/ci.yml", "脚本 + CI(校验/去敏/评测闸门)"),
     ]
-    hub_tb = s.shapes.add_textbox(Inches(0.5), Inches(1.50), Inches(7.5), Inches(5.46))
-    code_lines(hub_tb, hub_rows, size=8.0, space=0.95, width=40)
+    hub_tb = s.shapes.add_textbox(Inches(0.28), Inches(0.88), Inches(7.9), Inches(6.55))
+    code_lines(hub_tb, hub_rows, size=7.2, space=0.75, width=42)
 
-    # right column: consumer repo .opencode/
-    box(s, 8.15, 1.18, 4.73, 2.74, WHITE, line=TEAL, radius=0.03)
-    textbox(s, 8.3, 1.26, 4.5, 0.32,
-            [("② 业务仓 .opencode/ — 每成员执行面", 11, TEAL, True)])
+    # ---- right column (frameless): consumer tree + routing + rationale + governance ----
+    rx = 8.35
+    textbox(s, rx, 0.64, 4.8, 0.24,
+            [("② 业务仓 .opencode/  ·  执行面（本地叠加 + 在途沉淀）", 10.5, TEAL, True)])
     oc_rows = [
-        (".opencode/", "在业务仓内 · 执行面"),
-        ("├─ hub/", "子模块·锁定版本(只读)"),
-        ("├─ local/", "本成员执行产物"),
-        ("│   runs/<run_id>/", "plans/reviews/bench…"),
-        ("│     <target>_design.md", "运行证据(建议留存)"),
-        ("│   memory/", "在途记忆(Tier1)"),
-        ("│   sediment_staging/", "候选包 → PR 到 hub"),
+        (".opencode/", "在业务仓 hm-kernel-llm-opt 内"),
+        ("├─ hub/", "submodule · 锁定 hub 版本(只读)"),
+        ("├─ local/", "本成员执行面产物"),
+        ("│  ├─ runs/<run_id>/", "plans·reviews·bench·patches"),
+        ("│  │   └─ <target>_design.md", "每次运行设计(建议留存)"),
+        ("│  ├─ memory/", "在途工作记忆(Tier1)"),
+        ("│  └─ sediment_staging/", "蒸馏候选 → PR 到 hub"),
         ("├─ state/current_task.json", "纯运行态(gitignore)"),
-        ("├─ skill-memory.lock", "锁定版本(semver+SHA)"),
-        ("└─ resolver.py", "先 hub 再叠加 local"),
+        ("├─ skill-memory.lock", "锁定 hub 版本(semver+SHA)"),
+        ("└─ resolver.py", "先 hub 共享, 再叠加 local"),
     ]
-    oc_tb = s.shapes.add_textbox(Inches(8.2), Inches(1.58), Inches(4.6), Inches(2.3))
-    code_lines(oc_tb, oc_rows, size=8.3, space=1.7, width=27)
-    # right column: archetype routing note
-    note = box(s, 8.15, 4.04, 4.73, 0.96, L_GRAY, line=LINE, radius=0.08)
-    settext(note, [("三类资产 → 唯一归宿", 10.5, INK, True),
-                   ("做法/流程 → hub（skills · agents · commands · pipelines · docs）", 8.4, MUT, False),
-                   ("事实/教训 → hub knowledge ｜ 运行证据 → local/", 8.4, MUT, False)],
-            anchor=MSO_ANCHOR.TOP)
-    # right column: layout design rationale (3 stacked points)
-    minicard(s, 8.15, 5.08, 4.73, 0.60, "资产面 / 执行面分离",
-             "hub 只读·共享·版本化；local 个人·在途", L_INDIGO, INDIGO, INDIGO)
-    minicard(s, 8.15, 5.72, 4.73, 0.60, "每条知识 = 一文件 + 稳定 ID",
-             "规避 git 行级冲突，热点文件不争用", L_ORANGE, ORANGE, ORANGE)
-    minicard(s, 8.15, 6.36, 4.73, 0.58, "子模块锁定 + 版本锁文件",
-             "可复现·防漂移·中央仓宕机本地兜底", L_GREEN, GREEN, GREEN)
-    footer(s)
+    oc_tb = s.shapes.add_textbox(Inches(rx - 0.05), Inches(0.90), Inches(4.9), Inches(1.9))
+    code_lines(oc_tb, oc_rows, size=8.0, space=1.1, width=28)
+
+    def rsec(y, head, lines, hcolor=NAVY):
+        textbox(s, rx, y, 4.8, 0.24, [(head, 10.2, hcolor, True)])
+        textbox(s, rx + 0.05, y + 0.26, 4.78, 0.74,
+                [(t, 8.4, INK, False) for t in lines])
+
+    rsec(2.78, "三类资产 → 唯一归宿",
+         ["做法/流程 → hub（skills · agents · commands · pipelines · docs）",
+          "事实/教训 → hub knowledge ｜ 运行证据 → local/"])
+    rsec(3.74, "布局设计要点",
+         ["· 资产/执行面分离：hub 只读共享·版本化；local 个人在途",
+          "· 每条知识 = 一文件 + 稳定 ID：规避 git 行级冲突",
+          "· 子模块锁定 + 版本锁：可复现·防漂移·宕机本地兜底"])
+    rsec(5.18, "治理差异 · 谁过 eval-gate",
+         ["· skills/ → 引擎B：eval-gate 竞争式优化（严格变好才合并）",
+          "· agents/commands/pipelines/docs → 评审制 + semver（不过 eval）",
+          "· knowledge → 引擎A 集合并去重；evidence/eval → 回链审计"])
+    rsec(6.50, "消费 · 高可用",
+         ["· submodule pin + skill-memory.lock：可复现、防漂移",
+          "· 中央仓宕机 → resolver 回退上次本地快照并告警"])
 
     # S7 roadmap -----------------------------------------------------------
     s = prs.slides.add_slide(blank)
