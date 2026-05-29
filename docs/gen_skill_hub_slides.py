@@ -360,16 +360,22 @@ def build():
     header(s, "完整工程目录 Layout：两仓职责划清",
            "两仓分工：hm-skill-hub = 团队共享资产（版本化、只读消费）｜ .opencode/ = 各成员执行面（本地叠加 + 在途沉淀）", "06")
     # left card: central hub repo (expanded with concrete examples)
-    box(s, 0.45, 1.18, 7.05, 5.62, WHITE, line=INDIGO, radius=0.03)
-    textbox(s, 0.62, 1.26, 6.8, 0.32,
-            [("① 中央资产仓 hm-skill-hub/ — 团队共享 · 版本化（举例展开）", 11.5, INDIGO, True)])
+    box(s, 0.45, 1.16, 7.55, 5.84, WHITE, line=INDIGO, radius=0.03)
+    textbox(s, 0.62, 1.22, 7.3, 0.30,
+            [("① 中央资产仓 hm-skill-hub/ — 团队共享 · 版本化（举例展开）", 11, INDIGO, True)])
     hub_rows = [
         ("hm-skill-hub/", "团队共享 · 版本化(semver)"),
         ("├─ registry.yaml", "总清单:技能/版本/评测/负责人"),
         ("├─ schemas/", "各类记录的格式约束(校验用)"),
         ("├─ skills/", "技能(引擎B) · 三层结构见上一页"),
         ("│  ├─ core/", "流程·跨切面(全子系统通用)"),
-        ("│  │  ├─ optimization-funnel/", "例:优化漏斗(见右侧放大)"),
+        ("│  │  ├─ optimization-funnel/", "例:优化漏斗主流程 — 文件夹内容如下"),
+        ("│  │  │   ├─ SKILL.md", "选中即读:何时用 + 怎么用"),
+        ("│  │  │   ├─ best_skill.md", "SkillOpt 优化出的“正本”"),
+        ("│  │  │   ├─ evals/", "技能内·私有评测:用哪套题 + 留出用例"),
+        ("│  │  │   ├─ candidates/", "Pareto 前沿:互补候选"),
+        ("│  │  │   ├─ scorecards/", "本技能历次 A/B 跑分"),
+        ("│  │  │   └─ references/", "重材料(按需加载)"),
         ("│  │  └─ stage-gate-enforcement/", "例:阶段门禁强制"),
         ("│  ├─ technique/", "优化招式 · 按 mechanism 命名"),
         ("│  │  ├─ hoist-loop-invariant/", "例:循环不变量外提"),
@@ -387,17 +393,18 @@ def build():
         ("├─ evidence/", "可复核证据(每条回链来源)"),
         ("│  ├─ benchmarks/", "例:mm-reclaim_2026Q2.json"),
         ("│  └─ regressions/", "例:R031_shrink_node.json"),
-        ("├─ eval/", "顶层评测资产·团队共享(见右下)"),
+        ("├─ eval/", "顶层·团队共享评测(区别于技能内 evals/)"),
         ("│  ├─ task_suites/", "可复用任务集 例:mm_reclaim_suite/"),
         ("│  └─ scorecards/", "发布级评分 例:funnel_v3_*.md"),
         ("└─ policies/ staging/ tools/ .github/", "规则·入站候选·脚本·CI 门"),
     ]
-    hub_tb = s.shapes.add_textbox(Inches(0.5), Inches(1.58), Inches(7.0), Inches(5.18))
-    code_lines(hub_tb, hub_rows, size=9.0, space=1.4, width=40)
+    hub_tb = s.shapes.add_textbox(Inches(0.5), Inches(1.54), Inches(7.5), Inches(5.42))
+    code_lines(hub_tb, hub_rows, size=8.6, space=1.0, width=40)
 
-    # right column R1: consumer repo .opencode/
-    box(s, 7.65, 1.18, 5.23, 2.30, WHITE, line=TEAL, radius=0.03)
-    textbox(s, 7.8, 1.24, 5.0, 0.30, [("② 业务仓 .opencode/ — 每成员执行面", 11, TEAL, True)])
+    # right column: consumer repo .opencode/
+    box(s, 8.15, 1.18, 4.73, 2.74, WHITE, line=TEAL, radius=0.03)
+    textbox(s, 8.3, 1.26, 4.5, 0.32,
+            [("② 业务仓 .opencode/ — 每成员执行面", 11, TEAL, True)])
     oc_rows = [
         (".opencode/", "在业务仓内 · 执行面"),
         ("├─ hub/", "子模块·锁定版本(只读)"),
@@ -410,33 +417,20 @@ def build():
         ("├─ skill-memory.lock", "锁定版本(semver+SHA)"),
         ("└─ resolver.py", "先 hub 再叠加 local"),
     ]
-    oc_tb = s.shapes.add_textbox(Inches(7.72), Inches(1.56), Inches(5.12), Inches(1.92))
-    code_lines(oc_tb, oc_rows, size=8.2, space=1.3, width=27)
-
-    # right column R2: zoom-in of one skill folder (vertical anatomy)
-    box(s, 7.65, 3.56, 5.23, 1.62, RGBColor(0xF3, 0xFB, 0xFA), line=TEAL, radius=0.04)
-    textbox(s, 7.8, 3.62, 5.0, 0.30,
-            [("【放大】一个技能文件夹 = skills/core/optimization-funnel/", 10, TEAL, True)])
-    anat_rows = [
-        ("SKILL.md", "选中即读:何时用 + 怎么用"),
-        ("best_skill.md", "SkillOpt 优化出的“正本”"),
-        ("evals/", "本技能评测:绑定哪套题 + 留出用例"),
-        ("candidates/", "Pareto 前沿:互补候选"),
-        ("scorecards/", "本技能历次 A/B 跑分"),
-        ("references/", "重材料(按需加载)"),
-    ]
-    anat_tb = s.shapes.add_textbox(Inches(7.82), Inches(3.96), Inches(5.0), Inches(1.20))
-    code_lines(anat_tb, anat_rows, size=8.3, space=1.4, width=14)
-
-    # right column R3: eval/ vs evals/ — the easily-confused pair
-    textbox(s, 7.65, 5.26, 5.23, 0.28,
-            [("易混淆：eval/（顶层共享题库） 与 evals/（技能内考卷）", 9.5, NAVY, True)])
-    minicard(s, 7.65, 5.56, 2.55, 1.34, "eval/  顶层 · 共享",
-             "共享题库 task_suites/ + 发布评分 scorecards/",
-             L_INDIGO, INDIGO, INDIGO)
-    minicard(s, 10.33, 5.56, 2.55, 1.34, "evals/  技能内 · 私有",
-             "引用 eval_id 指向某 suite + 本技能用例/跑分",
-             L_TEAL, TEAL, TEAL)
+    oc_tb = s.shapes.add_textbox(Inches(8.2), Inches(1.58), Inches(4.6), Inches(2.3))
+    code_lines(oc_tb, oc_rows, size=8.3, space=1.7, width=27)
+    # right column: archetype routing note
+    note = box(s, 8.15, 4.04, 4.73, 0.92, L_GRAY, line=LINE, radius=0.08)
+    settext(note, [("三类资产 → 唯一归宿", 10.5, INK, True),
+                   ("做法/流程→hub skills；事实/教训→hub knowledge；运行证据→local/", 8.8, MUT, False)],
+            anchor=MSO_ANCHOR.TOP)
+    # right column: layout design rationale (3 stacked points)
+    minicard(s, 8.15, 5.08, 4.73, 0.60, "资产面 / 执行面分离",
+             "hub 只读·共享·版本化；local 个人·在途", L_INDIGO, INDIGO, INDIGO)
+    minicard(s, 8.15, 5.72, 4.73, 0.60, "每条知识 = 一文件 + 稳定 ID",
+             "规避 git 行级冲突，热点文件不争用", L_ORANGE, ORANGE, ORANGE)
+    minicard(s, 8.15, 6.36, 4.73, 0.58, "子模块锁定 + 版本锁文件",
+             "可复现·防漂移·中央仓宕机本地兜底", L_GREEN, GREEN, GREEN)
     footer(s)
 
     # S7 roadmap -----------------------------------------------------------
