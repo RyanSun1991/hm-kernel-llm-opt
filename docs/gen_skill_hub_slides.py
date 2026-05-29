@@ -359,64 +359,72 @@ def build():
     s = prs.slides.add_slide(blank)
     header(s, "完整工程目录 Layout：两仓职责划清",
            "两仓分工：hm-skill-hub = 团队共享资产（版本化、只读消费）｜ .opencode/ = 各成员执行面（本地叠加 + 在途沉淀）", "06")
-    # left card: central hub repo
-    box(s, 0.45, 1.22, 7.05, 3.92, WHITE, line=INDIGO, radius=0.03)
-    textbox(s, 0.62, 1.30, 6.8, 0.34,
-            [("① 中央资产仓 hm-skill-hub/ — 团队共享 · 版本化（只读消费）", 11.5, INDIGO, True)])
+    # left card: central hub repo (expanded with concrete examples)
+    box(s, 0.45, 1.18, 7.55, 5.75, WHITE, line=INDIGO, radius=0.03)
+    textbox(s, 0.62, 1.26, 7.3, 0.32,
+            [("① 中央资产仓 hm-skill-hub/ — 团队共享 · 版本化（举例展开）", 11.5, INDIGO, True)])
     hub_rows = [
-        ("hm-skill-hub/", "团队共享 · 语义化版本(semver)"),
-        ("├─ registry.yaml", "总清单:技能/版本/评测状态/负责人"),
-        ("├─ schemas/", "各类记录的格式约束(校验关卡用)"),
-        ("├─ skills/", "技能(引擎B)·内部布局见上一页"),
-        ("│   core/ technique/ domain/", "三个真正的技能层 + _registry/"),
+        ("hm-skill-hub/", "团队共享 · 版本化(semver)"),
+        ("├─ registry.yaml", "总清单:技能/版本/评测/负责人"),
+        ("├─ schemas/", "各类记录的格式约束(校验用)"),
+        ("├─ skills/", "技能(引擎B) · 三层结构见上一页"),
+        ("│  ├─ core/", "流程·跨切面(全子系统通用)"),
+        ("│  │  ├─ optimization-funnel/", "例:优化漏斗主流程"),
+        ("│  │  │    SKILL.md · best_skill.md · evals/ · candidates/ · scorecards/", ""),
+        ("│  │  └─ stage-gate-enforcement/", "例:阶段门禁强制"),
+        ("│  ├─ technique/", "优化招式 · 按 mechanism 命名"),
+        ("│  │  ├─ hoist-loop-invariant/", "例:循环不变量外提"),
+        ("│  │  └─ batch-coalescing/", "例:批量合并写"),
+        ("│  ├─ domain/", "按子系统(唯一触及代码结构)"),
+        ("│  │  ├─ mm-reclaim/", "例:内存回收(含 references/)"),
+        ("│  │  └─ hyperhold-io/", "例:hyperhold I/O 路径"),
+        ("│  └─ _registry/skills.yaml", "全量索引 + 子系统选择器"),
         ("├─ knowledge/", "知识(引擎A·分层·每条一文件)"),
-        ("│   global/{lessons,anti_patterns}/", ""),
-        ("│   subsystems/<s>.md", ""),
-        ("│   targets/<slug>/{facts,decisions,idea_ledger}", ""),
-        ("│   index/", "向量检索索引"),
-        ("├─ evidence/{benchmarks,regressions}/", "可复核的证据"),
-        ("├─ eval/{task_suites,scorecards}/", "评测套件 + 评分卡"),
-        ("├─ policies/*.md", "promotion/merge/deprecation 规则"),
-        ("├─ staging/<member>/<date>/*.json", "入站候选(Tier1)"),
-        ("├─ tools/*.py", "sediment/run_evals/lint/dedup..."),
-        ("└─ .github/workflows/ci.yml", "校验+去敏+评测闸门+建索引"),
+        ("│  ├─ global/", "全局教训 / 反模式"),
+        ("│  │  ├─ lessons/", "例:G012_reclaim-twice.md"),
+        ("│  │  └─ anti_patterns/", "例:A007_busy-wait.md"),
+        ("│  ├─ subsystems/<s>.md  ·  targets/<slug>/{facts,decisions,idea_ledger}", ""),
+        ("│  └─ index/", "向量检索索引"),
+        ("├─ evidence/", "可复核证据(每条回链来源)"),
+        ("│  ├─ benchmarks/", "例:mm-reclaim_2026Q2.json"),
+        ("│  └─ regressions/", "例:R031_shrink_node.json"),
+        ("├─ eval/", "评测资产(引擎B 的发布门)"),
+        ("│  ├─ task_suites/", "例:mm_reclaim_suite/"),
+        ("│  └─ scorecards/", "例:funnel_v3_scorecard.md"),
+        ("└─ policies/ staging/ tools/ .github/", "规则·入站候选·脚本·CI 门"),
     ]
-    hub_tb = s.shapes.add_textbox(Inches(0.5), Inches(1.68), Inches(7.0), Inches(3.42))
-    code_lines(hub_tb, hub_rows, size=8.8, space=1.5, width=36)
-    # right card: consumer repo
-    box(s, 7.7, 1.22, 5.18, 3.92, WHITE, line=TEAL, radius=0.03)
-    textbox(s, 7.87, 1.30, 4.9, 0.34,
-            [("② 业务仓 .opencode/ — 每成员执行面（本地叠加 + 在途沉淀）", 11, TEAL, True)])
+    hub_tb = s.shapes.add_textbox(Inches(0.5), Inches(1.58), Inches(7.5), Inches(5.32))
+    code_lines(hub_tb, hub_rows, size=8.5, space=1.4, width=40)
+    # right column: consumer repo
+    box(s, 8.15, 1.18, 4.73, 2.74, WHITE, line=TEAL, radius=0.03)
+    textbox(s, 8.3, 1.26, 4.5, 0.32,
+            [("② 业务仓 .opencode/ — 每成员执行面", 11, TEAL, True)])
     oc_rows = [
-        (".opencode/", "在业务仓 hm-kernel-llm-opt 内"),
-        ("├─ hub/", "子模块,锁定 hub 版本(只读)"),
-        ("├─ local/", "本成员执行面产物"),
-        ("│   runs/<run_id>/", "plans·reviews·bench·patches"),
+        (".opencode/", "在业务仓内 · 执行面"),
+        ("├─ hub/", "子模块·锁定版本(只读)"),
+        ("├─ local/", "本成员执行产物"),
+        ("│   runs/<run_id>/", "plans/reviews/bench…"),
         ("│     <target>_design.md", "运行证据(建议留存)"),
-        ("│   memory/", "在途工作记忆(Tier1)"),
+        ("│   memory/", "在途记忆(Tier1)"),
         ("│   sediment_staging/", "候选包 → PR 到 hub"),
         ("├─ state/current_task.json", "纯运行态(gitignore)"),
-        ("├─ skill-memory.lock", "锁定 hub 版本(semver+SHA)"),
-        ("└─ resolver.py", "先 hub 共享,再叠加 local"),
+        ("├─ skill-memory.lock", "锁定版本(semver+SHA)"),
+        ("└─ resolver.py", "先 hub 再叠加 local"),
     ]
-    oc_tb = s.shapes.add_textbox(Inches(7.75), Inches(1.68), Inches(5.1), Inches(2.5))
-    code_lines(oc_tb, oc_rows, size=8.8, space=2.2, width=27)
-    # right card: archetype routing note under the tree
-    note = box(s, 7.87, 4.30, 4.84, 0.74, L_GRAY, line=LINE, radius=0.08)
+    oc_tb = s.shapes.add_textbox(Inches(8.2), Inches(1.58), Inches(4.6), Inches(2.3))
+    code_lines(oc_tb, oc_rows, size=8.3, space=1.7, width=27)
+    # right column: archetype routing note
+    note = box(s, 8.15, 4.04, 4.73, 0.92, L_GRAY, line=LINE, radius=0.08)
     settext(note, [("三类资产 → 唯一归宿", 10.5, INK, True),
-                   ("做法/流程→hub skills；事实/教训→hub knowledge；运行证据→local/", 9, MUT, False)],
+                   ("做法/流程→hub skills；事实/教训→hub knowledge；运行证据→local/", 8.8, MUT, False)],
             anchor=MSO_ANCHOR.TOP)
-    # bottom: layout design rationale
-    textbox(s, 0.5, 5.22, 8, 0.28, [("布局设计要点", 11, NAVY, True)])
-    minicard(s, 0.45, 5.52, 4.0, 1.18, "资产面 / 执行面分离",
-             "hub 只读·共享·版本化；local 个人·在途·可丢弃。共享与个人互不污染。",
-             L_INDIGO, INDIGO, INDIGO)
-    minicard(s, 4.66, 5.52, 4.0, 1.18, "每条知识 = 一文件 + 一稳定 ID",
-             "从根上规避 git 行级冲突；热点文件不再争用，合并全交给引擎 A。",
-             L_ORANGE, ORANGE, ORANGE)
-    minicard(s, 8.87, 5.52, 4.0, 1.18, "子模块锁定 + 版本锁文件",
-             "锁定版本可复现、防漂移；本地留有副本，中央仓宕机也不阻塞。",
-             L_GREEN, GREEN, GREEN)
+    # right column: layout design rationale (3 stacked points)
+    minicard(s, 8.15, 5.08, 4.73, 0.60, "资产面 / 执行面分离",
+             "hub 只读·共享·版本化；local 个人·在途", L_INDIGO, INDIGO, INDIGO)
+    minicard(s, 8.15, 5.72, 4.73, 0.60, "每条知识 = 一文件 + 稳定 ID",
+             "规避 git 行级冲突，热点文件不争用", L_ORANGE, ORANGE, ORANGE)
+    minicard(s, 8.15, 6.36, 4.73, 0.58, "子模块锁定 + 版本锁文件",
+             "可复现·防漂移·中央仓宕机本地兜底", L_GREEN, GREEN, GREEN)
     footer(s)
 
     # S7 roadmap -----------------------------------------------------------
