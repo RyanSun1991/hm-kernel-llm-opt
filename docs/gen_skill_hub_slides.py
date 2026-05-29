@@ -156,7 +156,7 @@ def header(slide, title, sub, page):
     textbox(slide, 12.2, 0.30, 0.9, 0.5, [(page, 12, LIGHTTXT, True)], align=PP_ALIGN.RIGHT)
 
 
-def footer(slide, txt="Team Skill Hub · Draft v2.1 · 2026-05"):
+def footer(slide, txt="Team Skill Hub · Draft v2.2 · 2026-05"):
     textbox(slide, 0.5, 7.15, 12.3, 0.3, [(txt, 9, MUT, False)])
 
 
@@ -225,7 +225,7 @@ def build():
         b = box(s, px, 5.62, w, 0.5, NAVY2, line=TEAL, radius=0.5, lw=1.0)
         settext(b, [(p, 12, WHITE, True)])
         px += w + 0.25
-    textbox(s, 0.9, 6.7, 8, 0.4, [("Draft v2.1  ·  2026-05  ·  研究 + 方案设计", 11, LIGHTTXT, False)])
+    textbox(s, 0.9, 6.7, 8, 0.4, [("Draft v2.2  ·  2026-05  ·  研究 + 方案设计", 11, LIGHTTXT, False)])
 
     # S2 closed loop (hero) -----------------------------------------------
     s = prs.slides.add_slide(blank)
@@ -360,14 +360,14 @@ def build():
     header(s, "完整工程目录 Layout：两仓职责划清",
            "两仓分工：hm-skill-hub = 团队共享资产（版本化、只读消费）｜ .opencode/ = 各成员执行面（本地叠加 + 在途沉淀）", "06")
     # left card: central hub repo (expanded with concrete examples)
-    box(s, 0.45, 1.16, 7.55, 5.84, WHITE, line=INDIGO, radius=0.03)
-    textbox(s, 0.62, 1.22, 7.3, 0.30,
+    box(s, 0.45, 1.13, 7.55, 5.86, WHITE, line=INDIGO, radius=0.03)
+    textbox(s, 0.62, 1.18, 7.3, 0.30,
             [("① 中央资产仓 hm-skill-hub/ — 团队共享 · 版本化（举例展开）", 11, INDIGO, True)])
     hub_rows = [
         ("hm-skill-hub/", "团队共享 · 版本化(semver)"),
         ("├─ registry.yaml", "总清单:技能/版本/评测/负责人"),
         ("├─ schemas/", "各类记录的格式约束(校验用)"),
-        ("├─ skills/", "技能(引擎B) · 三层结构见上一页"),
+        ("├─ skills/", "技能(引擎B·过 eval-gate 优化) · 三层见上页"),
         ("│  ├─ core/", "流程·跨切面(全子系统通用)"),
         ("│  │  ├─ optimization-funnel/", "例:优化漏斗主流程 — 文件夹内容如下"),
         ("│  │  │   ├─ SKILL.md", "选中即读:何时用 + 怎么用"),
@@ -384,6 +384,8 @@ def build():
         ("│  │  ├─ mm-reclaim/", "例:内存回收(含 references/)"),
         ("│  │  └─ hyperhold-io/", "例:hyperhold I/O 路径"),
         ("│  └─ _registry/skills.yaml", "全量索引 + 子系统选择器"),
+        ("├─ agents/  ·  commands/", "角色定义 + slash 命令(评审制·非 eval)"),
+        ("├─ pipelines/  ·  docs/", "流水线预设 + harness 规范(原 CLAUDE.md)"),
         ("├─ knowledge/", "知识(引擎A·分层·每条一文件)"),
         ("│  ├─ global/", "全局教训 / 反模式"),
         ("│  │  ├─ lessons/", "例:G012_reclaim-twice.md"),
@@ -398,8 +400,8 @@ def build():
         ("│  └─ scorecards/", "发布级评分 例:funnel_v3_*.md"),
         ("└─ policies/ staging/ tools/ .github/", "规则·入站候选·脚本·CI 门"),
     ]
-    hub_tb = s.shapes.add_textbox(Inches(0.5), Inches(1.54), Inches(7.5), Inches(5.42))
-    code_lines(hub_tb, hub_rows, size=8.6, space=1.0, width=40)
+    hub_tb = s.shapes.add_textbox(Inches(0.5), Inches(1.50), Inches(7.5), Inches(5.46))
+    code_lines(hub_tb, hub_rows, size=8.0, space=0.95, width=40)
 
     # right column: consumer repo .opencode/
     box(s, 8.15, 1.18, 4.73, 2.74, WHITE, line=TEAL, radius=0.03)
@@ -420,9 +422,10 @@ def build():
     oc_tb = s.shapes.add_textbox(Inches(8.2), Inches(1.58), Inches(4.6), Inches(2.3))
     code_lines(oc_tb, oc_rows, size=8.3, space=1.7, width=27)
     # right column: archetype routing note
-    note = box(s, 8.15, 4.04, 4.73, 0.92, L_GRAY, line=LINE, radius=0.08)
+    note = box(s, 8.15, 4.04, 4.73, 0.96, L_GRAY, line=LINE, radius=0.08)
     settext(note, [("三类资产 → 唯一归宿", 10.5, INK, True),
-                   ("做法/流程→hub skills；事实/教训→hub knowledge；运行证据→local/", 8.8, MUT, False)],
+                   ("做法/流程 → hub（skills · agents · commands · pipelines · docs）", 8.4, MUT, False),
+                   ("事实/教训 → hub knowledge ｜ 运行证据 → local/", 8.4, MUT, False)],
             anchor=MSO_ANCHOR.TOP)
     # right column: layout design rationale (3 stacked points)
     minicard(s, 8.15, 5.08, 4.73, 0.60, "资产面 / 执行面分离",

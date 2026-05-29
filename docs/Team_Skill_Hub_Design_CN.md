@@ -2,13 +2,13 @@
 
 | 项 | 值 |
 |---|---|
-| 文档状态 | Draft v2.1（待团队评审） |
-| 日期 | 2026-05-27 |
+| 文档状态 | Draft v2.2（待团队评审） |
+| 日期 | 2026-05-29 |
 | 适用范围 | `.opencode/` harness 的团队化演进；新增独立中央仓 `hm-skill-hub` |
 | 语言策略 | 散文 zh-CN；路径 / 字段名 / 代码 / CLI / commit 一律英文 |
 | 关联文档 | `.opencode/docs/harness_engineer_system.md`、`.opencode/docs/memory_system.md` |
 | 图示 | `docs/Team_Skill_Hub_Design_Diagrams_CN.md`（6 张 Mermaid：闭环 / 双引擎 / 沉淀漏斗 / skills 布局 / 运行时组合 / 路线图）|
-| 修订 | v2.1：修正 §6.2 skill/knowledge 判定（补「做法 vs 事实」首要判据，三条降为排除项，补 bad_plans/global_lessons 归属与毕业通道）。v2.0：新增 §6.2 skills 布局 + 中后段精简 |
+| 修订 | v2.2：§6.1/§6.4 显式补全 procedural 顶层目录（`agents/`/`commands/`/`pipelines/`/`docs/` 与 `skills/` 平级、非嵌入），补 `CLAUDE.md`/`config.yaml` 迁移与「工具固定路径自动加载」兼容方案。v2.1：修正 §6.2 skill/knowledge 判定（补「做法 vs 事实」首要判据，三条降为排除项，补 bad_plans/global_lessons 归属与毕业通道）。v2.0：新增 §6.2 skills 布局 + 中后段精简 |
 
 ---
 
@@ -162,7 +162,11 @@
 hm-skill-hub/
   registry.yaml                # 清单: skill 列表 + 版本 + eval 状态 + owner
   schemas/                     # 每种记录的 JSON-Schema (lint 门)
-  skills/                      # Tier 2 过程性技能 (引擎 B) —— 内部布局见 §6.2
+  skills/                      # Tier 2 过程性技能 (引擎 B, 过 eval-gate 优化) —— 内部布局见 §6.2
+  agents/                      # 角色定义 (procedural·共享): Conductor/Coder/Reviewer/Verifier...
+  commands/                    # slash 命令入口 (procedural·共享)
+  pipelines/                   # 流水线预设 (procedural·共享): generic_full / hyperhold_full ...
+  docs/                        # harness 规范 (procedural·共享): 原 .opencode/CLAUDE.md 等铁律
   knowledge/                   # Tier 2 策展记忆 (引擎 A, memU/Mem0 分层)
     global/lessons/  global/anti_patterns/
     subsystems/<s>.md
@@ -177,6 +181,8 @@ hm-skill-hub/
 ```
 
 `knowledge/` 把 `global_lessons.md`/ledger 拆成「每条一文件 / 稳定 ID 一行」——不同 ID = 不同文件，git 行级冲突几乎消失，去重/冲突交给 Curator 语义处理（§10）。
+
+> **procedural 顶层目录（关键澄清）**：`skills/`、`agents/`、`commands/`、`pipelines/`、`docs/` 同属 procedural-shared，一起进 hub，但**各占一个顶层目录、彼此平级**——`agents/`/`commands/` **不嵌进 `skills/`**（`skills/` 有 SKILL.md 包结构 + registry/resolver/eval-gate，混入会破坏其前提）。治理上**只有 `skills/` 过引擎 B 的 eval-gate 竞争式优化**（§10.2）；`agents/`/`commands/`/`pipelines/`/`docs/` 是共享规范，走**双评审 + semver**（§13）。若想优化某 agent，把其可 eval 的部分**毕业**成一个 skill，agent 用 `requires:` 引用（§6.2）。
 
 ### 6.2 skills/ 内部布局
 
@@ -270,7 +276,12 @@ eval_id: eval/task_suites/mm_reclaim_suite
 
 | 原目录 | 原型 | 新位置 |
 |---|---|---|
-| `skills/` `agents/` `commands/` `pipelines/` `docs/`(harness 规范) | procedural | **hub** 对应目录 |
+| `skills/` | procedural | **hub** `skills/`（按 core/technique/domain 重排；**过 eval-gate**，引擎 B）|
+| `agents/` `commands/` `pipelines/` | procedural | **hub** 各自**顶层目录**（与 `skills/` **平级，不嵌进 `skills/`**）；评审制 + semver·**非 eval** |
+| `docs/`(harness 规范) | procedural | **hub** `docs/` |
+| `.opencode/CLAUDE.md`(harness 铁律) | procedural | **hub** `docs/`；业务仓留**瘦壳** symlink/include（见下「路径兼容」）|
+| 仓库根 `CLAUDE.md`(本项目 build/架构/命令) | 项目文档 | **留业务仓**（非 hub 资产，描述本代码库本身）|
+| `config.yaml` | procedural + 本地 | **拆**：共享默认/schema → hub；本仓覆盖 + `skill-memory.lock` → `local/` |
 | `*_template.md` | procedural（模板是程序）| **hub**（实例落 local）|
 | `memory/idea_ledger/` | knowledge | 权威版 **hub** `knowledge/targets/<slug>/`；在途副本 `local/memory/` |
 | `memory/targets|subsystems|global_lessons` | knowledge | 蒸馏→ **hub** `knowledge/`；在途副本 `local/memory/` |
@@ -279,6 +290,8 @@ eval_id: eval/task_suites/mm_reclaim_suite
 | `state/current_task.json` | run-evidence（纯态）| **仅本地** gitignore |
 | `plans/` `reviews/` `bench/` | run-evidence | **业务仓** `local/runs/`；validated delta/反模式→hub |
 | `patches/` | run-evidence | **业务仓**（随代码），不入 hub |
+
+**两点澄清**：① **procedural 都进 hub，但各占顶层目录**——`agents/`/`commands/`/`pipelines/`/`docs/` 与 `skills/` 平级，**不放进 `skills/`**（理由见 §6.1 注）；② **只有 `skills/` 过 eval-gate**，其余 procedural 资产靠双评审 + semver，需要可优化时再「毕业」成 skill 被 `requires:` 引用。
 
 ```
 ┌─ hm-skill-hub  (资产面 · 共享 · semver) ─────────────────────────────────┐
@@ -294,7 +307,7 @@ eval_id: eval/task_suites/mm_reclaim_suite
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**路径兼容（Phase 0 必处理）**：现 harness 硬编码 `.opencode/skills/X.md` 等相对路径，移入 `hub/` 会破坏。二选一：① symlink `.opencode/skills→hub/skills` 保旧路径（最小改动）；② 批量改写 + `resolver.py` 统一解析。推荐先 ① 兜底再迁 ②。
+**路径兼容（Phase 0 必处理）**：现 harness 既硬编码 `.opencode/skills/X.md` 等相对路径，又由工具按**固定路径自动加载** `CLAUDE.md`（仓库根 / `.opencode/`），整体移入 `hub/` 会破坏。二选一：① symlink（如 `.opencode/skills→hub/skills`、`.opencode/CLAUDE.md→hub/docs/harness_rules.md`）保旧路径（最小改动）；② 批量改写 + `resolver.py` 统一解析。业务仓侧 `CLAUDE.md` 退化为**瘦壳**——`include`/指向 hub 那份共享规范 + 仅放本仓本地内容。推荐先 ① 兜底再迁 ②。
 
 ---
 
