@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "idea.schema.json",
+  "title": "Idea Ledger record",
+  "description": "Per-target verdict on an optimization mechanism. Stable ID, never deleted.",
+  "type": "object",
+  "required": ["id", "mechanism", "scope", "status", "verdicted_by", "verdicted_at", "rationale"],
+  "additionalProperties": false,
+  "properties": {
+    "id":            {"type": "string", "pattern": "^L[0-9]{3,}$"},
+    "mechanism":     {"type": "string", "description": "Canonical mechanism name from _registry/mechanisms.yaml."},
+    "scope":         {"type": "string", "description": "files / functions / structs touched"},
+    "status":        {"enum": ["approved", "landed", "reverted", "rejected", "deferred"]},
+    "verdicted_by":  {"type": "string"},
+    "verdicted_at":  {"type": "string"},
+    "iteration":     {"type": "integer", "minimum": 1},
+    "approved_on":   {"type": "string", "format": "date-time"},
+    "rejected_on":   {"type": "string", "format": "date-time"},
+    "landed_on":     {"type": "string", "format": "date-time"},
+    "deferred_on":   {"type": "string", "format": "date-time"},
+    "rationale":     {"type": "string", "maxLength": 1500},
+    "delta_pct":     {"type": "number"},
+    "compare_level": {"enum": ["total", "process", "thread", "lib", "function"]},
+    "validation_path": {"type": "string"},
+    "reopen_trigger": {"type": "string"},
+    "related_ids":   {"type": "array", "items": {"type": "string", "pattern": "^L[0-9]{3,}$"}}
+  },
+  "allOf": [
+    {
+      "if":   {"properties": {"status": {"const": "landed"}}, "required": ["status"]},
+      "then": {"required": ["landed_on", "delta_pct", "compare_level", "validation_path"]}
+    },
+    {
+      "if":   {"properties": {"status": {"const": "deferred"}}, "required": ["status"]},
+      "then": {"required": ["deferred_on", "reopen_trigger"]}
+    }
+  ]
+}

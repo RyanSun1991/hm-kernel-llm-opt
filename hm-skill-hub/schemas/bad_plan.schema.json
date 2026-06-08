@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "bad_plan.schema.json",
+  "title": "Bad Plan record",
+  "description": "Globally or per-subsystem rejected optimization mechanism. Funnel dedup join-target.",
+  "type": "object",
+  "required": ["id", "mechanism", "target_pattern", "scope", "applies_to", "reason", "evidence", "rejected_on", "rejected_by", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "id":             {"type": "string", "pattern": "^B[0-9]{3,}$", "description": "Stable, never reused."},
+    "title":          {"type": "string", "maxLength": 200},
+    "mechanism":      {"type": "string", "description": "Canonical mechanism name from _registry/mechanisms.yaml; join key for dedup."},
+    "aliases":        {"type": "array", "items": {"type": "string"}},
+    "target_pattern": {"type": "string", "description": "NL description of code surface this applies to."},
+    "scope":          {"enum": ["function", "call-site", "data-flow", "subsystem", "architectural"]},
+    "applies_to": {
+      "type": "object",
+      "required": ["subsystems"],
+      "additionalProperties": false,
+      "properties": {
+        "subsystems": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "['*'] in global file; concrete list per-subsystem."},
+        "platforms":  {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "reason":         {"type": "string", "maxLength": 1500},
+    "evidence":       {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "required": ["kind", "ref"], "additionalProperties": false,
+        "properties": {
+          "kind": {"enum": ["bench", "review", "commit", "run_id", "doc"]},
+          "ref":  {"type": "string"}
+        }
+      }
+    },
+    "rejected_on":    {"type": "string", "format": "date"},
+    "rejected_by":    {"type": "string"},
+    "status":         {"enum": ["active", "superseded", "revisited"]},
+    "superseded_by":  {"type": "string", "pattern": "^B[0-9]{3,}$"},
+    "related_ids":    {"type": "array", "items": {"type": "string"}}
+  },
+  "allOf": [
+    {
+      "if":   {"properties": {"status": {"const": "superseded"}}, "required": ["status"]},
+      "then": {"required": ["superseded_by"]}
+    }
+  ]
+}

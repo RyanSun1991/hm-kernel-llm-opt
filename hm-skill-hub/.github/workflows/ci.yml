@@ -1,0 +1,25 @@
+name: hub-ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: install deps
+        run: pip install -r tools/requirements.txt
+      - name: schema lint
+        run: python tools/lint.py
+      - name: secret scan
+        run: python tools/redact.py --check
+
+  # NOTE: Until the hub is git subtree-split into its own repo, this workflow
+  # file lives here as a scaffold. GitHub only triggers workflows from .github/
+  # at the *repository root*. After the split, this file is at root and runs.

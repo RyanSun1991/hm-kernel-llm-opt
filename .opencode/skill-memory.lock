@@ -1,0 +1,18 @@
+# Pin file: locks the hub version this business repo consumes.
+# Format (key: value lines; YAML-compatible).
+# Updated by `hmopt skill-lock --update <semver>` (Phase 1).
+#
+# Until the hub is split into its own git repo:
+#   mode: in-repo
+#   path: ../hm-skill-hub
+#   pin: <SHA of the kernel-opt repo HEAD>  (proxy)
+# After subtree split:
+#   mode: submodule
+#   url: <git url>
+#   semver: 1.2.3
+#   sha: <full commit SHA>
+
+mode: in-repo
+path: ../hm-skill-hub
+pin: HEAD                      # Phase 0 placeholder; bumped when hub gains real releases.
+hub_version: 0.1.0             # See hm-skill-hub/registry.yaml#hub.version

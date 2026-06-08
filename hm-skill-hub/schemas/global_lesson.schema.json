@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "global_lesson.schema.json",
+  "title": "Global Lesson record",
+  "description": "Reusable cross-target wisdom. Three kinds: heuristic / anti_pattern / validation_pitfall.",
+  "type": "object",
+  "required": ["id", "lesson", "kind", "applies_when", "do_or_dont", "tags", "evidence", "confidence", "added_on", "added_by", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "id":           {"type": "string", "pattern": "^[HAV][0-9]{3,}$", "description": "H=heuristic, A=anti_pattern, V=validation_pitfall."},
+    "lesson":       {"type": "string", "maxLength": 300, "description": "One-line takeaway."},
+    "kind":         {"enum": ["heuristic", "anti_pattern", "validation_pitfall"]},
+    "applies_when": {"type": "string", "description": "Trigger condition; used for retrieval matching."},
+    "do_or_dont":   {"type": "string", "description": "Concrete action: 'do: X' / 'don't: Y' / 'watch out for: Z'."},
+    "tags":         {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "evidence":     {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "required": ["kind", "ref"], "additionalProperties": false,
+        "properties": {
+          "kind": {"enum": ["bench", "review", "commit", "run_id", "doc"]},
+          "ref":  {"type": "string"}
+        }
+      }
+    },
+    "confidence":   {"enum": ["tentative", "observed", "confirmed"], "description": "tentative=1 support, observed=2-3, confirmed=>=4 independent."},
+    "added_on":     {"type": "string", "format": "date"},
+    "added_by":     {"type": "string"},
+    "status":       {"enum": ["active", "superseded", "deprecated"]},
+    "superseded_by":{"type": "string", "pattern": "^[HAV][0-9]{3,}$"},
+    "related_ids":  {"type": "array", "items": {"type": "string"}}
+  },
+  "allOf": [
+    {
+      "if":   {"properties": {"status": {"const": "superseded"}}, "required": ["status"]},
+      "then": {"required": ["superseded_by"]}
+    },
+    {
+      "if":   {"properties": {"id": {"pattern": "^H"}}, "required": ["id"]},
+      "then": {"properties": {"kind": {"const": "heuristic"}}}
+    },
+    {
+      "if":   {"properties": {"id": {"pattern": "^A"}}, "required": ["id"]},
+      "then": {"properties": {"kind": {"const": "anti_pattern"}}}
+    },
+    {
+      "if":   {"properties": {"id": {"pattern": "^V"}}, "required": ["id"]},
+      "then": {"properties": {"kind": {"const": "validation_pitfall"}}}
+    }
+  ]
+}

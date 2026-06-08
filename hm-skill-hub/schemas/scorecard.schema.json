@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "scorecard.schema.json",
+  "title": "Skill eval scorecard",
+  "description": "Output of run_evals: per-skill, per-version eval result. Joined into the release record.",
+  "type": "object",
+  "required": ["skill", "version", "suite", "run_at", "metrics", "per_case"],
+  "additionalProperties": false,
+  "properties": {
+    "skill":   {"type": "string"},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "suite":   {"type": "string"},
+    "run_at":  {"type": "string", "format": "date-time"},
+    "runner":  {"type": "string"},
+    "metrics": {
+      "type": "object", "required": ["pass_rate", "n_cases"],
+      "additionalProperties": false,
+      "properties": {
+        "pass_rate":         {"type": "number", "minimum": 0, "maximum": 1},
+        "n_cases":           {"type": "integer", "minimum": 0},
+        "instr_count_delta": {"type": "number"},
+        "regression_rate":   {"type": "number", "minimum": 0, "maximum": 1}
+      }
+    },
+    "per_case": {
+      "type": "array",
+      "items": {
+        "type": "object", "required": ["case_id", "pass"], "additionalProperties": false,
+        "properties": {
+          "case_id":     {"type": "string"},
+          "pass":        {"type": "boolean"},
+          "score":       {"type": "number"},
+          "notes":       {"type": "string"},
+          "diff_to_baseline": {"type": "string"}
+        }
+      }
+    },
+    "baseline_version":    {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "improvement_over_baseline": {"type": "boolean"}
+  }
+}

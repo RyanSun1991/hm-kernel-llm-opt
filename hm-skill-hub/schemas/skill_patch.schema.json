@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "skill_patch.schema.json",
+  "title": "Skill update manifest",
+  "description": "Mandatory manifest accompanying any skills/** PR. CI rejects PRs without this.",
+  "type": "object",
+  "required": ["skill", "edit_ops", "task_suite", "metrics", "baseline_version"],
+  "additionalProperties": false,
+  "properties": {
+    "skill":              {"type": "string", "description": "Skill name (matches skill_frontmatter.name)."},
+    "edit_ops": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "required": ["op"], "additionalProperties": false,
+        "properties": {
+          "op":        {"enum": ["add", "delete", "replace"]},
+          "anchor":    {"type": "string", "description": "Heading or unique snippet identifying the edit site."},
+          "rationale": {"type": "string"},
+          "before":    {"type": "string"},
+          "after":     {"type": "string"}
+        }
+      }
+    },
+    "task_suite":         {"type": "string", "description": "Path under eval/task_suites/"},
+    "metrics": {
+      "type": "object", "required": ["pass_rate", "instr_count_delta", "regression_rate"],
+      "additionalProperties": false,
+      "properties": {
+        "pass_rate":          {"type": "number"},
+        "instr_count_delta":  {"type": "number"},
+        "regression_rate":    {"type": "number"}
+      }
+    },
+    "baseline_version":   {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "rejected_buffer_ref":{"type": "string"},
+    "scorecard_path":     {"type": "string"}
+  }
+}

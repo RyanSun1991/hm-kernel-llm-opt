@@ -1,0 +1,84 @@
+# Controlled vocabulary of optimization mechanism names.
+# Join key for: bad_plan.mechanism, idea.mechanism, technique skill name.
+# Add new entries via PR; CI rejects PRs introducing an unregistered mechanism.
+
+mechanisms:
+  - name: hoist-invariant
+    description: Move loop-invariant computation out of hot loops.
+    aliases: ["hoist-loop-invariant", "loop-invariant-code-motion", "licm"]
+    related_skills: ["technique/hoist-loop-invariant"]
+
+  - name: inline-callee
+    description: Inline a callee into its caller's hot path.
+    aliases: ["force-inline", "manual-inline"]
+    related_skills: ["technique/inline-tradeoff"]
+
+  - name: batch-coalesce
+    description: Coalesce multiple small operations into one batch round-trip.
+    aliases: ["batch-write", "batch-io", "request-coalescing"]
+    related_skills: ["technique/batch-coalescing"]
+
+  - name: lock-split
+    description: Split a coarse lock into per-domain / per-shard finer locks.
+    aliases: ["fine-grained-locking", "lock-sharding"]
+    related_skills: ["technique/lock-granularity-reduction"]
+
+  - name: lock-elide
+    description: Remove a lock entirely, replacing with atomics / RCU / lock-free.
+    aliases: ["lockless", "atomic-replace"]
+    related_skills: ["technique/lock-granularity-reduction"]
+
+  - name: branch-elimination
+    description: Remove a branch on the hot path via predication or restructure.
+    aliases: ["branchless", "predicate-conversion"]
+    related_skills: ["technique/branch-elimination"]
+
+  - name: redundant-load-elimination
+    description: Eliminate repeated loads / stores of the same value.
+    aliases: ["common-subexpression", "cse"]
+    related_skills: ["technique/redundant-load-elimination"]
+
+  - name: dead-code-removal
+    description: Remove provably unreached code from the hot path.
+    aliases: ["dce"]
+    related_skills: []
+
+  - name: indirection-collapse
+    description: Collapse a layer of function-pointer / vtable indirection.
+    aliases: ["devirtualize", "remove-vtable"]
+    related_skills: []
+
+  - name: data-layout-pack
+    description: Repack a struct for better cache density / alignment.
+    aliases: ["struct-pack", "cache-friendly-layout"]
+    related_skills: []
+
+  - name: state-machine-compression
+    description: Collapse states or transitions in a hot state machine.
+    aliases: ["state-merge"]
+    related_skills: []
+
+  - name: policy-removal
+    description: Remove a dead or no-op policy / config check on the hot path.
+    aliases: ["config-check-removal", "noop-policy-drop"]
+    related_skills: []
+
+  - name: prefetch
+    description: Insert explicit prefetch for predictable cache misses.
+    aliases: ["sw-prefetch"]
+    related_skills: []
+
+  - name: tail-call-optimize
+    description: Restructure to enable tail-call elimination.
+    aliases: ["tco"]
+    related_skills: []
+
+  - name: recompute-vs-cache
+    description: Trade computation for memory (or vice versa) on the hot path.
+    aliases: ["memoize", "demoize"]
+    related_skills: []
+
+  - name: bitmap-bitset-replace
+    description: Replace a dense bool array with a bitmap / bitset.
+    aliases: ["bitset"]
+    related_skills: []
