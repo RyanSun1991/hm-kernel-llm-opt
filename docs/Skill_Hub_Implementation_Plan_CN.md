@@ -2,11 +2,12 @@
 
 | 项 | 值 |
 |---|---|
-| 文档状态 | Draft v1.0 |
-| 日期 | 2026-05-27 |
-| 关联设计 | `docs/Team_Skill_Hub_Design_CN.md`（v2.1）+ `docs/Team_Skill_Hub_Design_Diagrams_CN.md` |
-| 范围 | Phase 0–4 任务级分解 + 本会话执行 Phase 0 |
+| 文档状态 | Draft v1.1（同步设计 v2.2 修订）|
+| 日期 | 2026-06-09 |
+| 关联设计 | `docs/Team_Skill_Hub_Design_CN.md`（v2.2）+ `docs/Team_Skill_Hub_Design_Diagrams_CN.md`（含读路径图）|
+| 范围 | Phase 0–4 任务级分解；v1.1 把 P0/P1 修订（基于 mem0 / EverOS 调研）落到任务卡 |
 | 语言策略 | 散文 zh-CN；schema/代码/CLI/commit 英文 |
+| 修订 | v1.1：① Phase 0.5 加 P0.5-2 schema/markdown 收敛（与 P0.5-1 内容迁移并列）；② Phase 1 扩为 3–5w，加 P1-6 resolver + P1-7 混合检索 + P1-8 本地在线消解 PoC + P1-9 LLM 显著性抽取 + P1-10 retrieval 评测集；③ Phase 2 加 P2-8 晋升候选自动检测器；④ §8 关键路径补读路径长杆 |
 
 ---
 
@@ -48,13 +49,16 @@ Phase 4 自动优化 10w+   ┃
 - 目录树与设计 §6.1 一致。
 - 任何团队成员能照 `CONTRIBUTING.md` + 示例文件 起手写一条 `bad_plan` 并通过 lint。
 
-**Phase 0.5（独立小会话，未列入本计划主线）**：内容迁移——把现有 `.opencode/skills`、`agents`、`commands`、`pipelines`、`docs`（harness 规范部分）切入 `hm-skill-hub/`，在 `.opencode/` 下用 symlink 保持旧路径可用。带回归：跑一次现有 `/optimize_generic` 验证 pipeline 行为不变。
+**Phase 0.5（独立小会话，未列入本计划主线）**：
+
+- **P0.5-1 内容迁移**——把现有 `.opencode/skills`、`agents`、`commands`、`pipelines`、`docs`（harness 规范部分）切入 `hm-skill-hub/`，在 `.opencode/` 下用 symlink 保持旧路径可用。带回归：跑一次现有 `/optimize_generic` 验证 pipeline 行为不变。
+- **P0.5-2 schema / markdown 落盘格式收敛**（v1.1 新增，对应设计 §17 议题 7）：当前示例（`A001-*.md` 用 `lesson/applies_when/do_or_dont/tags/confidence`）与 `memory_item.schema.json`（`id/type/title/body/scope/source/maturity/status`）字段不一致；目标——统一为一种格式。建议路径：① 把 `parse_memory.py` 升级为「markdown frontmatter → schema 对象」转换器；② 修 4 类示例 markdown 模板对齐 schema 字段；③ `lint.py` 改为 schema-driven 校验；④ 现有内容用 ① 一次性回填。**AC**：`python tools/lint.py` 对所有 4 类示例 + 任意新加条目 exit 0；mock 一条不合规条目能精准报错。
 
 ---
 
-## 2. Phase 1 — 蒸馏（2-3w）
+## 2. Phase 1 — 蒸馏 + 读路径 + 本地在线消解（3-5w，v1.1 扩展）
 
-**目标**：pipeline 收口点能产出符合 schema 的 Tier 1 候选包。
+**目标**：pipeline 收口点能产出符合 schema 的 Tier 1 候选包；resolver 读路径上线（混合检索 + 上下文预算）；本地在线消解 PoC 验证完成。
 
 | ID | 任务 | 交付物 | AC |
 |---|---|---|---|
@@ -63,8 +67,16 @@ Phase 4 自动优化 10w+   ┃
 | P1-3 | 收口钩子接入 | 改 `os-opt-manager` decision 阶段 + `iterative-optimization` pass 末 + primary-agent "done" | 三处自动调用 `hmopt sediment`；不阻塞主流程 |
 | P1-4 | memory export | `tools/memory_export.py`（一次性脚本）| 把现有 `memory/`、`plans/`、`reviews/` 转标准对象；产物可被 lint 通过 |
 | P1-5 | 沉淀 PR 工具 | `hmopt sediment --bundle --open-pr` | 把符合晋升触发条件的候选打包成 hub PR；走 GitHub API；本仓→hub 仓 |
+| **P1-6** | **resolver 读路径** | `src/hmopt/resolver/resolver.py` + 单测 | 入参 `(target, stage)`，按设计 §12.2 顺序解析：hub.skills selector 命中 → 拉 requires → 调 retrieve 查 hub.knowledge + local.memory → 合并去重 → 按 stage 预算裁切。pipeline 各阶段实际调用 |
+| **P1-7** | **混合检索 + scalar 过滤** | `src/hmopt/resolver/retrieval.py`（faiss + sqlite-fts5 起步）+ `tools/build_index.py` | 实现设计 §12.1 伪代码：scalar 预过滤 → BM25 + vector RRF 融合 + entity bonus + `score` 加权；返回 top-k；retrieval.jsonl 落盘（§12.4 可观测） |
+| **P1-8** | **本地在线消解 PoC** | `src/hmopt/memory/local_curator.py`（参 mem0 v0.1.x 论文版 `DEFAULT_UPDATE_MEMORY_PROMPT` 自带）+ 对比 benchmark | 三选一决策（设计 §17 议题 6）：① 自研复刻；② 用 `mem0ai` 包基础设施 + 自带 UPDATE prompt；③ 评估 Platform。**PoC AC**：跑 30 条合成 sediment（含明确重复 + 明确冲突），ADD/UPDATE/DELETE/NOOP 决策准确率 ≥ 0.85，端到端延迟 ≤ 3s/条 |
+| **P1-9** | **LLM 显著性抽取 pass** | 扩 `extractors.py` 加 LLM pass | 规则抽取剩余的 free-form 文本（design 摘要 / reviewer 笔记）→ 跑 `FACT_RETRIEVAL_PROMPT` 风格抽取；产物默认 `confidence: tentative`；可通过 `--no-llm-extract` 关闭 |
+| **P1-10** | **retrieval 小评测集** | `eval/retrieval/queries.yaml`（≥ 20 条 query → 期望命中 IDs） | 跑一次基线；DoD 用同一集回归；后续 PR 影响检索逻辑必须跑过 |
 
-**DoD**：现网跑一次完整 pipeline，自动落出 ≥ 1 个合 schema 的 Tier 1 候选包；`hmopt sediment --bundle` 能产生一份本地 PR diff（不必真提）。
+**DoD**：
+- 现网跑一次完整 pipeline，自动落出 ≥ 1 个合 schema 的 Tier 1 候选包；`hmopt sediment --bundle` 能产生一份本地 PR diff（不必真提）。
+- **resolver 在 pipeline 各阶段实际被调用**，retrieval.jsonl 真实落盘；retrieval 评测集 recall@5 ≥ 0.7（基线）。
+- **本地在线消解 PoC** 跑过、决策方向（议题 6）有明确写入设计文档的结论。
 
 ---
 
@@ -81,8 +93,9 @@ Phase 4 自动优化 10w+   ┃
 | P2-5 | 沉淀 PR 模板 | `hm-skill-hub/.github/PULL_REQUEST_TEMPLATE.md` | 强制列：候选来源、引擎归类、双评审 checklist |
 | P2-6 | policies 增强 | promotion/merge/deprecation 文档增加"实际命令"段 | 评审人可直接执行 |
 | P2-7 | 双评审配置 | `CODEOWNERS` + GitHub branch protection rules（文档） | `skills/core/` 需 owner + 流程评审 |
+| **P2-8** | **晋升候选自动检测器** | `tools/promotion_detector.py`（按设计 §11.5）| 跑 hub knowledge 聚类（mechanism + scope 维度）；簇内 `confirmations` 总和 ≥ 3 且跨 ≥ 2 contributors → 调 LLM 蒸馏「招式 + 适用条件 + 证据」→ 自动开 `promote-candidate` 标签 PR。**纪律**：只提建议、绝不自动 merge |
 
-**DoD**：跑一次 PR 全流程——成员本地沉淀 → 自动提 PR → CI 全过 → Curator 标注合并方案 → 双评审签字 → merge → hub 多了 ≥ 1 条 L2 knowledge 记录。
+**DoD**：跑一次 PR 全流程——成员本地沉淀 → 自动提 PR → CI 全过 → Curator 标注合并方案 → 双评审签字 → merge → hub 多了 ≥ 1 条 L2 knowledge 记录；**晋升检测器**对 mock knowledge 集能识别出 ≥ 1 个合理候选并开 PR。
 
 ---
 
@@ -152,12 +165,23 @@ R=Responsible, A=Accountable, C=Consulted, I=Informed。
 ```
 P0-3(schemas) → P0-6(parser/lint) → P0-7(CI)        ← Phase 0 主链
                        ↓
-P1-1(sediment) → P1-4(memory export) → P2-2(dedup) → P2-3(conflict) → P3-2(evaluator) → P3-4(eval-gate) ← 长杆终点
+                P0.5-2(schema/md 收敛)              ← Phase 0.5 卫生项
+                       ↓
+P1-1(sediment) → P1-2(extractors) → P1-9(LLM 显著性)               ┐
+                       ↓                                              ├→ P1-6(resolver) ← 读路径主链
+                P1-4(memory export) → P1-7(混合检索) → P1-10(retr eval) ┘
+                       ↓
+                P1-8(本地在线消解 PoC) → 议题 6 决策
+                       ↓
+P2-2(dedup, 中央) → P2-3(conflict, 中央) → P2-8(晋升检测) → P3-2(evaluator) → P3-4(eval-gate) ← 长杆终点
                                                                                   ↓
                                                                               P4-1(nightly)
 ```
 
-**最关键单点**：P0-3（schemas）—— 后续所有 lint / 校验 / 合并都靠它。本会话务必拿下。
+**最关键单点**：
+- **P0-3**（schemas）—— 后续所有 lint / 校验 / 合并都靠它。Phase 0 已落地。
+- **P1-6 + P1-7**（resolver + 混合检索）—— 读路径上线，决定了 mem0 / EverOS 的延迟与成本红利能不能拿到；任何下游 pipeline 加载都靠它。
+- **P1-8**（本地在线消解 PoC）—— 决定 mem0 依赖策略，影响后续 P2 中央层 Curator 工作量分配。
 
 ---
 

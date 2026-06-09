@@ -2,13 +2,13 @@
 
 | 项 | 值 |
 |---|---|
-| 文档状态 | Draft v2.1（待团队评审） |
-| 日期 | 2026-05-27 |
+| 文档状态 | Draft v2.2（待团队评审） |
+| 日期 | 2026-06-09 |
 | 适用范围 | `.opencode/` harness 的团队化演进；新增独立中央仓 `hm-skill-hub` |
 | 语言策略 | 散文 zh-CN；路径 / 字段名 / 代码 / CLI / commit 一律英文 |
 | 关联文档 | `.opencode/docs/harness_engineer_system.md`、`.opencode/docs/memory_system.md` |
-| 图示 | `docs/Team_Skill_Hub_Design_Diagrams_CN.md`（6 张 Mermaid：闭环 / 双引擎 / 沉淀漏斗 / skills 布局 / 运行时组合 / 路线图）|
-| 修订 | v2.1：修正 §6.2 skill/knowledge 判定（补「做法 vs 事实」首要判据，三条降为排除项，补 bad_plans/global_lessons 归属与毕业通道）。v2.0：新增 §6.2 skills 布局 + 中后段精简 |
+| 图示 | `docs/Team_Skill_Hub_Design_Diagrams_CN.md`（7 张 Mermaid：闭环 / 双引擎 / 沉淀漏斗 / skills 布局 / 运行时组合 / 路线图 / 读路径）|
+| 修订 | v2.2（基于 mem0 / EverOS 实测调研，2026-06-09）：① §3 调研映射修订 mem0 行（v3 OSS 退化提示）+ 新增 EverOS 行；② §8 抽取后叠 LLM 显著性 pass；③ §10.1 引擎 A 拆「本地在线 + 中央批量」两级；④ 新增 §11.5 晋升候选自动检测；⑤ §12 改写为「检索与运行时组合」（混合检索 / 上下文预算 / markdown 为真相源 / 索引可重建）；⑥ §14 路线图：Phase 1 加读路径 + 本地两级合并，Phase 2 加晋升候选检测；⑦ §15 加 mem0 v3 OSS 能力缩水风险行。v2.1：修正 §6.2 skill/knowledge 判定（补「做法 vs 事实」首要判据，三条降为排除项，补 bad_plans/global_lessons 归属与毕业通道）。v2.0：新增 §6.2 skills 布局 + 中后段精简 |
 
 ---
 
@@ -66,14 +66,17 @@
 |---|---|---|
 | **SkillOpt**（arXiv 2605.23904）| 技能=可训练外部状态；有界 add/delete/replace 编辑；留出验证集严格变好才接受；文本学习率 + 被拒编辑缓冲 + 慢更新；产出 `best_skill.md` | Skills 引擎 B + 质量门 |
 | **memU** | 三层 Resource→Item→Category；Memory-as-File-System；RAG + LLM 双检索；`where` 作用域 | Knowledge 分层与检索；hub/local 叠加 |
-| **Mem0 / Mem0g** | 两阶段抽取→冲突检测+消解；Conflict Detector → LLM 消解 | Curator 合并器 |
+| **Mem0 / Mem0g**（v0.1.x 论文版；v3 OSS 已退化，见下）| 两阶段抽取→冲突检测+消解：Phase1 用 `FACT_RETRIEVAL_PROMPT` 抽事实，Phase2 对候选取最近 k 条做 ADD / UPDATE / DELETE / NOOP 工具调用消解 | **本地在线**消解（引擎 A 第一级，§10.1.a）+ Curator 合并器灵感 |
+| **EverOS**（EverMind-AI，v1.0 / 2026-06）| markdown 为真相源；六类记忆（含一等公民 procedural Skill）；同步轻量抽取 + 异步 OME 离线重整理；技能/画像 clustering 触发器；cascade 增量重嵌；LanceDB 一次查询并跑 BM25+向量+scalar 过滤；明确**不含**冲突/衰减/质量门 | **markdown 为真相源 + 索引可重建**模式；**混合检索**模板（§12）；**晋升候选 clustering**（§11.5）；反面对照：缺治理层正是 hub 的差异化 |
 | **Zep / Graphiti** | 双时态，事实带失效时间 | 被取代记录不删除（`superseded`）|
 | **ExpeL** | 成败池 → 抽取洞见 ADD/UPVOTE/DOWNVOTE/EDIT | 晋升打分与衰减 |
 | **GEPA** | 反思式进化 + Pareto 前沿（保留互补候选，非单一最优）| 避免多成员编辑塌缩 |
 | **Voyager** | 增长式技能库，入库前自验证，可组合 | 技能库范式 + 组合复用 |
 | **Anthropic Agent Skills** | SKILL.md 开放标准；plugin 分发；project-scope 版本控制共享；marketplace 安全扫描 | 分发与互操作标准 + 治理 |
 
-**结论**：SkillOpt 给「技能优化工程化范式」，memU 给「记忆资产组织范式」；最契合做法——保留 `.opencode/` 为执行面，新增 hub 为资产面，用 CI + eval 把「经验沉淀」变成「可验证迭代」。
+**⚠️ mem0 v3 OSS 提示**（2026-04 起）：开源 `main.py` 将两阶段塌缩为「`ADDITIVE_EXTRACTION_PROMPT` + content-hash 去重」的 **ADD-only** 单遍流；LLM 驱动的 UPDATE/DELETE 与图记忆**仅保留在付费 Platform**。规划层面意味着：本设计在 §10.1.a 引用 mem0 时，OSS 版只能拿到「抽取 + 哈希去重 + 索引/检索」，**智能 UPDATE/DELETE/NOOP 消解逻辑需要按 v0.1.x 论文 prompt 自己复刻**（或评估付费 Platform）。
+
+**结论**：SkillOpt 给「技能优化工程化范式」，memU 给「记忆资产组织范式」，mem0/EverOS 给「在线抽取+混合检索」工程模式，**而它们都缺乏跨成员策展闭环（semver/eval-gate/L0–L3/双评审）**——这正是本设计的差异化护城河。最契合做法：保留 `.opencode/` 为执行面，新增 hub 为资产面；**本地层**借鉴 mem0/EverOS 拿到「便宜在线消解 + 混合检索」的延迟与成本红利，**中央层**保留 hub 自研重型治理（CI + eval-gate + 双评审）把「经验沉淀」变成「可验证迭代」。
 
 ---
 
@@ -89,6 +92,8 @@
 | 合并引擎 | **B**：验证门竞争式编辑 + Pareto | **A**：集合并 + 去重 + 冲突消解 |
 
 > **反模式**：用同一套 git 行级合并治理两者——知识会重复/自相矛盾，技能会被某人一周的坏经验覆盖。**两套引擎、两道门，分开走。**
+
+> **v2.2 补**：引擎 A（Knowledge）在工程上分两级——**本地在线**（mem0/EverOS 式：每次收口就跑 ADD/UPDATE/DELETE/NOOP，保持 `local/memory/` 不烂）+ **中央批量**（Curator + CI + eval-gate）。详见 §10.1。引擎 B（Skills）始终是中央批量，**不**在本地做（个人 eval 噪声大，反易污染）。
 
 ### 4.2 三层 + L0–L3 成熟度
 
@@ -177,6 +182,8 @@ hm-skill-hub/
 ```
 
 `knowledge/` 把 `global_lessons.md`/ledger 拆成「每条一文件 / 稳定 ID 一行」——不同 ID = 不同文件，git 行级冲突几乎消失，去重/冲突交给 Curator 语义处理（§10）。
+
+> **真相源不变式（EverOS 印证）**：`*.md` 与其 YAML frontmatter 是 hub 的**唯一真相源**，`index/` 下的向量/BM25/scalar 全部是**派生缓存**——删掉 `index/` 不丢任何知识，从 markdown 树整树重建即可。这条不变式同时给出三件保障：① 灾难恢复路径自然；② 索引后端可替换（faiss / pgvector / LanceDB 任意切换不影响数据）；③ 任何成员可手工 git 编辑、PR review 纯文本可读。**禁止**任何"先入索引、markdown 滞后"的写路径。
 
 ### 6.2 skills/ 内部布局
 
@@ -336,6 +343,13 @@ supersedes[] · valid_from · valid_until · contributor · created_at
 
 **Tier 0→1（蒸馏）触发**：复用已有收口点——pipeline decision 阶段、人机会话 "done"、每个 auto-iterate pass 末。产物落 `local/sediment_staging/*.json`（标 `maturity: L1`）。
 
+**两段抽取（v2.2）**：
+
+1. **规则映射抽取器**（确定性、必跑）：`extractors.py` 把 bench delta → fact、review 否决 → anti_pattern、ledger 状态机变更 → idea record。保证 `delta_pct / compare_level / source[]` 等**结构化字段不丢**。
+2. **LLM 显著性 pass**（启发式、可关）：取规则抽取剩余的自由文本（design 摘要、reviewer 笔记、人机决策对话），跑一次 `FACT_RETRIEVAL_PROMPT` 风格的抽取，捕捉**不落规则模板**的可复用洞见（mem0 / EverOS 都用这条；只用 LLM 抽容易漏结构化指标，只用规则抽容易漏"这条其实可复用"的非典型洞见，两段叠加最稳）。LLM pass 产物默认 `confidence: tentative`，需后续 confirmations 才升 maturity。
+
+**收口节奏（EverOS 印证）**：同步收口点只做**便宜抽取**（≤ 100ms 量级，规则 + 选填轻量 LLM），重的去重 / 显著性聚合 / 跨 run 关联交给**异步离线作业**（§11）。同步流程**不阻塞**主 pipeline。
+
 **Tier 1→2（晋升）触发**（满足其一 + 过 §9 三门）：① ≥2 个独立任务复现收益；② 单任务收益显著且有 bench 证据；③ 高复用失败教训（→ anti_pattern）。
 
 **贡献节奏**：自动暂存（持续）+ 批量 PR（每周/里程碑），`hmopt sediment` 打包候选成单个「沉淀 PR」，便于统一去重、避免刷屏。
@@ -361,20 +375,45 @@ supersedes[] · valid_from · valid_until · contributor · created_at
 
 ### 10.1 引擎 A — Knowledge：集合并 + 去重 + 冲突消解（绝不行级合并）
 
+v2.2 起拆成**本地在线** + **中央批量**两级。同一个伪代码核心，跑在两个不同时机和不同权限层级上。
+
+**为什么两级**：只有中央 Curator 会让 `local/memory/` 在到达批处理之前一周积重难返——重复、自相矛盾、检索质量劣化，到 Curator 时再去清理已经晚了。mem0 / EverOS 印证：在线消解可便宜跑（小 candidate set、近似最近邻），是检索质量的前置条件。
+
+#### 10.1.a 本地在线（每个收口点跑一次，每成员独立）
+
 ```
-for item in incoming:
-    dup = near_duplicate(item, hub)        # embedding 相似度
+# 触发：sediment 收口点。延迟预算: 单条 ≤ 1 LLM call + 1 ANN query (~1-3s)
+for item in just_sedimented(local):
+    if hash_seen(item): merge_provenance(...); continue   # cheap dedup, 先于 LLM
+    nearest = vector_search(local.index, item, k=5, filter=scope)
+    op = llm_decide(item, nearest, prompt=UPDATE_MEMORY_PROMPT)   # ADD/UPDATE/DELETE/NOOP
+    apply(op, local.memory)        # 写 markdown + 增量重嵌（cascade 风格）
+```
+
+- **作用域**：仅在 `local/memory/<member>/` 内消解，**不**跨成员。
+- **依赖**：可用 `pip install mem0ai` 拿到「索引 + ANN + 去重」基础设施；**ADD/UPDATE/DELETE/NOOP 消解 prompt 自带**（参照 mem0 v0.1.x 论文版 `DEFAULT_UPDATE_MEMORY_PROMPT`，因为 mem0 v3 OSS 已经只剩 ADD-only）。
+- **markdown 仍是真相源**：在线消解的产物**直接写回 markdown frontmatter + body**，索引由 cascade 增量重建（§12）。
+
+#### 10.1.b 中央批量（PR / nightly，跨成员）
+
+```
+# 触发：沉淀 PR 或 nightly Curator。延迟预算: 分钟级
+for item in incoming_from_all_members:
+    dup = near_duplicate(item, hub)        # embedding 相似度（threshold 收紧）
     if dup: merge_provenance(dup, item); confirmations += 1; continue
     conflict = contradiction(item, hub)    # 同 (target, mechanism) 断言相反
     if conflict:
-        if stronger_evidence(item):        # 证据/新近度加权 (Zep 双时态)
+        if stronger_evidence(item):        # 证据/新近度加权（Zep 双时态）
             conflict.status = "superseded"; item.supersedes = [conflict.id]; add(item)
         elif high_risk: escalate_to_human()
         else: drop_with_citation(item)
     else: add(item)
 ```
 
-**CRDT 纪律**：追加 + tombstone（`active/superseded/deprecated`）而非删除；双时态 `valid_from/until` 接住「rebase 使 offset 失效」。
+- **作用域**：跨所有成员、跨 hub 全量 knowledge。阈值比本地严：相似度收紧、冲突走双评审（§9 门 3）。
+- **新增职责**：**跨成员同语义簇合并**（不同人对同一事实的不同措辞）→ 合并出处 + 累加 confirmations。
+
+**CRDT 纪律（贯穿两级）**：追加 + tombstone（`active/superseded/deprecated`）而非删除；双时态 `valid_from/until` 接住「rebase 使 offset 失效」。**本地** tombstone 不立即 push；**中央** tombstone 是发布 artifact。
 
 ### 10.2 引擎 B — Skills：SkillOpt 验证门 + GEPA Pareto（绝不集合并）
 
@@ -412,14 +451,100 @@ nightly/weekly「Skill/Memory 优化作业」：
 
 **早期安全约束**：第 (4) 步必须接 `bad_edits` + Pareto + 脱敏，**默认半自动**（自动提 PR、人工合并），积累信任后再放开。
 
+### 11.5 晋升候选自动检测器（v2.2 新增）
+
+主流程的 L1→L2、knowledge→technique skill 晋升靠人工 PR 启动，**信号容易被埋**。EverOS 的 `trigger_skill_clustering.py` / `trigger_profile_clustering.py` 验证了「聚类**重复模式** → 自动开 PR 交人评审」是个工程可行的中间档：**只自动化候选检测，决策仍由 §9 门人评审**——治理不让步、人不淹没。
+
+```
+(1) Cluster      embedding 聚类 hub knowledge（按 mechanism + scope 维度）
+(2) Threshold    簇内 confirmations 总和 ≥ N（默认 3）且跨 ≥ 2 contributors
+(3) Distill      调 LLM 把簇内多条事实蒸馏为「招式 + 适用条件 + 证据列表」
+(4) PR-Open      自动开 promotion PR（标签 promote-candidate），CODEOWNERS 接力
+(5) Guard        晋升 PR 仍走 §9 三门（schema/evidence/curation+eval）
+```
+
+**两个适用场景**：
+- **L1 → L2**：staging 区跨成员命中同一事实 N 次 → 提议晋升到 hub `knowledge/global/` 或 `knowledge/subsystems/`。
+- **knowledge → technique skill**：同一 mechanism 下的 anti_pattern/heuristic 簇 ≥ N → 提议**毕业**为 `skills/technique/<mechanism>/`（§6.2 首要判据「做法/流程」具备时）。
+
+**纪律**：检测器只能**提建议**、**不能**自己合并；任何 promote-candidate PR 都必须由人显式 approve，无豁免。
+
 ---
 
-## 12. 消费与集成
+## 12. 检索与运行时组合（v2.2 改写）
+
+**v2.1 之前**这一节只写「先 hub 再 local + RAG」一句话；v2.2 把整个**读路径**补完整——这是 mem0 / EverOS 的全部价值区，原稿严重欠设计。
+
+### 12.1 三类检索 query，一条混合检索栈
+
+`resolver.py` 在 pipeline 各阶段对 hub + local 发起检索。**输入分三类**，**底层栈同一套**：
+
+| query 类型 | 触发点 | 输入 | 主要消费者 |
+|---|---|---|---|
+| **target-anchored** | research / plan / code 阶段 | 当前 target slug + symbol（如 `mm/vmscan.c::shrink_node`）| domain skill selector 命中后挂载 knowledge |
+| **mechanism-anchored** | plan-review / code-review | 候选 mechanism（`hoist-loop-invariant` 等）| technique skill 上下文 + 相关 anti_pattern |
+| **free-form** | 任意时刻，agent 显式提问 | 自由文本 | 兜底通用检索 |
+
+**混合检索栈（EverOS LanceDB 模式）**：
+
+```
+def retrieve(query, scope_filter, k=5):
+    # 1) Scalar 预过滤（schema 字段直接命中，廉价）
+    cands = scalar_filter(
+        index, status="active",
+        maturity_in={"L2","L3"},  # 默认排除 L0/L1, 灰度可调
+        scope=scope_filter,        # subsystem / target_slug / level
+    )
+    # 2) Hybrid score: BM25 + 向量 cosine + 实体匹配 + 时序新近度
+    v_scores  = vector_topk(cands, embed(query), k=4*k)
+    bm_scores = bm25_topk(cands, query, k=4*k)
+    ent_bonus = entity_match_bonus(cands, extract_entities(query))
+    fused     = rrf_fuse(v_scores, bm_scores) + ent_bonus
+    # 3) score 字段加权（§9：晋升打分喂回排序，新近 / confirmations 高的优先）
+    fused    *= sigmoid(item.score)
+    return topk(fused, k)
+```
+
+四件事是 mem0 / EverOS 教给我们的：① **scalar 过滤先于向量**（成本量级差异巨大，schema 现有的 `scope.level / maturity / status / scope.subsystem` 直接拿来用）；② **BM25 + 向量融合**（纯向量在术语命中场景拉胯——`shrink_node` 这种符号名向量近似很差，BM25 救场）；③ **`score` 字段（§9）必须喂回排序**，目前只用于晋升排序、读路径没接上，是个明显 bug；④ **每阶段有 token 预算**，不是检索越多越好——mem0 论文给出 7K vs 25K tokens/query 的对比，过量上下文会反向劣化决策。
+
+### 12.2 运行时组合（取代 v2.1 的"叠加"说法）
+
+resolver 解析顺序如下，**hub 与 local 不是简单叠加，而是分别贡献不同切面**：
+
+```
+resolve(target, stage)
+├─ hub.skills/   按 §6.2 selector 命中 domain → 拉 requires → core + technique
+├─ hub.knowledge 调 retrieve() 查 target-anchored + mechanism-anchored，取 top-k
+└─ local.memory  调 retrieve() 查同一 query，取 top-k（在途、含个人未晋升的 idea）
+   → 合并去重（同稳定 ID 以 hub 为准；local 仅补充未晋升的）
+   → 按上下文预算裁切（per-stage token cap）
+   → 注入 agent context
+```
+
+**上下文预算（每 pipeline 阶段）**：
+
+| stage | skills | knowledge top-k | knowledge token cap |
+|---|---|---|---|
+| research | core 全量 + domain selector 命中 | 8 | 3K |
+| plan / plan-review | + technique requires | 5 | 2K |
+| implement | + technique requires | 3 | 1.5K |
+| code-review | core + 反模式优先 | 5 | 2K |
+| test / decision | 仅 anti_pattern + heuristic | 3 | 1K |
+
+数值是起点，按 scorecard 反馈调整。**所有阶段一旦超预算优先丢 `maturity` 低、`score` 低、`evidence` 弱的**。
+
+### 12.3 索引：派生缓存，markdown 为真相源
+
+- **存储**：`hub/knowledge/index/` 与 `local/memory/index/`（faiss 文件或 LanceDB 目录，二选一，对齐 §17 拍板）。Phase 1 用 faiss + sqlite-fts5 起步成本最低，Phase 3+ 评估 LanceDB（单 query 跑混合检索 + scalar 过滤）。
+- **增量重嵌（cascade 风格，EverOS 印证）**：watchdog 监 markdown 树，`content_sha256` diff，仅重嵌变更条目；崩溃恢复靠 sqlite 状态队列。**禁止全量重建**作常规路径。
+- **重建配方**：每次发布带 `index/manifest.yaml`（embedding model + chunking 参数 + 重建命令），任何成员一行命令重建。
+
+### 12.4 跨工具与版本/降级
 
 - **版本锁定**：`skill-memory.lock`（semver + SHA）固定 hub 版本，等价 package lockfile，可复现、防漂移；每次 run 记录消费版本。
-- **运行时叠加**：`resolver.py` 先读 hub（共享）再叠加 local（个人在途），互不污染（memU `where`）。
 - **故障降级（可用性）**：hub 以 submodule pin 在本地（vendored 副本），**中央仓宕机不阻塞**；resolver 检测不可达即回退上次成功快照并告警。
 - **跨工具**：SKILL.md 开放标准，可同时被 OpenCode / Claude Code / Codex 消费，hub 即「团队私有 skill marketplace」。
+- **可观测性**：每次 retrieve 记录 `{query, scope, returned_ids, latency, token_used}` 到 `local/runs/<id>/retrieval.jsonl`，喂后续 score 衰减与未被检索条目识别（→ deprecation 候选）。
 
 ---
 
@@ -438,6 +563,7 @@ nightly/weekly「Skill/Memory 优化作业」：
 | 高可用 | lockfile + 本地兜底 + resolver 降级 |
 | 失效治理 | `superseded/deprecated` 状态 + 双时态 + 定期清理（保留可审计，不物删）|
 | 防泄密 | 脱敏门 + CI secret-scan |
+| 读路径可观测 | 每次 retrieve 落 `retrieval.jsonl`；长期未命中条目自动进 deprecation 候选；latency / token_used 直接喂 §14 调优 |
 
 ---
 
@@ -446,8 +572,8 @@ nightly/weekly「Skill/Memory 优化作业」：
 | 阶段 | 周期 | 目标 | 交付物 | 风险 |
 |---|---|---|---|---|
 | **0 抽取** | 1–2w | 零行为变更跑通双仓 | 切 `skills/agents/pipelines/commands/docs` 到 hub + submodule pin；**路径兼容**（symlink/改写，§6.4）；仓骨架 + schemas + registry | 低 |
-| **1 蒸馏** | 2–3w | Tier0→1 结构化 | `hmopt sediment`；`memory export` 转标准对象 | 低 |
-| **2 策展+合并** | 3–6w | 知识合并上线（引擎 A）| Curator + lint/secret-scan/dedup CI；`policies/` 三文档 | 中 |
+| **1 蒸馏 + 读路径 + 本地在线消解** | 3–5w | Tier0→1 结构化 **+ resolver 读路径上线 + 本地 mem0 集成评估** | `hmopt sediment`（含 LLM 显著性 pass，§8）；`memory export` 转标准对象；**`resolver.py` + 混合检索（§12）+ 上下文预算**；**本地 mem0 在线消解集成 PoC**（§10.1.a）：评估 mem0ai 包是否复用 + 自带 UPDATE prompt（绕过 v3 OSS 退化） | 中（mem0 v3 不确定性）|
+| **2 策展 + 合并 + 晋升候选检测** | 3–6w | 中央批量合并上线（引擎 A 第二级）| Curator + lint/secret-scan/dedup CI；`policies/` 三文档；**晋升候选自动检测器（§11.5）**：开 promote-candidate PR | 中 |
 | **3 eval 门** ★ | 6–10w | 安全反喂（引擎 B）| **建 core task suite**（长杆）+ CI eval-gate + scorecard；半自动优化器 | **高** |
 | **4 自动优化** | 10w+ | 闭环自动迭代 | 定时作业（§11）；发布节奏；`skill-memory.lock` 防漂移 | 中 |
 
@@ -466,6 +592,9 @@ nightly/weekly「Skill/Memory 优化作业」：
 | skills 维度爆炸 | core/technique/domain 三层 + file/function 归 knowledge + selector（§6.2）|
 | eval 豁免漏洞 | 无豁免；破例只能降级候选 + 签字 + 复核 |
 | 路径硬编码迁移 | Phase 0 symlink 或改写 + resolver（§6.4）|
+| **mem0 v3 OSS 能力缩水** | OSS 已退化为 ADD-only + hash 去重（§3 提示）；本设计在 §10.1.a 借用 mem0 时**自带 UPDATE/DELETE prompt**（参 v0.1.x 论文版）避免与 OSS 退化耦合；Phase 1 必须显式 PoC 验证 |
+| **检索质量退化（新增风险面）** | 加 retrieval 可观测（§12.4）；建小型 retrieval eval 集（"给 query 是否命中预期 ID"），Phase 1 末跑一次基线，发布前回归 |
+| **markdown ↔ index 漂移** | cascade 增量重嵌 + content_sha256 校验；每次发布生成 `index/manifest.yaml` 含重建命令；CI 在每次 PR 跑「重建一次索引→对照」校验 |
 
 ---
 
@@ -499,5 +628,7 @@ hmopt skill-eval <skill> --suite <s>   # 本地跑技能 eval, 出 scorecard
 1. hub 仓命名与归属、放哪个 GitHub org。
 2. eval ground truth：纯真机 A/B vs 静态代理 vs 混合（决定 Phase 3 工期）。
 3. 是否采用 `technique/` 层（现招式隐含在 funnel scope 标签里）。
-4. 检索后端：faiss 本地文件 vs pgvector（对齐现有 `storage/`）。
+4. 检索后端：**faiss + sqlite-fts5（Phase 1 起步）vs pgvector（对齐现有 `storage/`）vs LanceDB（一次跑混合检索 + scalar 过滤，EverOS 路线）**。建议 Phase 1 起 faiss，Phase 3 评估 LanceDB。
 5. `skills/core/` owner 团队与晋升评审人。
+6. **本地在线消解的 mem0 依赖策略**（v2.2 新增）：① 完全自研复刻 v0.1.x 论文 prompt；② 用 `mem0ai` OSS 包拿基础设施 + 自带消解 prompt（避开 v3 退化）；③ 评估 mem0 Platform。决策影响 Phase 1 工期。
+7. **markdown 与 schema 落盘格式收敛**（v2.2 新增）：当前示例（`A001-*.md` 用 `lesson/applies_when/do_or_dont/tags/confidence` 等字段）与 `memory_item.schema.json` 字段不一致；需在 Phase 0.5 内决定：① 修 markdown 模板对齐 schema；② 反向修 schema；③ 加 frontmatter→schema 的转换器。建议 ①。

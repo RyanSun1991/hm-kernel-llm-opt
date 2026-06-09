@@ -2,11 +2,12 @@
 
 | 项 | 值 |
 |---|---|
-| 文档状态 | Draft v1（配套 `Team_Skill_Hub_Design_CN.md` v2.0）|
-| 日期 | 2026-05-27 |
-| 说明 | 6 张 Mermaid 图，GitHub / VS Code 直接渲染。先看图建立整体直觉，细节回主文档对应 § |
+| 文档状态 | Draft v2（配套 `Team_Skill_Hub_Design_CN.md` v2.2）|
+| 日期 | 2026-06-09 |
+| 说明 | 7 张 Mermaid 图，GitHub / VS Code 直接渲染。先看图建立整体直觉，细节回主文档对应 § |
+| 修订 | v2：新增图 7「读路径：混合检索 + 上下文预算」（配套主文档 v2.2 §12 改写） |
 
-整体顺序：① 闭环全景 → ② 两套引擎（脊柱）→ ③ 沉淀漏斗 → ④ skills 维度归宿 → ⑤ 运行时组合 → ⑥ 路线图。
+整体顺序：① 闭环全景 → ② 两套引擎（脊柱）→ ③ 沉淀漏斗 → ④ skills 维度归宿 → ⑤ 运行时组合 → ⑥ 路线图 → ⑦ 读路径（v2 新增）。
 
 ---
 
@@ -153,4 +154,45 @@ flowchart LR
 
 ---
 
-**看完图后回主文档**：脊柱与原则 §4 · 布局 §6 · 数据模型 §7 · 合并引擎伪代码 §10 · 治理稳定可用 §13 · 风险 §15。
+---
+
+## 图 7 · 读路径：混合检索 + 上下文预算（v2 新增）—— 对应主文档 §12
+
+resolver 在 pipeline 各阶段并行查 hub + local；scalar 过滤先于 BM25 + 向量融合，最后按 stage 预算裁切注入。
+
+```mermaid
+flowchart TB
+  STG["pipeline stage<br/>(research / plan / code / review / test)"]
+  TGT["target slug + symbol<br/>(mm/vmscan.c::shrink_node)"]
+  STG --> R["resolver.py"]
+  TGT --> R
+  R -->|"selector 匹配"| SK["hub.skills<br/>domain → requires(core+technique)"]
+  R -->|"target-anchored query"| RH["retrieve(hub.knowledge)"]
+  R -->|"target-anchored query"| RL["retrieve(local.memory)"]
+  subgraph HYB["混合检索栈（hub / local 各一份）"]
+    direction TB
+    SF["① scalar 预过滤<br/>status=active · maturity∈{L2,L3}<br/>scope.subsystem · target_slug"]
+    BV["② BM25 + 向量 cosine + 实体加成<br/>RRF 融合"]
+    SC["③ score 字段加权<br/>(§9 晋升打分喂回排序)"]
+    SF --> BV --> SC
+  end
+  RH --> HYB
+  RL --> HYB
+  HYB --> MRG["合并去重<br/>同稳定 ID 以 hub 为准<br/>local 仅补未晋升的"]
+  SK --> CTX["按 stage 预算裁切<br/>research:8/3K · plan:5/2K · code:3/1.5K · review:5/2K"]
+  MRG --> CTX
+  CTX --> AG["注入 agent context"]
+  CTX -->|"落盘 retrieval.jsonl<br/>(可观测·喂衰减/deprecation 候选)"| OBS[("retrieval log")]
+  classDef hub fill:#cfe2ff,stroke:#0d6efd
+  classDef local fill:#ffe5d0,stroke:#fd7e14
+  classDef gate fill:#fff3cd,stroke:#d39e00
+  class RH,SK hub
+  class RL local
+  class SF,BV,SC,CTX gate
+```
+
+> **关键不变式**：markdown 是真相源，`index/` 是派生缓存——cascade 增量重嵌即可，可任何时刻整树重建；切换 faiss / pgvector / LanceDB 不影响数据。
+
+---
+
+**看完图后回主文档**：脊柱与原则 §4 · 布局 §6 · 数据模型 §7 · 合并引擎伪代码 §10 · 检索与运行时组合 §12 · 治理稳定可用 §13 · 风险 §15。
