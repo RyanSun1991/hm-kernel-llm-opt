@@ -2,13 +2,13 @@
 
 | 项 | 值 |
 |---|---|
-| 文档状态 | Draft v2.2（待团队评审） |
+| 文档状态 | Draft v2.3（待团队评审） |
 | 日期 | 2026-06-09 |
 | 适用范围 | `.opencode/` harness 的团队化演进；新增独立中央仓 `hm-skill-hub` |
 | 语言策略 | 散文 zh-CN；路径 / 字段名 / 代码 / CLI / commit 一律英文 |
 | 关联文档 | `.opencode/docs/harness_engineer_system.md`、`.opencode/docs/memory_system.md` |
 | 图示 | `docs/Team_Skill_Hub_Design_Diagrams_CN.md`（7 张 Mermaid：闭环 / 双引擎 / 沉淀漏斗 / skills 布局 / 运行时组合 / 路线图 / 读路径）|
-| 修订 | v2.2（基于 mem0 / EverOS 实测调研，2026-06-09）：① §3 调研映射修订 mem0 行（v3 OSS 退化提示）+ 新增 EverOS 行；② §8 抽取后叠 LLM 显著性 pass；③ §10.1 引擎 A 拆「本地在线 + 中央批量」两级；④ 新增 §11.5 晋升候选自动检测；⑤ §12 改写为「检索与运行时组合」（混合检索 / 上下文预算 / markdown 为真相源 / 索引可重建）；⑥ §14 路线图：Phase 1 加读路径 + 本地两级合并，Phase 2 加晋升候选检测；⑦ §15 加 mem0 v3 OSS 能力缩水风险行。v2.1：修正 §6.2 skill/knowledge 判定（补「做法 vs 事实」首要判据，三条降为排除项，补 bad_plans/global_lessons 归属与毕业通道）。v2.0：新增 §6.2 skills 布局 + 中后段精简 |
+| 修订 | v2.3（评审反馈，2026-06-09）：① §6.1 收敛「每条一文件 + frontmatter + 路径编码 scope + CI 一致性校验」，消除与 Phase 0 多记录示例的矛盾；② §7 加 `subsumes[]/subsumed_by[]` 字段 + frontmatter 必带全字段约束；③ §10.1 引入统一「合并关系分类表」（dup / contradiction / temporal / conditional / subsumption / selector / evidence 七路），10.1.a 禁止对时态/条件/selector 冲突 delete，10.1.b 加 subsumption（LLM 蕴含判定）；④ §11.5 打通 subsumption → 晋升 + ≥2 实例防伪泛化；⑤ §17 议题 7 升为 P1 前置阻塞 + 加路径编码 scope 决策。v2.2（mem0/EverOS 调研）：§3 调研行 + §8 LLM 显著性 pass + §10.1 两级合并 + §11.5 晋升检测器 + §12 检索与运行时组合改写 + §14/§15 同步。v2.1：§6.2 skill/knowledge 判定。v2.0：§6.2 skills 布局 + 精简 |
 
 ---
 
@@ -181,7 +181,20 @@ hm-skill-hub/
   .github/workflows/ci.yml     # lint + secret-scan + eval-gate + index-build
 ```
 
-`knowledge/` 把 `global_lessons.md`/ledger 拆成「每条一文件 / 稳定 ID 一行」——不同 ID = 不同文件，git 行级冲突几乎消失，去重/冲突交给 Curator 语义处理（§10）。
+**存储形态收敛（v2.3，对应 §17 议题 7 / Phase 0.5 阻塞项）**：`knowledge/` 一律「**每条记录一文件**」，文件 = YAML frontmatter（全 schema 字段）+ markdown body。不同 ID = 不同文件，git 行级冲突几乎消失，去重/冲突/subsumption 交给 Curator 语义处理（§10）。
+
+> ⚠️ **收敛动作**：Phase 0 示例（`A001-*.md` 是 `### A001` 多记录堆在一个 category 文件、字段自定义为 `lesson/applies_when/...`）与本原则**不一致**，且与 `memory_item.schema.json` 字段不对齐。Phase 0.5 必须**先**收敛（§17 议题 7，列为 P1 前置阻塞）：① 一记录一文件；② frontmatter 用标准 schema 字段（不允许每类 markdown 自扩字段）；③ `parse_memory.py` 输出标准 schema object。
+
+**路径即 scope（v2.3）**：文件路径**编码** scope，与 frontmatter 的 `scope` 字段**冗余且必须一致**，CI 强校验（不一致即拒）。这让 scalar 过滤（§12.1）可先按目录粗筛、再读 frontmatter 精筛：
+
+```text
+knowledge/
+  global/{heuristics,anti_patterns,bad_plans,validation_pitfalls}/<ID>.md   # scope.level=global
+  subsystems/<subsystem>/<ID>.md                                            # scope.level=subsystem
+  targets/<slug>/{facts,decisions}/<ID>.md                                  # scope.level=function|call-site|...
+  targets/<slug>/idea_ledger/<Lxxx>.md                                      # 每条 idea 一文件
+  index/                       # 派生缓存：向量 / BM25 / scalar 清单 + 重建配方（manifest.yaml）
+```
 
 > **真相源不变式（EverOS 印证）**：`*.md` 与其 YAML frontmatter 是 hub 的**唯一真相源**，`index/` 下的向量/BM25/scalar 全部是**派生缓存**——删掉 `index/` 不丢任何知识，从 markdown 树整树重建即可。这条不变式同时给出三件保障：① 灾难恢复路径自然；② 索引后端可替换（faiss / pgvector / LanceDB 任意切换不影响数据）；③ 任何成员可手工 git 编辑、PR review 纯文本可读。**禁止**任何"先入索引、markdown 滞后"的写路径。
 
@@ -324,12 +337,17 @@ eval_id: eval/task_suites/mm_reclaim_suite
 ```
 id(稳定,前缀 F/G/A/R) · type · title · body
 scope{level: function|call-site|data-flow|subsystem|architectural|global, subsystem, target_slug}
+applies_when(条件适用范围, 用于「条件分歧」共存判定, §10.1)   ← v2.3
 source[]{kind: commit|review|bench|doc|run_id, ref}   ← 必填, 无出处即拒
 evidence{delta_pct, compare_level, confirmations}
 maturity(L0-L3) · status(active|superseded|deprecated) · score
 invalidation(失效条件, 如 "rebase 后须重校 offset")
-supersedes[] · valid_from · valid_until · contributor · created_at
+supersedes[] · superseded_by[]                         ← 时态/矛盾关系 (双时态)
+subsumes[] · subsumed_by[]                             ← v2.3 泛化包含关系 (§10.1 / §11.5)
+valid_from · valid_until · contributor · created_at
 ```
+
+> **frontmatter 约束（v2.3，CI 强校验）**：每条 knowledge 落盘文件的 YAML frontmatter **必须**含上述全部 required 字段，**不允许**每类 markdown 自扩字段；**文件路径编码的 scope 必须与 frontmatter `scope` 一致**（§6.1）。`subsumes[]/subsumed_by[]` 与 `supersedes[]/superseded_by[]` 同为**关系边**——这是未来若引入图层（mem0g / Graphiti）的第一批落地边，现阶段仅作字段、不建图存储。
 
 **skill frontmatter**（兼容 SKILL.md，详见 §6.2）：`name/kind/version/maturity/applies_to/requires/eval_id/owners/status`。
 
@@ -375,9 +393,26 @@ supersedes[] · valid_from · valid_until · contributor · created_at
 
 ### 10.1 引擎 A — Knowledge：集合并 + 去重 + 冲突消解（绝不行级合并）
 
-v2.2 起拆成**本地在线** + **中央批量**两级。同一个伪代码核心，跑在两个不同时机和不同权限层级上。
+v2.2 起拆成**本地在线** + **中央批量**两级。同一个分类器核心，跑在两个不同时机和不同权限层级上。
 
 **为什么两级**：只有中央 Curator 会让 `local/memory/` 在到达批处理之前一周积重难返——重复、自相矛盾、检索质量劣化，到 Curator 时再去清理已经晚了。mem0 / EverOS 印证：在线消解可便宜跑（小 candidate set、近似最近邻），是检索质量的前置条件。
+
+#### 10.1.0 合并关系分类表（v2.3 核心）
+
+合并决策**不是**「重复? / 矛盾?」二分，而是把 incoming 与最近 k 条已有记录的**关系**分到下面七类之一。**铁律：除「明确矛盾且新证据更强」外，任何分支都不物理 delete**——这是评审反馈「别把历史事实误删」的根本保障。
+
+| 关系 | 判定 | 处理 | 谁来判 | **绝不** |
+|---|---|---|---|---|
+| **duplicate** | 语义近重复、同 scope 同结论 | 合并 source[]，`confirmations += 1` | hash + embedding（廉价）| — |
+| **contradiction** | 同 (target, mechanism, **同条件**) 断言相反 | 新证据强 → 旧记 `superseded` + `valid_until`，`superseded_by` 互链；否则 escalate | embedding + LLM | 删旧记 |
+| **temporal staleness** | 旧记**曾对、现已过时**（如新 kernel 版本行为变了）| 旧记 `superseded` + `valid_until=now`，**保留可审计** | LLM（看 valid_from / 版本）| **当作错误 delete** |
+| **conditional divergence** | 两条**都对、适用条件不同** | **共存**，各自写明 `applies_when` / `scope` | LLM | 当作矛盾去重 |
+| **subsumption（泛化包含）** | 一条是另一条的**泛化**（B 概括 A）| **都留**：A 作 target-level evidence；B 升 pattern/technique 候选；A 进 B 的 `source[]` + 互链 `subsumes/subsumed_by` | **LLM 蕴含判定** | 把 A 去重吞进 B |
+| **selector drift** | 同 symbol **rebase 后路径/偏移变了** | **重解析 selector**、更新 `invalidation`，知识本体不动 | clangd/scip 索引 | 删该知识 |
+| **evidence divergence** | 同 mechanism 同 delta、**`compare_level` 不同** | **合并**，按 `compare_level` 消歧（total/process/function 不可直接比）| 规则 | 当作矛盾 |
+| **novel** | 与最近 k 条无上述关系 | ADD | — | — |
+
+**分层归属**：`duplicate / temporal / conditional / contradiction / evidence` 廉价或单 LLM call → **两级都跑**（本地 10.1.a + 中央 10.1.b）；`selector drift` 依赖代码索引 → 本地 resolver 加载期 + 中央 CI；**`subsumption` 需 LLM 蕴含判定、较贵 → 仅中央 10.1.b**（本地延迟预算扛不住，且泛化是跨成员信号）。
 
 #### 10.1.a 本地在线（每个收口点跑一次，每成员独立）
 
@@ -386,12 +421,13 @@ v2.2 起拆成**本地在线** + **中央批量**两级。同一个伪代码核�
 for item in just_sedimented(local):
     if hash_seen(item): merge_provenance(...); continue   # cheap dedup, 先于 LLM
     nearest = vector_search(local.index, item, k=5, filter=scope)
-    op = llm_decide(item, nearest, prompt=UPDATE_MEMORY_PROMPT)   # ADD/UPDATE/DELETE/NOOP
-    apply(op, local.memory)        # 写 markdown + 增量重嵌（cascade 风格）
+    rel = classify_relation(item, nearest)      # §10.1.0 表（本地只跑廉价 5 类）
+    apply(rel, local.memory)                     # 见下「禁止 delete」纪律
 ```
 
-- **作用域**：仅在 `local/memory/<member>/` 内消解，**不**跨成员。
-- **依赖**：可用 `pip install mem0ai` 拿到「索引 + ANN + 去重」基础设施；**ADD/UPDATE/DELETE/NOOP 消解 prompt 自带**（参照 mem0 v0.1.x 论文版 `DEFAULT_UPDATE_MEMORY_PROMPT`，因为 mem0 v3 OSS 已经只剩 ADD-only）。
+- **作用域**：仅在 `local/memory/<member>/` 内消解，**不**跨成员；**不跑 subsumption**（留中央）。
+- **关键纪律（评审反馈 ③）**：本地 `apply` 对 `temporal / conditional / selector / evidence` 四类**一律不 delete**——temporal → `superseded`+`valid_until`；conditional → 共存（写 `applies_when`）；selector → 重解析 + 更 `invalidation`；evidence → 按 `compare_level` 合并。唯一会写 tombstone 的是「contradiction 且新证据更强」，且 tombstone 是 `superseded` 不是物删。**本地 false-delete 必须 ≈ 0**（P1-8 PoC 硬指标）。
+- **依赖**：可用 `pip install mem0ai` 拿到「索引 + ANN + 去重」基础设施；**关系分类 prompt 自带**（参照 mem0 v0.1.x 论文版 `DEFAULT_UPDATE_MEMORY_PROMPT` 扩展到七路，因为 mem0 v3 OSS 已经只剩 ADD-only）。
 - **markdown 仍是真相源**：在线消解的产物**直接写回 markdown frontmatter + body**，索引由 cascade 增量重建（§12）。
 
 #### 10.1.b 中央批量（PR / nightly，跨成员）
@@ -399,18 +435,27 @@ for item in just_sedimented(local):
 ```
 # 触发：沉淀 PR 或 nightly Curator。延迟预算: 分钟级
 for item in incoming_from_all_members:
-    dup = near_duplicate(item, hub)        # embedding 相似度（threshold 收紧）
-    if dup: merge_provenance(dup, item); confirmations += 1; continue
-    conflict = contradiction(item, hub)    # 同 (target, mechanism) 断言相反
-    if conflict:
-        if stronger_evidence(item):        # 证据/新近度加权（Zep 双时态）
-            conflict.status = "superseded"; item.supersedes = [conflict.id]; add(item)
-        elif high_risk: escalate_to_human()
-        else: drop_with_citation(item)
-    else: add(item)
+    rel = classify_relation(item, hub)     # §10.1.0 全七路，含 LLM 蕴含判定
+    match rel.kind:
+        case duplicate:    merge_provenance(rel.target, item); confirmations += 1
+        case temporal:     rel.target.status="superseded"; rel.target.valid_until=now(); link(item, rel.target)
+        case conditional:  add(item)        # 共存，校验两者 applies_when 不重叠
+        case evidence:     merge_by_compare_level(rel.target, item)
+        case contradiction:
+            if stronger_evidence(item): rel.target.status="superseded"; item.supersedes=[rel.target.id]; add(item)
+            elif high_risk: escalate_to_human()
+            else: drop_with_citation(item)
+        case subsumption:  # ← v2.3 新增第三类（评审反馈 ④）
+            general, specific = orient(item, rel.target)   # 谁泛化谁
+            specific.subsumed_by += [general.id]; general.subsumes += [specific.id]
+            general.source += specific.as_source()         # specific 成为 general 的证据，不被吞
+            emit_promotion_signal(general)                 # → §11.5（≥2 实例才晋升）
+        case novel:        add(item)
 ```
 
 - **作用域**：跨所有成员、跨 hub 全量 knowledge。阈值比本地严：相似度收紧、冲突走双评审（§9 门 3）。
+- **subsumption ≠ duplicate ≠ contradiction**（评审反馈 ④）：例「`shrink_node` 中 hoist `sc->priority` 降低重复读取」(A，target-level) vs 「mm reclaim 热循环中 loop-invariant 状态应 hoist 出循环」(B，pattern-level)——B 是 A 的**泛化**。处理：A 留为 target 证据、B 升 pattern/technique 候选、**A 作 B 的 `source`/evidence 而非被去重吞掉**。这是 `knowledge → technique skill` 毕业通道的引擎。
+- **防伪泛化**：subsumption 只立刻**建链**（廉价、安全）；泛化记录 B 真正**晋升**为 technique 仍需 §11.5 的 **≥2 个不同被包含实例**门 + §9 三门。单个 A 不足以喂出一条 technique。
 - **新增职责**：**跨成员同语义簇合并**（不同人对同一事实的不同措辞）→ 合并出处 + 累加 confirmations。
 
 **CRDT 纪律（贯穿两级）**：追加 + tombstone（`active/superseded/deprecated`）而非删除；双时态 `valid_from/until` 接住「rebase 使 offset 失效」。**本地** tombstone 不立即 push；**中央** tombstone 是发布 artifact。
@@ -455,17 +500,22 @@ nightly/weekly「Skill/Memory 优化作业」：
 
 主流程的 L1→L2、knowledge→technique skill 晋升靠人工 PR 启动，**信号容易被埋**。EverOS 的 `trigger_skill_clustering.py` / `trigger_profile_clustering.py` 验证了「聚类**重复模式** → 自动开 PR 交人评审」是个工程可行的中间档：**只自动化候选检测，决策仍由 §9 门人评审**——治理不让步、人不淹没。
 
+**两路输入**（v2.3）：
+- **聚类信号**：embedding 聚类 hub knowledge（按 mechanism + scope 维度）。
+- **subsumption 信号**（§10.1.b 喂入）：某条泛化记录 B 的 `subsumes[]` 累积到 **≥2 个不同被包含实例**（不同 target / 不同 contributor）——这是比纯聚类更强的毕业信号（已显式建立「具体→泛化」关系）。
+
 ```
-(1) Cluster      embedding 聚类 hub knowledge（按 mechanism + scope 维度）
-(2) Threshold    簇内 confirmations 总和 ≥ N（默认 3）且跨 ≥ 2 contributors
-(3) Distill      调 LLM 把簇内多条事实蒸馏为「招式 + 适用条件 + 证据列表」
+(1) Gather       收 (a) embedding 簇 + (b) subsumes[] ≥ 2 的泛化记录
+(2) Threshold    簇内 confirmations 总和 ≥ N（默认 3）且跨 ≥ 2 contributors；
+                 subsumption 路要求 ≥ 2 个不同被包含实例（防伪泛化）
+(3) Distill      调 LLM 把簇/泛化记录蒸馏为「招式 + 适用条件 + 证据列表（含被包含实例）」
 (4) PR-Open      自动开 promotion PR（标签 promote-candidate），CODEOWNERS 接力
 (5) Guard        晋升 PR 仍走 §9 三门（schema/evidence/curation+eval）
 ```
 
 **两个适用场景**：
 - **L1 → L2**：staging 区跨成员命中同一事实 N 次 → 提议晋升到 hub `knowledge/global/` 或 `knowledge/subsystems/`。
-- **knowledge → technique skill**：同一 mechanism 下的 anti_pattern/heuristic 簇 ≥ N → 提议**毕业**为 `skills/technique/<mechanism>/`（§6.2 首要判据「做法/流程」具备时）。
+- **knowledge → technique skill**：同一 mechanism 下的 anti_pattern/heuristic 簇 ≥ N，**或**一条 pattern 已 `subsumes` ≥2 个 target-level 实例 → 提议**毕业**为 `skills/technique/<mechanism>/`（§6.2 首要判据「做法/流程」具备时）。被包含的具体实例**保留**为该 technique 的 `evidence`，不删。
 
 **纪律**：检测器只能**提建议**、**不能**自己合并；任何 promote-candidate PR 都必须由人显式 approve，无豁免。
 
@@ -595,6 +645,9 @@ resolve(target, stage)
 | **mem0 v3 OSS 能力缩水** | OSS 已退化为 ADD-only + hash 去重（§3 提示）；本设计在 §10.1.a 借用 mem0 时**自带 UPDATE/DELETE prompt**（参 v0.1.x 论文版）避免与 OSS 退化耦合；Phase 1 必须显式 PoC 验证 |
 | **检索质量退化（新增风险面）** | 加 retrieval 可观测（§12.4）；建小型 retrieval eval 集（"给 query 是否命中预期 ID"），Phase 1 末跑一次基线，发布前回归 |
 | **markdown ↔ index 漂移** | cascade 增量重嵌 + content_sha256 校验；每次发布生成 `index/manifest.yaml` 含重建命令；CI 在每次 PR 跑「重建一次索引→对照」校验 |
+| **本地消解误删历史事实**（评审反馈 ③）| 七路分类器对 temporal/conditional/selector/evidence 一律不 delete（§10.1.a）；P1-8 PoC 设 **false-delete rate ≈ 0** 硬指标，时态/条件子类单独统计 |
+| **subsumption 过度泛化**（评审反馈 ④）| 仅中央 LLM 判定；建链廉价但晋升需 **≥2 个不同被包含实例** + §9 三门（§11.5）；`skills/core/` 候选可要求更高实例门（§17 议题 8）|
+| **schema 未收敛即开 Phase 1** | §17 议题 7 升为 P1 前置阻塞；Phase 0.5 DoD 不达成不开工（实现计划 §1）|
 
 ---
 
@@ -631,4 +684,5 @@ hmopt skill-eval <skill> --suite <s>   # 本地跑技能 eval, 出 scorecard
 4. 检索后端：**faiss + sqlite-fts5（Phase 1 起步）vs pgvector（对齐现有 `storage/`）vs LanceDB（一次跑混合检索 + scalar 过滤，EverOS 路线）**。建议 Phase 1 起 faiss，Phase 3 评估 LanceDB。
 5. `skills/core/` owner 团队与晋升评审人。
 6. **本地在线消解的 mem0 依赖策略**（v2.2 新增）：① 完全自研复刻 v0.1.x 论文 prompt；② 用 `mem0ai` OSS 包拿基础设施 + 自带消解 prompt（避开 v3 退化）；③ 评估 mem0 Platform。决策影响 Phase 1 工期。
-7. **markdown 与 schema 落盘格式收敛**（v2.2 新增）：当前示例（`A001-*.md` 用 `lesson/applies_when/do_or_dont/tags/confidence` 等字段）与 `memory_item.schema.json` 字段不一致；需在 Phase 0.5 内决定：① 修 markdown 模板对齐 schema；② 反向修 schema；③ 加 frontmatter→schema 的转换器。建议 ①。
+7. **markdown 与 schema 落盘格式收敛**（v2.3 升级为 **P1 前置阻塞项**，非普通卫生项）：当前示例（`A001-*.md` 多记录 + 自定义字段）与 `memory_item.schema.json` 不一致；后续 lint / dedup / retrieval scalar filter / Curator 七路分类**全部依赖 schema 字段稳定**，故必须**先于 Phase 1** 收敛。已定方向（§6.1 / §7）：① 一记录一文件 + frontmatter 全 schema 字段；② **文件路径编码 scope** 且 CI 校验路径 scope 与 frontmatter scope 一致；③ `parse_memory.py` 输出标准 schema object，不允许每类自扩字段；④ schema 同时补 `subsumes[]/subsumed_by[]/superseded_by[]/applies_when`。**剩余待拍板**：路径编码粒度（是否到 `targets/<slug>/facts/` 这层）。
+8. **subsumption 判定的 LLM 成本与误判**（v2.3 新增）：subsumption 需 LLM 蕴含判定，比 dedup 贵；且过度泛化有风险。已加 ≥2 实例门兜底（§11.5），仍需拍板：中央 Curator 每轮跑 subsumption 的算力预算上限 + 是否对 `skills/core/` 候选要求更高的实例门（如 ≥3）。

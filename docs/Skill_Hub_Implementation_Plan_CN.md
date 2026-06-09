@@ -2,12 +2,12 @@
 
 | 项 | 值 |
 |---|---|
-| 文档状态 | Draft v1.1（同步设计 v2.2 修订）|
+| 文档状态 | Draft v1.2（同步设计 v2.3 评审修订）|
 | 日期 | 2026-06-09 |
-| 关联设计 | `docs/Team_Skill_Hub_Design_CN.md`（v2.2）+ `docs/Team_Skill_Hub_Design_Diagrams_CN.md`（含读路径图）|
-| 范围 | Phase 0–4 任务级分解；v1.1 把 P0/P1 修订（基于 mem0 / EverOS 调研）落到任务卡 |
+| 关联设计 | `docs/Team_Skill_Hub_Design_CN.md`（v2.3）+ `docs/Team_Skill_Hub_Design_Diagrams_CN.md`（含读路径图）|
+| 范围 | Phase 0–4 任务级分解；v1.2 把评审反馈（schema 阻塞 / retrieval 硬门 / 冲突分类 / subsumption）落到任务卡 |
 | 语言策略 | 散文 zh-CN；schema/代码/CLI/commit 英文 |
-| 修订 | v1.1：① Phase 0.5 加 P0.5-2 schema/markdown 收敛（与 P0.5-1 内容迁移并列）；② Phase 1 扩为 3–5w，加 P1-6 resolver + P1-7 混合检索 + P1-8 本地在线消解 PoC + P1-9 LLM 显著性抽取 + P1-10 retrieval 评测集；③ Phase 2 加 P2-8 晋升候选自动检测器；④ §8 关键路径补读路径长杆 |
+| 修订 | v1.2（评审反馈）：① P0.5-2 升为 **Phase 1 前置阻塞 gate**（+ 路径编码 scope + CI 一致性 + schema 补 subsumes/applies_when）；② P1-8 PoC benchmark 扩为**七路冲突分类** + false-delete≈0 硬指标；③ P1-10 retrieval 升**硬门**（3 类 query + must/optional-hit + CI + 符号名 ablation）；④ Phase 2 加 P2-9 subsumption 检测器、喂 P2-8。v1.1：Phase 1 扩为 3–5w（读路径 + 本地两级），Phase 2 加 P2-8 晋升检测器 |
 
 ---
 
@@ -49,10 +49,10 @@ Phase 4 自动优化 10w+   ┃
 - 目录树与设计 §6.1 一致。
 - 任何团队成员能照 `CONTRIBUTING.md` + 示例文件 起手写一条 `bad_plan` 并通过 lint。
 
-**Phase 0.5（独立小会话，未列入本计划主线）**：
+**Phase 0.5（独立小会话）—— 含 Phase 1 前置阻塞 gate**：
 
 - **P0.5-1 内容迁移**——把现有 `.opencode/skills`、`agents`、`commands`、`pipelines`、`docs`（harness 规范部分）切入 `hm-skill-hub/`，在 `.opencode/` 下用 symlink 保持旧路径可用。带回归：跑一次现有 `/optimize_generic` 验证 pipeline 行为不变。
-- **P0.5-2 schema / markdown 落盘格式收敛**（v1.1 新增，对应设计 §17 议题 7）：当前示例（`A001-*.md` 用 `lesson/applies_when/do_or_dont/tags/confidence`）与 `memory_item.schema.json`（`id/type/title/body/scope/source/maturity/status`）字段不一致；目标——统一为一种格式。建议路径：① 把 `parse_memory.py` 升级为「markdown frontmatter → schema 对象」转换器；② 修 4 类示例 markdown 模板对齐 schema 字段；③ `lint.py` 改为 schema-driven 校验；④ 现有内容用 ① 一次性回填。**AC**：`python tools/lint.py` 对所有 4 类示例 + 任意新加条目 exit 0；mock 一条不合规条目能精准报错。
+- **P0.5-2 schema / markdown 落盘格式收敛 ★前置阻塞**（v1.2 升级，评审反馈 ①，对应设计 §6.1 / §7 / §17 议题 7）：lint / dedup / retrieval scalar filter / Curator 七路分类全部依赖 schema 字段稳定，故**必须先于 Phase 1 完成**。交付：① **一记录一文件**（拆掉 `### A001` 多记录堆叠），frontmatter 用标准 schema 全字段，**禁止每类自扩字段**；② **文件路径编码 scope**（`knowledge/targets/<slug>/facts/<ID>.md` 等，§6.1）；③ `parse_memory.py` 升级为「frontmatter → 标准 schema object」转换器；④ `lint.py` 改 schema-driven + **新增路径 scope 与 frontmatter scope 一致性校验**；⑤ schema 补 `subsumes[]/subsumed_by[]/superseded_by[]/applies_when`；⑥ 现有内容一次性回填。**AC（gate）**：`python tools/lint.py` 对全部示例 + 任意新条目 exit 0；路径/frontmatter scope 不一致能精准报错；schema 含新字段；**此 gate 不过，Phase 1 不开工**。
 
 ---
 
@@ -69,14 +69,15 @@ Phase 4 自动优化 10w+   ┃
 | P1-5 | 沉淀 PR 工具 | `hmopt sediment --bundle --open-pr` | 把符合晋升触发条件的候选打包成 hub PR；走 GitHub API；本仓→hub 仓 |
 | **P1-6** | **resolver 读路径** | `src/hmopt/resolver/resolver.py` + 单测 | 入参 `(target, stage)`，按设计 §12.2 顺序解析：hub.skills selector 命中 → 拉 requires → 调 retrieve 查 hub.knowledge + local.memory → 合并去重 → 按 stage 预算裁切。pipeline 各阶段实际调用 |
 | **P1-7** | **混合检索 + scalar 过滤** | `src/hmopt/resolver/retrieval.py`（faiss + sqlite-fts5 起步）+ `tools/build_index.py` | 实现设计 §12.1 伪代码：scalar 预过滤 → BM25 + vector RRF 融合 + entity bonus + `score` 加权；返回 top-k；retrieval.jsonl 落盘（§12.4 可观测） |
-| **P1-8** | **本地在线消解 PoC** | `src/hmopt/memory/local_curator.py`（参 mem0 v0.1.x 论文版 `DEFAULT_UPDATE_MEMORY_PROMPT` 自带）+ 对比 benchmark | 三选一决策（设计 §17 议题 6）：① 自研复刻；② 用 `mem0ai` 包基础设施 + 自带 UPDATE prompt；③ 评估 Platform。**PoC AC**：跑 30 条合成 sediment（含明确重复 + 明确冲突），ADD/UPDATE/DELETE/NOOP 决策准确率 ≥ 0.85，端到端延迟 ≤ 3s/条 |
+| **P1-8** | **本地在线消解 PoC**（评审反馈 ③）| `src/hmopt/memory/local_curator.py`（七路分类器，参 mem0 v0.1.x 论文版 prompt 扩展）+ 分类 benchmark | 三选一依赖决策（§17 议题 6）。**benchmark 必覆盖七路**：duplicate / contradiction / **temporal**（曾对现过时）/ **conditional**（都对、`applies_when` 不同）/ **selector**（rebase 后路径变）/ **evidence**（同 delta 不同 `compare_level`）/ novel，每类 ≥ 5 条共 ≥ 40 条。**AC**：① 七路分类准确率 ≥ 0.85；② **temporal + conditional 子类 false-delete rate ≈ 0**（误把历史/条件事实删掉是 PoC 否决项）；③ 端到端 ≤ 3s/条；④ 本地**不**跑 subsumption（留中央 P2-9） |
 | **P1-9** | **LLM 显著性抽取 pass** | 扩 `extractors.py` 加 LLM pass | 规则抽取剩余的 free-form 文本（design 摘要 / reviewer 笔记）→ 跑 `FACT_RETRIEVAL_PROMPT` 风格抽取；产物默认 `confidence: tentative`；可通过 `--no-llm-extract` 关闭 |
-| **P1-10** | **retrieval 小评测集** | `eval/retrieval/queries.yaml`（≥ 20 条 query → 期望命中 IDs） | 跑一次基线；DoD 用同一集回归；后续 PR 影响检索逻辑必须跑过 |
+| **P1-10** | **retrieval eval 硬门**（评审反馈 ②）| `eval/retrieval/queries.yaml` + `tools/run_retrieval_eval.py` + CI 接入 | ① **三类 query 各 ≥ 8 条**：target-anchored（`mm/vmscan.c::shrink_node`）/ mechanism-anchored（`hoist-loop-invariant`）/ free-form（"最近哪些方案被判 bad plan"）；② 每条 expected ID 标 **must-hit / optional-hit**，分别算严格 recall 与宽松 recall；③ **检索逻辑 PR 必跑**，早期用**回归门**（不劣于上次 green）、语料够大后上绝对线（must-hit recall@5 ≥ 0.8）；④ 对**符号名 query** 单独报 BM25-only / vector-only / hybrid 三 ablation，证明 hybrid ≥ 各单路 |
 
 **DoD**：
+- **P0.5-2 gate 已过**（schema 收敛 + 路径 scope 校验绿）——否则不进 Phase 1。
 - 现网跑一次完整 pipeline，自动落出 ≥ 1 个合 schema 的 Tier 1 候选包；`hmopt sediment --bundle` 能产生一份本地 PR diff（不必真提）。
-- **resolver 在 pipeline 各阶段实际被调用**，retrieval.jsonl 真实落盘；retrieval 评测集 recall@5 ≥ 0.7（基线）。
-- **本地在线消解 PoC** 跑过、决策方向（议题 6）有明确写入设计文档的结论。
+- **resolver 在 pipeline 各阶段实际被调用**，retrieval.jsonl 真实落盘；retrieval 硬门接入 CI，符号名 query 的 hybrid ablation 报告产出且 hybrid ≥ 各单路；must-hit recall@5 基线已记录（回归门生效）。
+- **本地在线消解 PoC** 跑过：七路分类准确率 ≥ 0.85、**temporal+conditional false-delete ≈ 0**；mem0 依赖决策（议题 6）写入设计文档。
 
 ---
 
@@ -93,9 +94,10 @@ Phase 4 自动优化 10w+   ┃
 | P2-5 | 沉淀 PR 模板 | `hm-skill-hub/.github/PULL_REQUEST_TEMPLATE.md` | 强制列：候选来源、引擎归类、双评审 checklist |
 | P2-6 | policies 增强 | promotion/merge/deprecation 文档增加"实际命令"段 | 评审人可直接执行 |
 | P2-7 | 双评审配置 | `CODEOWNERS` + GitHub branch protection rules（文档） | `skills/core/` 需 owner + 流程评审 |
-| **P2-8** | **晋升候选自动检测器** | `tools/promotion_detector.py`（按设计 §11.5）| 跑 hub knowledge 聚类（mechanism + scope 维度）；簇内 `confirmations` 总和 ≥ 3 且跨 ≥ 2 contributors → 调 LLM 蒸馏「招式 + 适用条件 + 证据」→ 自动开 `promote-candidate` 标签 PR。**纪律**：只提建议、绝不自动 merge |
+| **P2-8** | **晋升候选自动检测器** | `tools/promotion_detector.py`（按设计 §11.5）| 两路输入：(a) hub knowledge 聚类（mechanism + scope）簇内 `confirmations` ≥ 3 且跨 ≥ 2 contributors；(b) **P2-9 喂入**的 `subsumes[] ≥ 2` 泛化记录 → 调 LLM 蒸馏「招式 + 适用条件 + 证据（含被包含实例）」→ 自动开 `promote-candidate` PR。**纪律**：只提建议、绝不自动 merge |
+| **P2-9** | **subsumption 检测器**（评审反馈 ④）| 扩 `merge_curator` + `tools/subsumption.py` | 在中央批量合并中加第三类判定：incoming vs hub 最近 k 条做 **LLM 蕴含判定**，识别「泛化包含」（B 概括 A）→ 建链 `A.subsumed_by/B.subsumes`、A 进 B 的 `source[]`（**不去重吞 A**）、emit 晋升信号。**AC**：对 mock 集（含「shrink_node hoist sc->priority」vs「reclaim 热循环 hoist loop-invariant」这类）正确判为 subsumption 而非 dup/contradiction；**≥ 2 实例**才向 P2-8 emit；单实例只建链不晋升 |
 
-**DoD**：跑一次 PR 全流程——成员本地沉淀 → 自动提 PR → CI 全过 → Curator 标注合并方案 → 双评审签字 → merge → hub 多了 ≥ 1 条 L2 knowledge 记录；**晋升检测器**对 mock knowledge 集能识别出 ≥ 1 个合理候选并开 PR。
+**DoD**：跑一次 PR 全流程——成员本地沉淀 → 自动提 PR → CI 全过 → Curator 标注合并方案（含 subsumption 判定）→ 双评审签字 → merge → hub 多了 ≥ 1 条 L2 knowledge 记录；**晋升检测器**对 mock knowledge 集（聚类路 + subsumption 路各一）能识别出 ≥ 1 个合理候选并开 PR，且被包含的具体实例在 PR 里作为 evidence 保留、未被删除。
 
 ---
 
@@ -165,15 +167,15 @@ R=Responsible, A=Accountable, C=Consulted, I=Informed。
 ```
 P0-3(schemas) → P0-6(parser/lint) → P0-7(CI)        ← Phase 0 主链
                        ↓
-                P0.5-2(schema/md 收敛)              ← Phase 0.5 卫生项
+                P0.5-2(schema/md 收敛) ★前置阻塞 gate ← 不过则 Phase 1 不开工
                        ↓
 P1-1(sediment) → P1-2(extractors) → P1-9(LLM 显著性)               ┐
                        ↓                                              ├→ P1-6(resolver) ← 读路径主链
-                P1-4(memory export) → P1-7(混合检索) → P1-10(retr eval) ┘
+                P1-4(memory export) → P1-7(混合检索) → P1-10(retr 硬门) ┘
                        ↓
-                P1-8(本地在线消解 PoC) → 议题 6 决策
+                P1-8(本地七路消解 PoC) → 议题 6 决策
                        ↓
-P2-2(dedup, 中央) → P2-3(conflict, 中央) → P2-8(晋升检测) → P3-2(evaluator) → P3-4(eval-gate) ← 长杆终点
+P2-2(dedup) → P2-3(conflict) → P2-9(subsumption) → P2-8(晋升检测) → P3-2(evaluator) → P3-4(eval-gate) ← 长杆终点
                                                                                   ↓
                                                                               P4-1(nightly)
 ```

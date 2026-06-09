@@ -2,10 +2,10 @@
 
 | 项 | 值 |
 |---|---|
-| 文档状态 | Draft v2（配套 `Team_Skill_Hub_Design_CN.md` v2.2）|
+| 文档状态 | Draft v3（配套 `Team_Skill_Hub_Design_CN.md` v2.3）|
 | 日期 | 2026-06-09 |
 | 说明 | 7 张 Mermaid 图，GitHub / VS Code 直接渲染。先看图建立整体直觉，细节回主文档对应 § |
-| 修订 | v2：新增图 7「读路径：混合检索 + 上下文预算」（配套主文档 v2.2 §12 改写） |
+| 修订 | v3：图 2 引擎 A 改为**七路关系分类器**（dup/contradiction/temporal/conditional/subsumption/selector/evidence），标注「不删」分支。v2：新增图 7「读路径」 |
 
 整体顺序：① 闭环全景 → ② 两套引擎（脊柱）→ ③ 沉淀漏斗 → ④ skills 维度归宿 → ⑤ 运行时组合 → ⑥ 路线图 → ⑦ 读路径（v2 新增）。
 
@@ -54,15 +54,22 @@ flowchart TB
     B2 -->|"否"| B4["进 bad_edits 缓冲<br/>（不再重试）"]
     B3 --> B5["GEPA Pareto<br/>保留互补候选，防塌缩"]
   end
-  subgraph EA["引擎 A · Knowledge（追加合并·绝不行级合并）"]
+  subgraph EA["引擎 A · Knowledge（七路关系分类·绝不行级合并·§10.1.0）"]
     direction TB
-    A1["稳定 ID · 集合并"] --> A2{"近似重复?"}
-    A2 -->|"是"| A3["合并出处<br/>confirmations + 1"]
-    A2 -->|"否"| A4{"矛盾?"}
-    A4 -->|"是"| A5["证据/新近度加权<br/>旧记录标 superseded（不删）"]
-    A4 -->|"否"| A6["新增"]
+    A1["incoming vs 最近 k 条<br/>关系分类器"] --> A2{"哪一类?"}
+    A2 -->|"duplicate"| A3["合并出处 · confirmations+1"]
+    A2 -->|"contradiction<br/>(同条件相反)"| A5["新证据强 → 旧记 superseded<br/>（双时态·不删）"]
+    A2 -->|"temporal<br/>(曾对现过时)"| A7["superseded + valid_until<br/>（保留可审计·不删）"]
+    A2 -->|"conditional<br/>(都对·条件不同)"| A8["共存 · 各写 applies_when"]
+    A2 -->|"subsumption<br/>(B 泛化 A)"| A9["都留 · A 作 B 证据<br/>→ 晋升信号(§11.5)"]
+    A2 -->|"selector drift / evidence"| A10["重解析 selector / 按 compare_level 合并"]
+    A2 -->|"novel"| A6["新增"]
   end
+  classDef nodel fill:#d4edda,stroke:#28a745
+  class A7,A8,A9 nodel
 ```
+
+> **本地（10.1.a）跑廉价 5 类、绝不 delete temporal/conditional/selector/evidence；subsumption（绿色，需 LLM 蕴含判定）仅中央（10.1.b）跑。**
 
 ---
 
