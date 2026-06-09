@@ -13,8 +13,11 @@ on:
       - "hm-skill-hub/**"
       - "src/hmopt/skillhub/**"
       - "src/hmopt/sediment/**"
+      - "src/hmopt/memory/**"
       - "tests/test_skillhub_*.py"
       - "tests/test_sediment*.py"
+      - "tests/test_local_curator.py"
+      - "tests/test_retrieval_eval.py"
       - ".github/workflows/skill-hub-ci.yml"
 
 jobs:
@@ -47,5 +50,11 @@ jobs:
         run: |
           pip install -e .
           pip install pytest pyyaml jsonschema
-      - name: skillhub read/write-path tests
-        run: python -m pytest tests/test_skillhub_retrieval.py tests/test_skillhub_resolver.py -q
+      - name: skillhub read/write-path + curator + eval tests
+        run: |
+          python -m pytest \
+            tests/test_skillhub_retrieval.py \
+            tests/test_skillhub_resolver.py \
+            tests/test_sediment.py \
+            tests/test_local_curator.py \
+            tests/test_retrieval_eval.py -q

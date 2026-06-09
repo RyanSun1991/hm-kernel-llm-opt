@@ -592,5 +592,30 @@ def resolve(
         typer.echo("  (none)")
 
 
+@app.command("retrieval-eval")
+def retrieval_eval(
+    eval_dir: str = typer.Option("hm-skill-hub/eval/retrieval", "--eval-dir"),
+    k: int = typer.Option(5, "--k"),
+    update_baseline: bool = typer.Option(False, "--update-baseline", help="Rewrite baseline.json"),
+) -> None:
+    # Demo: python -m hmopt.cli retrieval-eval
+    # Purpose: run the retrieval hard gate (recall@k + symbol-name ablation, P1-10).
+    from hmopt.skillhub.retrieval_eval import load_baseline, run_eval, write_baseline
+
+    r = run_eval(eval_dir, k=k)
+    typer.echo(f"queries={r.n_queries}  must_recall@{k}={r.must_recall:.3f}  "
+               f"lenient@{k}={r.lenient_recall:.3f}")
+    typer.echo(f"per-type: {r.per_type}")
+    typer.echo(f"symbol ablation (k=1) bm25/vector/hybrid: "
+               f"{r.ablation.get('bm25'):.3f} / {r.ablation.get('vector'):.3f} / "
+               f"{r.ablation.get('hybrid'):.3f}")
+    base = load_baseline(eval_dir)
+    if base and r.must_recall < base["must_recall"] - 1e-9:
+        typer.echo(f"REGRESSION: must_recall {r.must_recall:.3f} < baseline {base['must_recall']:.3f}")
+        raise typer.Exit(code=1)
+    if update_baseline:
+        typer.echo(f"baseline updated: {write_baseline(r, eval_dir)}")
+
+
 if __name__ == "__main__":
     app()

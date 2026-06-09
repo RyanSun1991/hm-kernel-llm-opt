@@ -1,0 +1,21 @@
+{
+  "k": 5,
+  "must_recall": 1.0,
+  "lenient_recall": 1.0,
+  "per_type": {
+    "target-anchored": 1.0,
+    "mechanism-anchored": 1.0,
+    "free-form": 1.0
+  },
+  "type_counts": {
+    "target-anchored": 10,
+    "mechanism-anchored": 8,
+    "free-form": 8
+  },
+  "ablation": {
+    "bm25": 1.0,
+    "vector": 0.8,
+    "hybrid": 1.0
+  },
+  "n_queries": 26
+}

@@ -182,7 +182,9 @@ class HybridRetriever:
                 continue
             rtoks = set(self._tokens[i])
             ent = sum(1 for e in entities if e in rtoks)
-            ebonus = entity_bonus_weight * ent
+            # Entity matching is a hybrid feature; keep bm25/vector arms pure so
+            # the ablation (P1-10 ④) measures the raw single-arm signal.
+            ebonus = (entity_bonus_weight * ent) if mode == "hybrid" else 0.0
             sw = _sigmoid(self.records[i].score)
             final = (base + ebonus) * sw
             hits.append(

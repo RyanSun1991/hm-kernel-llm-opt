@@ -64,6 +64,8 @@ Phase 4 自动优化 10w+   ┃
 
 **目标**：pipeline 收口点能产出符合 schema 的 Tier 1 候选包；resolver 读路径上线（混合检索 + 上下文预算）；本地在线消解 PoC 验证完成。
 
+> **状态（本会话）**：P1-1/P1-2/P1-6/P1-7/P1-8/P1-9/P1-10 核心已落地（`src/hmopt/skillhub/` 读路径 + `src/hmopt/sediment/` 写路径 + `src/hmopt/memory/` 本地 curator + `eval/retrieval/` 硬门）。**实测**：retrieval must-recall@5 = 1.0、三类 query 各 ≥8、符号名 ablation **hybrid(1.0) > vector(0.8)** 证明 BM25 救场；本地七路分类器 benchmark 48 例准确率 1.0、temporal+conditional false-delete = 0、本地零 subsumption；sediment 产出 schema-valid 候选。**议题 6（mem0 依赖）已决策**（见设计 §17 议题 6）。**未接入**：P1-3 三处收口钩子的真实 pipeline 调用（需 live run，本沙箱无重依赖）、P1-5 `--open-pr` 真正提 PR（仅 `--bundle` 落地）。检索后端为纯 Python BM25+token-hashing 向量（离线确定性），faiss/真实 embedder 可后续注入。
+
 | ID | 任务 | 交付物 | AC |
 |---|---|---|---|
 | P1-1 | `hmopt sediment` CLI | `src/hmopt/cli/sediment.py` + Typer 注册 | 在 pipeline 末调用；遍历 `.opencode/local/runs/<run_id>/`，提取 bench delta + idea ledger 变更 + 收口的 design 摘要 → 输出 `local/sediment_staging/<run_id>.jsonl` |

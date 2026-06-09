@@ -1,0 +1,146 @@
+# Retrieval-eval queries (plan P1-10): three query types, >= 8 each. Each
+# expected id is tagged must (strict recall) or optional (lenient recall).
+# `symbol: true` marks target-anchored queries used for the BM25/vector/hybrid
+# ablation (P1-10 ④).
+
+queries:
+  # ---------- target-anchored (>= 8) ----------
+  - id: ta1
+    type: target-anchored
+    symbol: true
+    query: "mm/vmscan.c::shrink_node hoist sc->priority loop invariant"
+    scope: {subsystem: mm-reclaim, target_slug: mm-vmscan-c-shrink-node}
+    expect: [{id: MF1, hit: must}, {id: GH1, hit: optional}]
+  - id: ta2
+    type: target-anchored
+    symbol: true
+    query: "shrink_node batch page isolation coalesce list operations"
+    scope: {subsystem: mm-reclaim, target_slug: mm-vmscan-c-shrink-node}
+    expect: [{id: MF2, hit: must}]
+  - id: ta3
+    type: target-anchored
+    symbol: true
+    query: "kernel/workqueue.c::process_one_work inline kworker entry"
+    scope: {subsystem: workqueue-threadpool, target_slug: kernel-workqueue-c-process-one-work}
+    expect: [{id: WF1, hit: must}, {id: WB1, hit: optional}]
+  - id: ta4
+    type: target-anchored
+    symbol: true
+    query: "kernel/locking/mutex.c coarse mutex contention split per shard"
+    scope: {subsystem: sync-primitives, target_slug: kernel-locking-mutex-c}
+    expect: [{id: SF1, hit: must}]
+  - id: ta5
+    type: target-anchored
+    symbol: true
+    query: "pick_next_task hot branch misprediction predicate"
+    scope: {subsystem: sched, target_slug: kernel-sched-c-pick-next}
+    expect: [{id: DF1, hit: must}]
+  - id: ta6
+    type: target-anchored
+    symbol: true
+    query: "drivers/hyperhold io header reload redundant load"
+    scope: {subsystem: hyperhold-io, target_slug: drivers-hyperhold-io-c}
+    expect: [{id: HF1, hit: must}]
+  - id: ta7
+    type: target-anchored
+    symbol: true
+    query: "shrink_node reclaim loop invariant read"
+    scope: {subsystem: mm-reclaim, target_slug: mm-vmscan-c-shrink-node}
+    expect: [{id: MF1, hit: must}, {id: MF2, hit: optional}]
+  - id: ta8
+    type: target-anchored
+    symbol: true
+    query: "process_one_work kworker hot entry cache pressure"
+    scope: {subsystem: workqueue-threadpool, target_slug: kernel-workqueue-c-process-one-work}
+    expect: [{id: WF1, hit: must}, {id: WB1, hit: optional}]
+  # bare symbol-name queries: the ablation discriminators (vector dilutes on the
+  # short DX* sub-token distractors; idf-weighted BM25 rescues — design §12.1).
+  - id: ta9
+    type: target-anchored
+    symbol: true
+    match: any   # bare 'shrink_node' is satisfied by either shrink_node fact
+    query: "shrink_node"
+    scope: {subsystem: mm-reclaim, target_slug: mm-vmscan-c-shrink-node}
+    expect: [{id: MF1, hit: must}, {id: MF2, hit: must}]
+  - id: ta10
+    type: target-anchored
+    symbol: true
+    query: "pick_next_task"
+    scope: {subsystem: sched, target_slug: kernel-sched-c-pick-next}
+    expect: [{id: DF1, hit: must}]
+
+  # ---------- mechanism-anchored (>= 8) ----------
+  - id: ma1
+    type: mechanism-anchored
+    query: "hoist-invariant loop-invariant code motion"
+    mechanism: hoist-invariant
+    expect: [{id: MF1, hit: must}, {id: GH1, hit: optional}]
+  - id: ma2
+    type: mechanism-anchored
+    query: "inline-callee force inline tradeoff"
+    mechanism: inline-callee
+    expect: [{id: WB1, hit: must}, {id: WF1, hit: optional}]
+  - id: ma3
+    type: mechanism-anchored
+    query: "batch-coalesce coalesce small operations"
+    mechanism: batch-coalesce
+    expect: [{id: MF2, hit: must}]
+  - id: ma4
+    type: mechanism-anchored
+    query: "lock-split fine grained per shard locking"
+    mechanism: lock-split
+    expect: [{id: SF1, hit: must}]
+  - id: ma5
+    type: mechanism-anchored
+    query: "branch-elimination remove hot path branch predication"
+    mechanism: branch-elimination
+    expect: [{id: DF1, hit: must}]
+  - id: ma6
+    type: mechanism-anchored
+    query: "redundant-load-elimination drop repeated loads"
+    mechanism: redundant-load-elimination
+    expect: [{id: HF1, hit: must}]
+  - id: ma7
+    type: mechanism-anchored
+    query: "hoist loop invariant before inline ordering heuristic"
+    mechanism: hoist-invariant
+    expect: [{id: GH1, hit: must}, {id: MF1, hit: optional}]
+  - id: ma8
+    type: mechanism-anchored
+    query: "inline kworker entry regression i-cache"
+    mechanism: inline-callee
+    expect: [{id: WB1, hit: must}, {id: WF1, hit: optional}]
+
+  # ---------- free-form (>= 8) ----------
+  - id: ff1
+    type: free-form
+    query: "which optimization plans were rejected as bad plans"
+    expect: [{id: WB1, hit: must}]
+  - id: ff2
+    type: free-form
+    query: "how do I avoid wasting iterations on cold paths"
+    expect: [{id: GA1, hit: must}]
+  - id: ff3
+    type: free-form
+    query: "why is testing only the feature image not a valid comparison"
+    expect: [{id: GV1, hit: must}]
+  - id: ff4
+    type: free-form
+    query: "should I hoist or inline first on a hot loop"
+    expect: [{id: GH1, hit: must}, {id: MF1, hit: optional}]
+  - id: ff5
+    type: free-form
+    query: "reduce repeated memory loads in a driver hot path"
+    expect: [{id: HF1, hit: must}]
+  - id: ff6
+    type: free-form
+    query: "make a coarse lock finer grained to cut contention"
+    expect: [{id: SF1, hit: must}]
+  - id: ff7
+    type: free-form
+    query: "remove a branch on the scheduler hot path"
+    expect: [{id: DF1, hit: must}]
+  - id: ff8
+    type: free-form
+    query: "coalesce many small writes into one batch round trip"
+    expect: [{id: MF2, hit: must}]
