@@ -1,0 +1,35 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "skill_frontmatter.schema.json",
+  "title": "Skill YAML frontmatter",
+  "description": "YAML frontmatter of SKILL.md (Anthropic-compatible). Validated by lint.",
+  "type": "object",
+  "required": ["name", "kind", "version", "maturity", "owners", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "name":              {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+    "kind":              {"enum": ["core", "technique", "domain"]},
+    "version":           {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "description": "semver"},
+    "maturity":          {"enum": ["L0", "L1", "L2", "L3"]},
+    "optimization_goal": {"type": "string"},
+    "applies_to": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "subsystems":       {"type": "array", "items": {"type": "string"}},
+        "path_globs":       {"type": "array", "items": {"type": "string"}},
+        "symbol_selectors": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "requires":          {"type": "array", "items": {"type": "string"}},
+    "eval_id":           {"type": "string"},
+    "owners":            {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "status":            {"enum": ["active", "deprecated", "experimental"]},
+    "scope":             {"type": "array", "items": {"type": "string"}}
+  },
+  "allOf": [
+    {
+      "if":   {"properties": {"kind": {"const": "domain"}}, "required": ["kind"]},
+      "then": {"required": ["applies_to"]}
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# Local artifacts
+*.tmp
+.DS_Store
+
+# Vector indexes (rebuilt from records)
+knowledge/index/*.faiss
+knowledge/index/*.pkl
+!knowledge/index/.gitkeep

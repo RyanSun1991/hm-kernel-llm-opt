@@ -1,0 +1,28 @@
+# Top-level inventory of hub assets.
+# Maintained by tools/release.py (Phase 4); hand-edited until then.
+
+hub:
+  version: "0.1.0"
+  status: "phase-0-skeleton"
+
+skills: []
+# Schema (example):
+#   - name: optimization-funnel
+#     kind: core               # core | technique | domain
+#     version: 2.3.1
+#     maturity: L3             # L0 | L1 | L2 | L3
+#     eval_id: eval/task_suites/funnel_suite_v2
+#     owners: [@core-skill-owners]
+#     status: active
+
+knowledge_indexes:
+  - path: "knowledge/global/heuristics/"        # H###
+  - path: "knowledge/global/anti_patterns/"     # A###
+  - path: "knowledge/global/validation_pitfalls/" # V###
+  - path: "knowledge/global/bad_plans/"         # B###
+  - path: "knowledge/subsystems/"               # G### / F### per subsystem
+  - path: "knowledge/targets/"                  # F### / L### per target
+
+evals: []
+
+releases: []

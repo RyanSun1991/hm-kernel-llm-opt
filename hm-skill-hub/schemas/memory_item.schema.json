@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "memory_item.schema.json",
+  "title": "Memory Item",
+  "description": "Generic typed knowledge record (curated, retrievable). One of five types.",
+  "type": "object",
+  "required": ["id", "type", "title", "body", "scope", "source", "created_at", "maturity", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "id":            {"type": "string", "pattern": "^[FGAR][0-9]{3,}$", "description": "F=fact, G=global lesson (mirrored), A=anti_pattern, R=rule/playbook."},
+    "type":          {"enum": ["fact", "rule", "pattern", "anti_pattern", "playbook_step"]},
+    "title":         {"type": "string", "maxLength": 200},
+    "body":          {"type": "string"},
+    "scope": {
+      "type": "object", "required": ["level"], "additionalProperties": false,
+      "properties": {
+        "level":       {"enum": ["function", "call-site", "data-flow", "subsystem", "architectural", "global"]},
+        "subsystem":   {"type": "string"},
+        "target_slug": {"type": "string"}
+      }
+    },
+    "source": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "required": ["kind", "ref"], "additionalProperties": false,
+        "properties": {
+          "kind": {"enum": ["commit", "review", "bench", "doc", "run_id"]},
+          "ref":  {"type": "string"}
+        }
+      }
+    },
+    "evidence": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "delta_pct":     {"type": "number"},
+        "compare_level": {"enum": ["total", "process", "thread", "lib", "function"]},
+        "confirmations": {"type": "integer", "minimum": 1}
+      }
+    },
+    "maturity":      {"enum": ["L0", "L1", "L2", "L3"]},
+    "status":        {"enum": ["active", "superseded", "deprecated"]},
+    "invalidation":  {"type": "string", "description": "Failure condition, e.g. 'rebase invalidates offset'."},
+    "supersedes":    {"type": "array", "items": {"type": "string"}},
+    "valid_from":    {"type": "string", "format": "date-time"},
+    "valid_until":   {"type": "string", "format": "date-time"},
+    "score":         {"type": "number"},
+    "contributor":   {"type": "string"},
+    "created_at":    {"type": "string", "format": "date-time"},
+    "updated_at":    {"type": "string", "format": "date-time"}
+  }
+}

@@ -1,0 +1,202 @@
+# Team Skill Hub 实现计划与细节设计
+
+| 项 | 值 |
+|---|---|
+| 文档状态 | Draft v1.0 |
+| 日期 | 2026-05-27 |
+| 关联设计 | `docs/Team_Skill_Hub_Design_CN.md`（v2.1）+ `docs/Team_Skill_Hub_Design_Diagrams_CN.md` |
+| 范围 | Phase 0–4 任务级分解 + 本会话执行 Phase 0 |
+| 语言策略 | 散文 zh-CN；schema/代码/CLI/commit 英文 |
+
+---
+
+## 0. 总体节奏
+
+```
+Phase 0 抽取    1-2w   ┃ 本会话 ★
+Phase 1 蒸馏    2-3w   ┃ 下会话
+Phase 2 策展合并 3-6w   ┃
+Phase 3 eval门  6-10w  ┃ 长杆
+Phase 4 自动优化 10w+   ┃
+```
+
+**核心约束**：
+- 全程在分支 `claude/tender-cray-ABIsw`；hub 初期作为本仓子目录 `hm-skill-hub/`，未来 `git subtree split --prefix=hm-skill-hub` 拆出独立仓。
+- 每个 Phase 都有「Definition of Done」（DoD），不达成不进入下一阶段。
+- 现有 `.opencode/{skills,agents,...}` **Phase 0 不动内容**，只建结构；内容迁移留到 Phase 0.5 专门会话做（带回归验证）。
+
+---
+
+## 1. Phase 0 — 抽取（本会话执行）
+
+**目标**：零行为变更地把双仓骨架立起来；hub 能 lint 通过、能跑 CI 占位。
+
+| ID | 任务 | 交付物（路径）| AC（验收）| 依赖 |
+|---|---|---|---|---|
+| P0-1 | 仓骨架 | `hm-skill-hub/{README,CONTRIBUTING,GOVERNANCE,CHANGELOG}.md`、`registry.yaml`、`.gitignore` | 6 文件存在、内容自洽 | — |
+| P0-2 | 空目录占位 | `skills/{core,technique,domain}/`、`knowledge/{global/{lessons,anti_patterns},subsystems,targets,index}/`、`evidence/{benchmarks,regressions}/`、`eval/{task_suites,scorecards}/`、`staging/`、`releases/`（每个含 `.gitkeep`）| 目录树存在 | — |
+| P0-3 | 7 份 JSON-Schema | `schemas/{bad_plan,global_lesson,memory_item,idea,skill_frontmatter,skill_patch,scorecard}.schema.json` | 每份是 valid JSON-Schema draft-07 | — |
+| P0-4 | 控制词表 | `_registry/{mechanisms,subsystem_selectors}.yaml` | mechanisms 初始 ≥ 12 条（hoist/inline/batch 等）| — |
+| P0-5 | 三份策略文档 | `policies/{promotion,merge,deprecation}_policy.md` | 固化设计 §8/§9/§10/§13 规则；可被人直接执行 | P0-3 |
+| P0-6 | 解析器 + lint CLI | `tools/{parse_memory,lint,redact}.py`、`tools/requirements.txt` | `python tools/lint.py` 在空 hub 上 exit 0；带示例时验证 schema | P0-3 |
+| P0-7 | CI 占位 | `.github/workflows/ci.yml`（hub 内）| 拆仓后即可激活 | P0-6 |
+| P0-8 | 1 份示例 | `knowledge/global/anti_patterns/A001-*.md`、`knowledge/global/lessons/H001-*.md`、`skills/core/example/SKILL.md` | lint 通过；可作模板复用 | P0-3, P0-6 |
+| P0-9 | 消费端占位 | `.opencode/skill-memory.lock`（pinning placeholder） | 格式自描述；hub 未拆前用 in-repo 模式 | — |
+
+**DoD**：
+- `python hm-skill-hub/tools/lint.py` 在含示例的 hub 上 exit 0。
+- 目录树与设计 §6.1 一致。
+- 任何团队成员能照 `CONTRIBUTING.md` + 示例文件 起手写一条 `bad_plan` 并通过 lint。
+
+**Phase 0.5（独立小会话，未列入本计划主线）**：内容迁移——把现有 `.opencode/skills`、`agents`、`commands`、`pipelines`、`docs`（harness 规范部分）切入 `hm-skill-hub/`，在 `.opencode/` 下用 symlink 保持旧路径可用。带回归：跑一次现有 `/optimize_generic` 验证 pipeline 行为不变。
+
+---
+
+## 2. Phase 1 — 蒸馏（2-3w）
+
+**目标**：pipeline 收口点能产出符合 schema 的 Tier 1 候选包。
+
+| ID | 任务 | 交付物 | AC |
+|---|---|---|---|
+| P1-1 | `hmopt sediment` CLI | `src/hmopt/cli/sediment.py` + Typer 注册 | 在 pipeline 末调用；遍历 `.opencode/local/runs/<run_id>/`，提取 bench delta + idea ledger 变更 + 收口的 design 摘要 → 输出 `local/sediment_staging/<run_id>.jsonl` |
+| P1-2 | 蒸馏规则映射 | `src/hmopt/sediment/extractors.py`（bench→facts、review→anti_patterns、ledger→idea record）| 每类输入对应一种 extractor；单测覆盖 |
+| P1-3 | 收口钩子接入 | 改 `os-opt-manager` decision 阶段 + `iterative-optimization` pass 末 + primary-agent "done" | 三处自动调用 `hmopt sediment`；不阻塞主流程 |
+| P1-4 | memory export | `tools/memory_export.py`（一次性脚本）| 把现有 `memory/`、`plans/`、`reviews/` 转标准对象；产物可被 lint 通过 |
+| P1-5 | 沉淀 PR 工具 | `hmopt sediment --bundle --open-pr` | 把符合晋升触发条件的候选打包成 hub PR；走 GitHub API；本仓→hub 仓 |
+
+**DoD**：现网跑一次完整 pipeline，自动落出 ≥ 1 个合 schema 的 Tier 1 候选包；`hmopt sediment --bundle` 能产生一份本地 PR diff（不必真提）。
+
+---
+
+## 3. Phase 2 — 策展 + 合并（3-6w）
+
+**目标**：知识合并上线（引擎 A），CI 强校验，policies 落地。
+
+| ID | 任务 | 交付物 | AC |
+|---|---|---|---|
+| P2-1 | Curator-agent 提示词 | `hm-skill-hub/tools/merge_curator.md` | OpenCode 可加载；输入候选 + 现有 hub knowledge，输出去重 / 冲突 / 消解决策 |
+| P2-2 | 去重器 | `tools/dedup.py` | embedding 相似度（faiss 本地）+ alias 命中；阈值可调；输出"合并/新建/冲突"三态 |
+| P2-3 | 冲突消解 | `tools/conflict_resolve.py` | 同 (target, mechanism) 断言相反 → Zep 双时态：旧条目标 `superseded`、`valid_until=now`，新条目 `supersedes=[old.id]` |
+| P2-4 | CI: secret-scan + lint + dedup | 扩 `.github/workflows/ci.yml` | gitleaks/trufflehog + lint + dedup 全过才允许 merge |
+| P2-5 | 沉淀 PR 模板 | `hm-skill-hub/.github/PULL_REQUEST_TEMPLATE.md` | 强制列：候选来源、引擎归类、双评审 checklist |
+| P2-6 | policies 增强 | promotion/merge/deprecation 文档增加"实际命令"段 | 评审人可直接执行 |
+| P2-7 | 双评审配置 | `CODEOWNERS` + GitHub branch protection rules（文档） | `skills/core/` 需 owner + 流程评审 |
+
+**DoD**：跑一次 PR 全流程——成员本地沉淀 → 自动提 PR → CI 全过 → Curator 标注合并方案 → 双评审签字 → merge → hub 多了 ≥ 1 条 L2 knowledge 记录。
+
+---
+
+## 4. Phase 3 — eval 门（6-10w）★长杆
+
+**目标**：技能修改安全反喂（引擎 B），SkillOpt 半自动闭环。
+
+| ID | 任务 | 交付物 | AC |
+|---|---|---|---|
+| P3-1 | 评测样本采集 | `eval/task_suites/<suite>/cases/*.yaml` | 每条 case：input target + 期望优化方向 + grading rubric；初始 ≥ 20 case 覆盖 mm/wq/hyperhold |
+| P3-2 | 评测执行器 | `tools/run_evals.py` | 给定 skill 版本 + task suite，跑全 case，出 `scorecards/<skill>__<semver>.json` |
+| P3-3 | 代理指标 | 静态指令数估计器 + 小样本真机 A/B 接口 | Phase 3 早期用代理；后期真机加密 |
+| P3-4 | eval-gate CI | 扩 `.github/workflows/ci.yml` | 任何 `skills/**/` 变更触发 evaluator；`metrics.pass_rate` 不增即拒 |
+| P3-5 | bounded edit 优化器 | `tools/skill_optimizer.py` | 输入 rollout traces + 当前 skill，输出有界 add/del/replace 编辑候选 |
+| P3-6 | Pareto 前沿 | `tools/pareto.py` | per-instance score 维护；保留互补候选到 `skills/<name>/candidates/` |
+| P3-7 | bad_edits 缓冲 | `skills/<name>/bad_edits.jsonl` | 被 eval 否决的编辑入库；优化器下次直接跳过 |
+
+**DoD**：手动触发优化作业 → 优化器对一个 core skill 提出有界编辑 → eval-gate 自动跑 → 严格变好则自动开 PR；不变好则编辑入 bad_edits 缓冲；产生一份 scorecard。
+
+**长杆原因**：内核优化 ground truth = 真机 A/B 指令数 delta，慢/贵/噪声大。Phase 3 早期必须用代理指标起步。
+
+---
+
+## 5. Phase 4 — 自动优化（10w+）
+
+**目标**：闭环自动迭代日常运行；每周小版本 / 每月稳定版。
+
+| ID | 任务 | 交付物 | AC |
+|---|---|---|---|
+| P4-1 | 定时优化作业 | `.github/workflows/nightly.yml`（hub 内）| nightly 跑 Collect→Normalize→Cluster→Optimize→Validate→Promote→Broadcast |
+| P4-2 | 发布工具 | `tools/release.py` | 自动算 semver bump（patch/minor/major）+ 打 tag + 生成 release notes + 更新 `registry.yaml` |
+| P4-3 | broadcast | `tools/broadcast.py` | 发布后自动开 PR 到业务仓更新 `skill-memory.lock` |
+| P4-4 | 监控面板 | `eval/scorecards/_dashboard.md`（GitHub 渲染）| 每技能 score 趋势可视化 |
+| P4-5 | 半自动→全自动闸门 | `policies/auto_merge_policy.md` | 信任阈值（连续 N 次 eval 提升 + 0 回滚）后允许自动 merge；之前必须人工 |
+
+**DoD**：一个完整自然周内，hub 自动跑出 ≥ 1 个 patch 版本，被业务仓自动 pin 后 pipeline 行为有可测的正向变化。
+
+---
+
+## 6. 横切关注（贯穿所有 Phase）
+
+| 关注 | 措施 |
+|---|---|
+| **安全** | 脱敏门（`redact.py`）+ CI secret-scan（gitleaks）+ CODEOWNERS；任何成员都不能直接 push 到 main，只能通过 PR |
+| **性能** | lint 全量跑 < 30s（大仓需要 incremental lint）；CI eval 跑 < 30min（用代理指标 + 缓存） |
+| **路径兼容** | Phase 0.5 用 symlink 兜底；Phase 1+ 在 `resolver.py` 内统一解析 |
+| **文档** | 每个 Phase 同步更新 `Team_Skill_Hub_Design_CN.md` 修订行；本计划文档独立维护，每 Phase 完成后打勾 |
+| **回滚** | 每 Phase 入口先打 git tag；每个 hub 发布带 scorecard，方便诊断回滚 |
+
+---
+
+## 7. 角色与责任（RACI lite）
+
+| 角色 | Phase 0–2 | Phase 3 | Phase 4 |
+|---|---|---|---|
+| **平台 / 工具** | hub 骨架 + 工具链（R）| eval 执行器（R）| 定时作业 + 发布（R）|
+| **领域专家** | 评审示例（C）| eval case 设计（R）| 评审异常（C）|
+| **流程 reviewer** | policies 评审（A）| eval-gate 设计（A）| 自动 merge 闸门（A）|
+| **业务仓使用者** | 用现有 .opencode 不变（I）| Phase 3.5 切到 hub-backed（C）| 消费新版本（I）|
+
+R=Responsible, A=Accountable, C=Consulted, I=Informed。
+
+---
+
+## 8. 关键路径
+
+```
+P0-3(schemas) → P0-6(parser/lint) → P0-7(CI)        ← Phase 0 主链
+                       ↓
+P1-1(sediment) → P1-4(memory export) → P2-2(dedup) → P2-3(conflict) → P3-2(evaluator) → P3-4(eval-gate) ← 长杆终点
+                                                                                  ↓
+                                                                              P4-1(nightly)
+```
+
+**最关键单点**：P0-3（schemas）—— 后续所有 lint / 校验 / 合并都靠它。本会话务必拿下。
+
+---
+
+## 9. 本会话交付清单（Phase 0 实际产出）
+
+完成后将存在的文件：
+
+```
+hm-skill-hub/
+  README.md  CONTRIBUTING.md  GOVERNANCE.md  CHANGELOG.md
+  registry.yaml  .gitignore
+  schemas/{bad_plan,global_lesson,memory_item,idea,
+           skill_frontmatter,skill_patch,scorecard}.schema.json   # 7 份
+  _registry/{mechanisms,subsystem_selectors}.yaml
+  policies/{promotion,merge,deprecation}_policy.md
+  tools/{parse_memory,lint,redact}.py  tools/requirements.txt
+  .github/workflows/ci.yml
+  skills/{core,technique,domain}/.gitkeep
+  skills/core/example/SKILL.md
+  knowledge/global/{lessons,anti_patterns}/{.gitkeep, H001-*.md, A001-*.md}
+  knowledge/{subsystems,targets,index}/.gitkeep
+  evidence/{benchmarks,regressions}/.gitkeep
+  eval/{task_suites,scorecards}/.gitkeep
+  staging/.gitkeep  releases/.gitkeep
+.opencode/
+  skill-memory.lock                                                # 占位
+docs/
+  Skill_Hub_Implementation_Plan_CN.md                              # 本文档
+```
+
+**验证**：`python hm-skill-hub/tools/lint.py` 在示例上 exit 0、schemas 互引无误、目录树与设计 §6.1 一致。
+
+---
+
+## 10. 本会话不做的事（避免范围蔓延）
+
+- 不写 Curator-agent 提示词（Phase 2）
+- 不写 SkillOpt 优化器、Pareto 算法、eval 执行器（Phase 3）
+- 不真正搬动 `.opencode/{skills,agents,...}` 内容（Phase 0.5 独立会话）
+- 不创建独立 GitHub 仓（受环境限制，本会话仅准备好"将来一行 subtree 拆出"的结构）
+- 不接入 sediment CLI / memory export（Phase 1）
+- 不写 nightly 优化作业（Phase 4）

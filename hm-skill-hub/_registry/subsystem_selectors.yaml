@@ -1,0 +1,29 @@
+# Single-point binding from subsystem name -> volatile kernel topology.
+# Domain skills reference subsystems by name; concrete path_globs / symbol_selectors
+# live here so a kernel rebase only requires updating this file, not every skill.
+
+subsystems:
+  - name: mm-reclaim
+    description: Memory reclaim and page eviction.
+    path_globs: ["mm/vmscan.c", "mm/*reclaim*", "mm/page_alloc.c"]
+    symbol_selectors: ["shrink_*", "*_reclaim", "kswapd*", "do_try_to_free_pages"]
+
+  - name: workqueue-threadpool
+    description: Workqueue / kworker thread-pool execution.
+    path_globs: ["kernel/workqueue.c", "include/linux/workqueue.h"]
+    symbol_selectors: ["worker_thread", "process_one_work", "queue_work*", "__queue_work"]
+
+  - name: hyperhold-io
+    description: Hyperhold storage I/O path.
+    path_globs: ["drivers/hyperhold/**/*.c"]
+    symbol_selectors: ["hyperhold_*"]
+
+  - name: sync-primitives
+    description: Basic synchronization primitives (mutex / spinlock / rwsem).
+    path_globs: ["kernel/locking/**/*.c", "include/linux/spinlock*.h", "include/linux/mutex*.h"]
+    symbol_selectors: ["mutex_*", "spin_*", "down_*", "up_*", "rwsem_*"]
+
+  - name: sched
+    description: CPU scheduler.
+    path_globs: ["kernel/sched/**/*.c"]
+    symbol_selectors: ["sched_*", "__schedule", "pick_next_task*"]
