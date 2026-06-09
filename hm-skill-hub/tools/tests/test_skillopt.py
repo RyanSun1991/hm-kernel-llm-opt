@@ -6,6 +6,7 @@ Runnable via pytest or standalone:
 """
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -51,6 +52,35 @@ def test_scorecard_strictly_better_and_regression():
     assert better.strictly_better_than(base)
     assert better.regression_rate_vs(base) == 0.0
     assert not base.strictly_better_than(better)
+
+
+def test_safety_property_aggregate_up_but_one_instance_regresses_is_rejected():
+    """THE re-feed safety property: an edit that raises pass_rate AND mean but
+    regresses even one instance must be REJECTED (monotone gate, design §10.2)."""
+    suite = load_suite(SUITE)
+    base = run_evals("s", "1", "lock-split per-shard contention batch-coalesce round-trip", suite)
+    # adds hoist (mm now passes) but drops 'contention' (wq 1.0 -> 0.8, still >= 0.6)
+    cand = run_evals("s", "1",
+                     "lock-split per-shard batch-coalesce round-trip "
+                     "hoist loop-invariant re-measure hoist-invariant", suite)
+    assert cand.pass_rate > base.pass_rate          # aggregate improved
+    assert cand.mean_score > base.mean_score
+    assert cand.regression_rate_vs(base) > 0.0      # but an instance regressed
+    assert not cand.strictly_better_than(base)      # => rejected
+
+
+def test_empty_expected_terms_does_not_autopass():
+    from run_evals import Case  # type: ignore
+    c = Case(id="x", target="t", expected_mechanism="hoist-invariant", expected_terms=[])
+    assert ProxyScorer().score("apply hoist-invariant guidance", c) < 0.6  # mech-only = 0.4
+
+
+def test_avoid_term_substring_of_expected_not_penalized():
+    from run_evals import Case  # type: ignore
+    # avoid 'coalesce' must NOT fire on the expected term 'batch-coalesce' (word boundary)
+    c = Case(id="x", target="t", expected_mechanism="batch-coalesce",
+             expected_terms=["batch-coalesce"], avoid_terms=["coalesce"])
+    assert ProxyScorer().score("apply batch-coalesce here", c) >= 0.9
 
 
 # ---- pareto ----------------------------------------------------------------
@@ -132,6 +162,30 @@ def test_regressing_edit_fails_gate_and_is_buffered(tmp_path: Path):
 def test_eval_gate_passes_on_committed_seed():
     ok, msg = eval_gate.check_skill(SKILL)
     assert ok, msg
+
+
+def test_committed_card_prefers_version_match(tmp_path: Path):
+    d = _tmp_skill(tmp_path)
+    sc = d / "scorecards"
+    sc.mkdir(exist_ok=True)
+    # decoy card with a lexically-larger version; SKILL.md version is 0.1.0
+    (sc / "instruction-count-first__0.9.0.json").write_text(
+        json.dumps({"skill": "instruction-count-first", "version": "0.9.0", "suite": "s",
+                    "per_instance": {}, "pass_rate": 0.0, "mean_score": 0.0}), encoding="utf-8")
+    card = eval_gate._committed_card(d)
+    assert card is not None and card.version == "0.1.0"  # version-matched, not lexical-max
+
+
+def test_committed_card_semver_max_when_no_version_match(tmp_path: Path):
+    d = _tmp_skill(tmp_path)
+    sc = d / "scorecards"
+    (sc / "instruction-count-first__0.1.0.json").unlink()  # drop the version-matched card
+    for v, pr in [("0.9.0", 0.5), ("0.10.0", 0.8)]:
+        (sc / f"instruction-count-first__{v}.json").write_text(
+            json.dumps({"skill": "x", "version": v, "suite": "s",
+                        "per_instance": {}, "pass_rate": pr, "mean_score": pr}), encoding="utf-8")
+    card = eval_gate._committed_card(d)
+    assert card.version == "0.10.0"  # parsed semver (0.10.0 > 0.9.0), not lexical
 
 
 def test_eval_gate_flags_regression(tmp_path: Path):

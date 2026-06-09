@@ -11,6 +11,14 @@ the gated optimizer (or a reviewed PR), so it represents the accepted baseline; 
 hand edit to `best_skill.md` that regresses is caught here because it re-evaluates
 worse than the committed card.
 
+THREAT MODEL / LIMITATION (be honest): the baseline is the *in-tree, mutable*
+scorecard. A PR that regresses `best_skill.md` **and** co-rewrites the scorecard
+to the worse numbers will pass this gate (baseline == current). So this gate is
+NOT self-sufficient — it assumes the scorecard is not hand-edited and relies on a
+reviewer inspecting the scorecard diff. A robust implementation pins the baseline
+to a non-co-editable source (the card at the PR merge-base / previous git
+revision, or a card stored under `evidence/`); that is a Phase-4 follow-up.
+
 CLI:
     python tools/eval_gate.py [skills_dir]        # default: skills/
 """
@@ -22,7 +30,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from run_evals import Scorecard, evaluate_skill_dir  # type: ignore
+from run_evals import Scorecard, evaluate_skill_dir, load_skill  # type: ignore
 
 try:
     import yaml
@@ -49,11 +57,26 @@ def _suite_dir_for(skill_dir: Path) -> Path | None:
     return d if (d / "cases").exists() else None
 
 
+def _semver_key(path: Path) -> tuple[int, int, int]:
+    m = re.search(r"__(\d+)\.(\d+)\.(\d+)\.json$", path.name)
+    return tuple(int(x) for x in m.groups()) if m else (0, 0, 0)  # type: ignore[return-value]
+
+
 def _committed_card(skill_dir: Path) -> Scorecard | None:
-    cards = sorted((skill_dir / "scorecards").glob("*.json")) if (skill_dir / "scorecards").exists() else []
+    sc_dir = skill_dir / "scorecards"
+    cards = list(sc_dir.glob("*.json")) if sc_dir.exists() else []
     if not cards:
         return None
-    raw = json.loads(cards[-1].read_text(encoding="utf-8"))
+    # prefer the card matching the current best_skill version; else the highest
+    # semver (parsed, not lexical — 0.10.0 > 0.9.0).
+    try:
+        _, version, _ = load_skill(skill_dir)
+    except Exception:  # noqa: BLE001
+        version = ""
+    chosen = next((c for c in cards if c.name.endswith(f"__{version}.json")), None)
+    if chosen is None:
+        chosen = max(cards, key=_semver_key)
+    raw = json.loads(chosen.read_text(encoding="utf-8"))
     return Scorecard(skill=raw["skill"], version=raw["version"], suite=raw["suite"],
                      per_instance=raw.get("per_instance", {}),
                      pass_rate=raw.get("pass_rate", 0.0), mean_score=raw.get("mean_score", 0.0))

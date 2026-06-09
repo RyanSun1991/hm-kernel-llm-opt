@@ -18,6 +18,14 @@ Discipline (the three SkillOpt safety pieces):
 The optimizer only *proposes* and (with --apply) writes `best_skill.md`; the
 design keeps merge half-automatic (auto-PR, human merge) early on.
 
+HONESTY: `propose_edits` synthesizes its guidance bullet from the SAME
+`expected_terms`/`expected_mechanism` the `ProxyScorer` reads back, so a
+strictly-better candidate is guaranteed on any failing group. The 0.67→1.00
+demo therefore validates the SkillOpt *control flow* (bounded edit → eval gate →
+accept/reject → Pareto → bad_edits), NOT edit *discovery* or that keyword
+coverage tracks instruction-count reduction. A real scorer (static instr-count
+estimator / real-machine A/B) plugs in via the `scorer=` parameter unchanged.
+
 CLI:
     python tools/skill_optimizer.py <skill_dir> [--apply] [--suite=<dir>]
 """

@@ -116,8 +116,20 @@ def _load_mechanism_aliases() -> dict[str, set[str]]:
     return out
 
 
+def _present(term: str, text_l: str) -> bool:
+    """Word-boundary match (hyphen-aware) so an avoid_term that is a *substring*
+    of an expected_term (e.g. `coalesce` inside `batch-coalesce`) doesn't mis-fire."""
+    return re.search(r"(?<![\w-])" + re.escape(term.lower()) + r"(?![\w-])", text_l) is not None
+
+
 class ProxyScorer:
-    """Static keyword/mechanism-coverage proxy (offline, deterministic)."""
+    """Static keyword/mechanism-coverage proxy (offline, deterministic).
+
+    NOTE (honesty): the optimizer's `propose_edits` synthesizes guidance from the
+    SAME `expected_terms`/`expected_mechanism` this scorer reads back. So the
+    0.67→1.00 demo validates the SkillOpt *control flow* (propose → gate → accept
+    / reject / Pareto / bad_edits), NOT that keyword coverage tracks real
+    instruction-count reduction. Swap in a real-machine scorer for capability."""
 
     def __init__(self) -> None:
         self.aliases = _load_mechanism_aliases()
@@ -125,11 +137,12 @@ class ProxyScorer:
     def score(self, skill_text: str, case: Case) -> float:
         text = skill_text.lower()
         terms = case.expected_terms or []
-        recall = (sum(t.lower() in text for t in terms) / len(terms)) if terms else 1.0
+        # a rubric-less case must NOT auto-pass: empty expected_terms => recall 0.
+        recall = (sum(_present(t, text) for t in terms) / len(terms)) if terms else 0.0
         names = self.aliases.get(case.expected_mechanism, {case.expected_mechanism})
-        mech_bonus = 1.0 if any(n.lower() in text for n in names) else 0.0
+        mech_bonus = 1.0 if any(_present(n, text) for n in names) else 0.0
         penalty = (
-            sum(a.lower() in text for a in case.avoid_terms) / len(case.avoid_terms)
+            sum(_present(a, text) for a in case.avoid_terms) / len(case.avoid_terms)
             if case.avoid_terms else 0.0
         )
         return max(0.0, min(1.0, 0.6 * recall + 0.4 * mech_bonus - 0.5 * penalty))
