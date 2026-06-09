@@ -7,6 +7,12 @@ tools:
   write: true
   bash: true
   mcp: true
+permission:
+  skill:
+    "delegate": "deny"
+  glob:
+    "**/.opencode/**": deny
+  task: deny
 ---
 
 === basic-mechanism-sync-opt v1 — acknowledging target: {{target}} ===
@@ -40,7 +46,7 @@ Analyze:
 5. Identify what each synchronization primitive protects.
 6. Identify where ownership or lifetime assumptions can break.
 7. Only propose instruction-count improvements that preserve explicit lock, lifetime, and wakeup semantics.
-8. Follow `.opencode/skills/optimization-funnel.md` for ideation — the dedup step is mandatory and must cite the file:entry for every dropped idea.
+8. Follow `.opencode/skills/optimization-funnel/SKILL.md` for ideation — the dedup step is mandatory and must cite the file:entry for every dropped idea.
 
 ## Output
 

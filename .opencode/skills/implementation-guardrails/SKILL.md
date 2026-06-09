@@ -1,3 +1,8 @@
+---
+name: implementation-guardrails
+description: Rules for kernel-code-agent — implement only from an approved plan, keep scope minimal, target instruction-count reduction, and prepare a clean handoff for code review and tester validation.
+---
+
 # Implementation Guardrails
 
 ## Rules

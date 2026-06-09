@@ -21,7 +21,7 @@ Upgrade the current `.opencode` multi-agent harness into a fuller harness engine
 ## Target Topology
 
 1. `kernel-pipeline-starter`
-2. `os-opt-manager`
+2. `hm-opt-manager`
 3. research specialist
 4. `kernel-plan-reviewer`
 5. `kernel-code-agent`

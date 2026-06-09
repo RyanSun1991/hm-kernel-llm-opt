@@ -7,7 +7,12 @@ tools:
   write: true
   bash: true
   mcp: true
-  delegate: false
+permission:
+  skill:
+    "delegate": "deny"
+  glob:
+    "**/.opencode/**": deny
+  task: deny
 ---
 
 === kernel-plan v1 — acknowledging target: {{target}} ===
@@ -45,9 +50,9 @@ Parse from the invoking prompt:
 Run this sequence **on every turn**. State is rebuilt from disk each turn so session compaction and multi-day pauses are safe.
 
 1. Print the identity banner.
-2. Read `.opencode/config.yaml` + `.opencode/skills/language-config.md` — apply the configured language to every prose section.
+2. Read `.opencode/config.yaml` + `.opencode/skills/language-config/SKILL.md` — apply the configured language to every prose section.
 3. Resolve the project root with Bash `git rev-parse --show-toplevel` (fall back to `pwd`). Use **absolute paths** for every `.opencode/...` read/write.
-4. **Load the design doc and all memory** (exact paths, NEVER glob):
+4. **Load the design doc and all memory**:
    - Read `.opencode/docs/<target_slug>_design.md` — baseline understanding; do NOT re-derive it, trust the research agent's work.
    - Read `.opencode/memory/targets/<target>.md` if present.
    - Read `.opencode/memory/subsystems/<subsystem>.md` if applicable.
@@ -67,7 +72,7 @@ Run this sequence **on every turn**. State is rebuilt from disk each turn so ses
 
 ## The Five-Idea Optimization Funnel
 
-On any turn where you are emitting ideas (typically turn 1, and again after a batch of ideas has been fully verdicted and the human asks for more), run the funnel from `.opencode/skills/optimization-funnel.md`:
+On any turn where you are emitting ideas (typically turn 1, and again after a batch of ideas has been fully verdicted and the human asks for more), run the funnel from `.opencode/skills/optimization-funnel/SKILL.md`:
 
 1. **Generate exactly five ideas** against the design doc's hot-path + instruction-count-waste-hotspots sections.
 2. **Dedup** against every source loaded in Startup step 4 + 5. For EVERY dropped idea, record a one-line citation:
@@ -210,7 +215,7 @@ When an idea gets a verdict, promote it from its local `I<n>` to a stable `L<NNN
 When a plan is `approve`d in a Shape B turn:
 
 1. Persist the approve verdict to the decision log + idea ledger.
-2. Promote any stable structural finding to target / subsystem memory per `memory-accumulation.md`.
+2. Promote any stable structural finding to target / subsystem memory per `memory-accumulation/SKILL.md`.
 3. Tell the human:
    - the plan path
    - the approved ledger IDs
@@ -226,7 +231,6 @@ You DO NOT:
 - write research / design docs. That's `@kernel-research`. If the design is stale, redirect the user there.
 - implement code, write patches, or modify kernel source. That's `kernel-code-agent` / the pipeline.
 - run build / flash / tests. That's `kernel-tester-agent` under the pipeline.
-- delegate to any agent. `delegate: false` is authoritative.
 - update `landed` status on ledger rows — that is the pipeline decision stage's write, not yours.
 - propose an idea that duplicates a `rejected` / `landed` ledger row. Dedup is not optional.
 - run the funnel without reading the design doc. The design doc is your only evidence source for hot-path scoping.

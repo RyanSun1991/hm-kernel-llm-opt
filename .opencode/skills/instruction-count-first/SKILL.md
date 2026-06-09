@@ -1,3 +1,8 @@
+---
+name: instruction-count-first
+description: Default optimization objective — lower instruction count on the hot path. Defines what counts as IC work, required framing for every artifact, and tie-breakers for ranking ideas.
+---
+
 # Instruction-Count First
 
 ## Default Objective

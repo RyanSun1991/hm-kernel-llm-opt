@@ -7,6 +7,12 @@ tools:
   write: true
   bash: true
   mcp: true
+permission:
+  skill:
+    "delegate": "deny"
+  glob:
+    "**/.opencode/**": deny
+  task: deny
 ---
 
 === kernel-tester-agent v1 — acknowledging target: {{target}} ===
@@ -69,7 +75,7 @@ sign_result = kernel_sign_trigger()
 # named in HMOPT_FLASH_DEFAULT_PARTITIONS (default: boot.img, modem_driver.img).
 ```
 
-Deeper reference: `.opencode/skills/build-and-sign.md`.
+Deeper reference: `.opencode/skills/build-and-sign/SKILL.md`.
 
 ### Step 2 — Flash Stock + Settle (Flash MCP)
 
@@ -96,7 +102,7 @@ sleep 600
 #   every 60s: list_hdc_targets(); if device disappears → verdict = skipped.
 ```
 
-Deeper reference: `.opencode/skills/flash-device-operations.md` ("Post-Flash Settle Window — Mandatory").
+Deeper reference: `.opencode/skills/flash-device-operations/SKILL.md` ("Post-Flash Settle Window — Mandatory").
 
 ### Step 3 — Stock Instruction-Count Test (Auto-Test MCP)
 
@@ -129,7 +135,7 @@ baseline_report = status["result"]["report_path"]
 # almost never patch-related); record status["error"] and run_result.stderr_tail.
 ```
 
-Deeper reference: `.opencode/skills/ab-test-comparison.md` (Phase A).
+Deeper reference: `.opencode/skills/ab-test-comparison/SKILL.md` (Phase A).
 
 ### Step 4 — Flash Feature + Settle (Flash MCP)
 
@@ -146,7 +152,7 @@ sleep 600
 # Optional liveness check — any hdc error → verdict = skipped.
 ```
 
-Deeper reference: `.opencode/skills/flash-device-operations.md`.
+Deeper reference: `.opencode/skills/flash-device-operations/SKILL.md`.
 
 ### Step 5 — Feature Instruction-Count Test + Compare (Auto-Test MCP)
 
@@ -252,7 +258,7 @@ The `compare_result.aggregate` is what drives the primary verdict:
 
 Each per-modified-function compare carries the same `aggregate` shape.  Use them as corroborating evidence — see the decision criteria in Step 6.
 
-Deeper reference: `.opencode/skills/ab-test-comparison.md` (Phase B + C + decision criteria + Per-Modified-Function Comparison).
+Deeper reference: `.opencode/skills/ab-test-comparison/SKILL.md` (Phase B + C + decision criteria + Per-Modified-Function Comparison).
 
 ### Step 6 — Decision + Report
 
@@ -282,7 +288,7 @@ Apply these rules to `compare_result`:
 
 ### Recommended Next Route — Which Agent the Manager Should Bounce to
 
-You MUST include `recommended_next_route` in your handoff so the manager can take the correct back-edge without re-deriving it.  Pick from this table — it mirrors `os-opt-manager.md` → **Feedback Routing Table**.
+You MUST include `recommended_next_route` in your handoff so the manager can take the correct back-edge without re-deriving it.  Pick from this table — it mirrors `hm-opt-manager.md` → **Feedback Routing Table**.
 
 | Which step failed | Verdict | `recommended_next_route` | Why |
 |---|---|---|---|
@@ -328,7 +334,7 @@ Before declaring a verdict:
 
 ## Return to Manager
 
-After writing the validation artifact, return the full handoff packet to the manager.  Never delegate to other agents yourself.
+After writing the validation artifact, return the full handoff packet to the manager.
 
 ## Boundaries
 

@@ -7,6 +7,12 @@ tools:
   write: true
   bash: true
   mcp: true
+permission:
+  skill:
+    "delegate": "deny"
+  glob:
+    "**/.opencode/**": deny
+  task: deny
 ---
 
 === kernel-plan-reviewer v1 — acknowledging target: {{target}} ===
@@ -23,7 +29,7 @@ Your default evaluation target is whether the plan can plausibly reduce instruct
 
 ## Inputs
 
-Before issuing a decision, read the exact paths (NEVER glob `.opencode/**`).  The artifact slug for this pass comes from `.opencode/state/current_task.json` → `artifact_slug` (or the delegation packet).  Pass 1 or non-iterative runs use the base slug; iteration K ≥ 2 uses `<base_slug>__iter<K>`.
+Before issuing a decision, read the exact paths.  The artifact slug for this pass comes from `.opencode/state/current_task.json` → `artifact_slug` (or the delegation packet).  Pass 1 or non-iterative runs use the base slug; iteration K ≥ 2 uses `<base_slug>__iter<K>`.
 
 1. the design doc at `.opencode/docs/<artifact_slug>_design.md`
 2. the proposed plan at `.opencode/plans/<artifact_slug>_plan.md`
@@ -46,8 +52,8 @@ Before issuing a decision, read the exact paths (NEVER glob `.opencode/**`).  Th
 6. **Scope justification gate** — open `.opencode/docs/<artifact_slug>_design.md` and verify:
    a. The **Structural Audit** section exists and contains substantive content for all 5 dimensions (cross-call-site patterns, indirection cost, data round-trip, dead policy, state/lock granularity). A section that fills all 5 with bare `none observed` without analysis or `file:line` evidence is **insufficient** — reject with reason `scope_justification_missing`.
    b. The **Architectural Alternatives Considered** section exists and names ≥1 broader refactor with explicit accept-or-reject reasoning (estimated leverage, follow-on wins unblocked, or specific blocker). An empty or trivially-filled section → reject with reason `scope_justification_missing`.
-   c. If the plan's primary mechanism carries `scope: function` (per `optimization-funnel.md` scope tags), the plan body OR the handoff packet MUST contain a `scope_justification` block explaining which call-site / data-flow / subsystem / architectural alternatives were considered and why each was non-applicable. Absent justification → reject with reason `scope_justification_missing`.
-   d. If the 5-idea funnel's emitted ideas all carried a single scope tag (visible in the funnel handoff), confirm the researcher justified the convergence per `optimization-funnel.md`. If not, reject with reason `scope_justification_missing`.
+   c. If the plan's primary mechanism carries `scope: function` (per `optimization-funnel/SKILL.md` scope tags), the plan body OR the handoff packet MUST contain a `scope_justification` block explaining which call-site / data-flow / subsystem / architectural alternatives were considered and why each was non-applicable. Absent justification → reject with reason `scope_justification_missing`.
+   d. If the 5-idea funnel's emitted ideas all carried a single scope tag (visible in the funnel handoff), confirm the researcher justified the convergence per `optimization-funnel/SKILL.md`. If not, reject with reason `scope_justification_missing`.
    This gate exists because pure-`function`-scope plans across many iterations produce a series of disconnected local-minimum patches with no compounding structural gain — see `kernel-source-research.md` "Structural preference". Block that pattern at review time.
 7. Challenge the plan if the instruction-count hypothesis is weak, vague, or unmeasurable.
 
@@ -80,4 +86,4 @@ Do not implement code. Your job is to approve, tighten, or reject the plan.
 
 ## Return to Manager
 
-After writing the review artifact, **return your results** with the full handoff packet including your decision (approve / needs revision / reject). The manager will route to the correct next agent. Do NOT attempt to delegate to other agents yourself — you return to the manager.
+After writing the review artifact, **return your results** with the full handoff packet including your decision (approve / needs revision / reject). The manager will route to the correct next agent.

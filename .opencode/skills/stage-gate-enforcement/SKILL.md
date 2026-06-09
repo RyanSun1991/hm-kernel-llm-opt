@@ -1,22 +1,27 @@
+---
+name: stage-gate-enforcement
+description: Hard pipeline gate rules — no bypassing plan review, implementation, or code review. Defines stage ownership, back-edge routing, anti-drift rules, and the mandatory context-refresh protocol.
+---
+
 # Stage-Gate Enforcement
 
-This skill defines hard gates that no agent may bypass. Load this skill at every session start alongside `handoff-contract.md`.
+This skill defines hard gates that no agent may bypass. Load this skill at every session start alongside `handoff-contract/SKILL.md`.
 
 ## Pipeline Stages and Ownership
 
 | Stage | Owner Agent | Entry Condition | Exit Condition |
 |-------|-------------|-----------------|----------------|
-| 1. Intake + Routing | `os-opt-manager` | User request | Config loaded, delegated to correct specialist |
+| 1. Intake + Routing | `hm-opt-manager` | User request | Config loaded, delegated to correct specialist |
 | 2. Research | Specialist researcher | Manager delegation | Design doc + plan written, **returns to manager** |
 | 3. Plan Review | `kernel-plan-reviewer` | Manager delegation with plan | Review written, **returns to manager** |
 | 4. Implementation | `kernel-code-agent` | Manager delegation (plan approved) | Code changes + handoff, **returns to manager** |
 | 5. Code Review | `kernel-code-reviewer` | Manager delegation with coder handoff | Review written, **returns to manager** |
 | 6. Tester Validation | `kernel-tester-agent` | Manager delegation (code review requires it) | Validation report written, **returns to manager** |
-| 7. Decision | `os-opt-manager` | All sub-agent results received | Memory updated, next cycle or done |
+| 7. Decision | `hm-opt-manager` | All sub-agent results received | Memory updated, next cycle or done |
 
 ### Back-Edges (Feedback Loops)
 
-The pipeline is primarily forward, but the manager MUST take these back-edges when a gate rejects work.  See `os-opt-manager.md` → **Feedback Routing Table** for the full rules and iteration budget.
+The pipeline is primarily forward, but the manager MUST take these back-edges when a gate rejects work.  See `hm-opt-manager.md` → **Feedback Routing Table** for the full rules and iteration budget.
 
 | Failing stage | Failure type | Back-edge target |
 |---|---|---|
@@ -67,10 +72,10 @@ Every back-edge MUST include: the full failing artifact, the failure reason, and
 Every agent MUST complete this checklist before finishing:
 
 1. [ ] I have written my required output artifact to the correct `.opencode/` subdirectory
-2. [ ] I have prepared the handoff packet per `handoff-contract.md`
+2. [ ] I have prepared the handoff packet per `handoff-contract/SKILL.md`
 3. [ ] I know which agent is next according to the stage table above
 
-**If I am `os-opt-manager`**: I use the delegate tool NOW to hand off to the next sub-agent with the full handoff packet. I do NOT stop to ask the user to manually continue.
+**If I am `hm-opt-manager`**: I use the delegate tool NOW to hand off to the next sub-agent with the full handoff packet. I do NOT stop to ask the user to manually continue.
 
 **If I am a sub-agent** (specialist, reviewer, coder, tester): I return my results with the handoff packet to the manager. I do NOT attempt to delegate to other agents myself.
 
@@ -88,7 +93,7 @@ These rules prevent agents from silently absorbing work that belongs to other st
 
 The previous "if you feel uncertain" variant is obsolete. OpenCode does not signal compaction to the agent; therefore feeling-based triggers fail exactly when they are needed (right after compaction, when the agent confidently misremembers state).
 
-The manager (`os-opt-manager`) MUST run the **Per-Turn State Rebuild** protocol — defined in `.opencode/agents/os-opt-manager.md` under the section of that exact name — at the START of EVERY turn. Not just when uncertain. Not just after 10 exchanges. Every turn.
+The manager (`hm-opt-manager`) MUST run the **Per-Turn State Rebuild** protocol — defined in `.opencode/agents/hm-opt-manager.md` under the section of that exact name — at the START of EVERY turn. Not just when uncertain. Not just after 10 exchanges. Every turn.
 
 Sub-agents do not loop and therefore do not need this protocol; they are spawned fresh and finish in one or a few turns inside their own session.
 

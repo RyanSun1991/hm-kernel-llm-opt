@@ -4,7 +4,7 @@ This document defines the upgraded `.opencode` harness engineer system for this 
 
 ## Language Configuration
 
-The workspace supports configurable session language. Read `.opencode/config.yaml` for the `language` field and load `.opencode/skills/language-config.md` at session start. All agent dialogue, analysis prose, review verdicts, and documentation prose must follow the configured language. Code, commit messages, and technical identifiers remain in English. See the language-config skill for full rules.
+The workspace supports configurable session language. Read `.opencode/config.yaml` for the `language` field and load `.opencode/skills/language-config/SKILL.md` at session start. All agent dialogue, analysis prose, review verdicts, and documentation prose must follow the configured language. Code, commit messages, and technical identifiers remain in English. See the language-config skill for full rules.
 
 ## Primary Objective
 
@@ -12,27 +12,27 @@ The default optimization objective is to reduce instruction count on the hot pat
 
 ## Agent Topology
 
-1. `os-opt-manager` — **entry agent and central hub** (handles intake, routing, and stage chaining)
+1. `hm-opt-manager` — **entry agent and central hub** (handles intake, routing, and stage chaining)
 2. research specialist (domain-specific sub-agent)
 3. `kernel-plan-reviewer` (sub-agent)
 4. `kernel-code-agent` (sub-agent)
 5. `kernel-code-reviewer` (sub-agent)
 6. `kernel-tester-agent` (conditional sub-agent)
-7. `kernel-pipeline-starter` — legacy alias, redirects to `os-opt-manager`
+7. `kernel-pipeline-starter` — legacy alias, redirects to `hm-opt-manager`
 
 ## Stage Order
 
-1. intake, config loading, and routing (`os-opt-manager`)
+1. intake, config loading, and routing (`hm-opt-manager`)
 2. research and instruction-count hypothesis (specialist, returns to manager)
 3. plan review (returns to manager)
 4. implementation (returns to manager)
 5. code review (returns to manager)
 6. conditional flash + A/B test validation: flash stock, test stock, flash feature, test feature, compare (returns to manager)
-7. decision, memory update, and next-step routing (`os-opt-manager`)
+7. decision, memory update, and next-step routing (`hm-opt-manager`)
 
 ### Iterative Close-Loop Mode (Optional)
 
-When a command carries `Auto-Iterate: N` (with N ≥ 2) and loads `.opencode/skills/iterative-optimization.md`, stage 7 for a **pass** verdict does not end the session — the manager automatically starts pass K+1 on the same target, treating all prior-pass plans/patches as LANDED context. The researcher must propose orthogonal new mechanisms each pass. Iteration stops when N passes complete, the researcher returns `no_more_ideas`, two consecutive passes land within noise, or a failure hits the back-edge stall cap. See `iterative-optimization.md` for the full protocol.
+When a command carries `Auto-Iterate: N` (with N ≥ 2) and loads `.opencode/skills/iterative-optimization/SKILL.md`, stage 7 for a **pass** verdict does not end the session — the manager automatically starts pass K+1 on the same target, treating all prior-pass plans/patches as LANDED context. The researcher must propose orthogonal new mechanisms each pass. Iteration stops when N passes complete, the researcher returns `no_more_ideas`, two consecutive passes land within noise, or a failure hits the back-edge stall cap. See `iterative-optimization/SKILL.md` for the full protocol.
 
 ## Role Summary
 
@@ -85,7 +85,7 @@ Every stage must produce a handoff packet that includes:
 
 ## Hub-and-Spoke Delegation Model
 
-`os-opt-manager` is the **central hub**. Only the starter and manager use the delegate tool.
+Only agents with `permission: skill: "delegate": "allow"` in their front-matter (currently only `hm-opt-manager`) may delegate. Load `.opencode/skills/delegate/SKILL.md` for the full mechanism — the `task(subagent_type=...)` tool is the delegation primitive.
 
 **Sub-agents (specialists, reviewers, coder, tester) do NOT delegate.** They complete their work, write their artifacts, and return their handoff packet to the manager. The manager then reads the artifacts, checks stage-gate conditions, and delegates to the next stage.
 

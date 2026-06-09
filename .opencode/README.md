@@ -11,7 +11,7 @@ This directory is the canonical OpenCode-facing workspace for kernel analysis an
 - `docs/`: living subsystem design notes and bootstrap docs
 - `memory/`: long-term memory across runs
   - `targets/`, `subsystems/`, `global_lessons.md`: stable structural / heuristic memory
-  - `human_decisions/`: per-target chronological log populated by primary-agent human workflows (`kernel-research`, `kernel-plan`, `kernel-function-research`) — see `skills/human-interaction-memory.md`
+  - `human_decisions/`: per-target chronological log populated by primary-agent human workflows (`kernel-research`, `kernel-plan`, `kernel-function-research`) — see `skills/human-interaction-memory/SKILL.md`
   - `idea_ledger/`: per-target approved / landed / rejected / deferred mechanism ledger; populated by the primary-agent human workflows and consulted by both primary agents and pipeline sub-agents during the optimization-funnel dedup step
 - `state/`: persistent task and ideation state
 - `plans/`: approved implementation plans
@@ -23,7 +23,7 @@ This directory is the canonical OpenCode-facing workspace for kernel analysis an
 
 - `config.yaml`: workspace-level settings (session language, etc.)
   - `language: zh-CN` for Chinese, `language: en` for English (default)
-  - Applied automatically via `skills/language-config.md`
+  - Applied automatically via `skills/language-config/SKILL.md`
 
 ## Entry Points — Three Routes For Three Kinds Of Work
 
@@ -31,7 +31,7 @@ The workspace supports three complementary entry points depending on what the us
 
 ### 1. Full automated pipeline — for end-to-end optimization runs
 
-`@os-opt-manager` (or `/optimize_generic`, `/optimize_hyperhold`, etc.) runs the complete `research → plan review → implement → code review → tester → decision` pipeline with sub-agents delegated by the manager. Use this when the target is well-understood and you want an automated land-it run.
+`@hm-opt-manager` (or `/optimize_generic`, `/optimize_hyperhold`, etc.) runs the complete `research → plan review → implement → code review → tester → decision` pipeline with sub-agents delegated by the manager. Use this when the target is well-understood and you want an automated land-it run.
 
 ### 2. Primary-agent human-in-the-loop — for expert-driven iterative work
 
@@ -50,8 +50,8 @@ All human verdicts in routes 2 and 3 are persisted live to `memory/human_decisio
 
 ## Working Rules
 
-0. Read `config.yaml` and load `skills/language-config.md` at the start of every session to apply the configured language.
-1. For automated end-to-end runs: `agents/os-opt-manager.md` (central hub) or `agents/kernel-pipeline-starter.md` (legacy alias).
+0. Read `config.yaml` and load `skills/language-config/SKILL.md` at the start of every session to apply the configured language.
+1. For automated end-to-end runs: `agents/hm-opt-manager.md` (central hub) or `agents/kernel-pipeline-starter.md` (legacy alias).
 2. For expert-driven iterative research: `agents/kernel-research.md` (`/research`).
 3. For expert-driven iterative ideation + planning: `agents/kernel-plan.md` (`/plan`) — reads the design doc produced in step 2.
 4. For a single-shot function deep dive: `agents/kernel-function-research.md` (`/function_detail`).

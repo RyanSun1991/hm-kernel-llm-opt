@@ -1,0 +1,80 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [".opencode/CLAUDE.md"],
+  "provider": {
+    "local-provider": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "local-provider",
+      "options": {
+        "baseURL": "https://veri-hammer.rnd.huawei.com/oskernel-api/v1",
+        "apiKey": "sk-mlyAY6LoJM3XJC32DzpbKhVFDEBfVOjqvpAtx79zLxnZ3Jh2"
+      },
+      "models": {
+        "auto": {
+          "id": "auto"
+        }
+      }
+    }
+  },
+  "mcp": {
+      "hmopt_kernel_index_remote": {
+        "type": "remote",
+        "enabled": true,
+        "url": "http://127.0.0.1:7332/mcp/",
+        "headers": {
+          "Authorization": "Bearer sk-mlyAY6LoJM3XJC32DzpbKhVFDEBfVOjqvpAtx79zLxnZ3Jh2"
+        },
+        "timeout": 30000
+      },
+      "hmopt_flamegraph_remote": {
+        "type": "remote",
+        "url": "http://127.0.0.1:7330/mcp/",
+        "enabled": true
+      },
+      "hmopt_seq_thinking_remote": {
+        "type": "remote",
+        "url": "http://127.0.0.1:7333/mcp/",
+        "enabled": true
+      },
+      "hmopt_git_remote": {
+        "type": "remote",
+        "enabled": true,
+        "url": "http://127.0.0.1:7334/mcp/",
+        "timeout": 30000
+      },
+      "hmopt_build_remote": {
+        "type": "remote",
+        "url": "http://127.0.0.1:7335/mcp/",
+        "enabled": true,
+        "timeout": 3600000
+      },
+      "hmopt_auto_test_remote": {
+        "type": "remote",
+        "url": "http://127.0.0.1:7336/mcp/",
+        "enabled": true
+      },
+      "hmopt_graph_db_remote": {
+        "type": "remote",
+        "enabled": true,
+        "url": "http://127.0.0.1:7338/mcp/",
+        "headers": {
+          "Authorization": "Basic bmVvNGo6QGh1YXdlaTIwMjY="
+        },
+        "timeout": 30000
+      }
+  },
+  "agent": {
+    "plan": {
+      "disable": true
+    },
+    "build": {
+      "disable": true
+    }
+  },
+  "permission": {
+    "external_directory": {
+        "./.opencode/**": "allow"
+    }
+  },
+  "default_agent": "hm-opt-manager"
+}

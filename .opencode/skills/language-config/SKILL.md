@@ -1,3 +1,8 @@
+---
+name: language-config
+description: Language configuration skill — reads config.yaml to determine the session language (zh-CN or en) and applies it to all agent prose, handoff packets, reviews, and reports.
+---
+
 # Language Configuration
 
 ## Purpose

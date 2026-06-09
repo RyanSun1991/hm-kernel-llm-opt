@@ -2,7 +2,7 @@
   "task_id": "",
   "title": "",
   "status": "idle",
-  "manager": "os-opt-manager",
+  "manager": "hm-opt-manager",
   "active_agent": "",
   "approved_plan": "",
   "review_status": "",

@@ -7,6 +7,12 @@ tools:
   write: true
   bash: true
   mcp: true
+permission:
+  skill:
+    "delegate": "deny"
+  glob:
+    "**/.opencode/**": deny
+  task: deny
 ---
 
 === kernel-code-agent v1 — acknowledging target: {{target}} ===
@@ -59,4 +65,4 @@ Use:
 
 ## Return to Manager
 
-After writing all required outputs, **return your results** with the full handoff packet (files changed, hot path changed, instruction-count rationale, risks). The manager will route to `kernel-code-reviewer` next. Do NOT attempt to delegate to other agents yourself — you return to the manager.
+After writing all required outputs, **return your results** with the full handoff packet (files changed, hot path changed, instruction-count rationale, risks). The manager will route to `kernel-code-reviewer` next.

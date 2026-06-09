@@ -42,98 +42,16 @@ opencode --version
 
 ---
 
-## Step 2: Configure OpenCode Global Settings
+## Step 2: Configure OpenCode Settings
 
-### 2.1 Create the OpenCode configuration file
-
+You can optionally apply the OpenCode config globally:
 ```bash
-mkdir -p ~/.config/opencode
-vim ~/.config/opencode/opencode.json
+HMOPT_PATH=$(pwd)
+rm "$HOME/.config/opencode/opencode.jsonc"
+ln -s "$HMOPT_PATH/opencode.jsonc" "$HOME/.config/opencode/opencode.jsonc"
 ```
 
-### 2.2 Minimal configuration template
-
-```json
-{
-  "$schema": "https://opencode.ai/config.json",
-  "provider": {
-    "local-provider": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "local-provider",
-      "options": {
-        "baseURL": "<LLM_API_BASE_URL>/v1/",
-        "apiKey": "<YOUR_API_KEY>"
-      },
-      "models": {
-        "glm-47": {
-          "id": "glm-4.7"
-        }
-      }
-    }
-  },
-  "mcp": {
-    "hmopt_kernel_index_remote": {
-      "type": "remote",
-      "enabled": true,
-      "url": "http://127.0.0.1:7332/mcp/",
-      "headers": {
-        "Authorization": "<YOUR_MCP_API_KEY>"
-      },
-      "timeout": 30000
-    }
-  },
-  "keybinds": {
-    "app_exit": "ctrl+d,<leader>q"
-  },
-  "default_agent": "plan"
-}
-```
-
-### 2.3 Configuration field reference
-
-| Field | Description |
-|-------|-------------|
-| `provider.*.options.baseURL` | Your LLM API endpoint (must end with `/v1/`) |
-| `provider.*.options.apiKey` | Your LLM API key |
-| `provider.*.models.*.id` | Model ID supported by your API (e.g., `glm-4.7`) |
-| `mcp.hmopt_kernel_index_remote.url` | HMOPT MCP server endpoint (default: `http://127.0.0.1:7332/mcp/`) |
-| `mcp.hmopt_kernel_index_remote.headers.Authorization` | MCP server API key (if configured) |
-
-### 2.4 Optional: Add additional MCP servers
-
-You can register more MCP servers for extended capabilities:
-
-```json
-{
-  "mcp": {
-    "hmopt_kernel_index_remote": {
-      "type": "remote",
-      "enabled": true,
-      "url": "http://127.0.0.1:7332/mcp/",
-      "headers": { "Authorization": "<key>" },
-      "timeout": 30000
-    },
-    "hmopt_git_mcp": {
-      "type": "remote",
-      "enabled": true,
-      "url": "http://127.0.0.1:7334/mcp/",
-      "timeout": 15000
-    },
-    "hmopt_build_mcp": {
-      "type": "remote",
-      "enabled": true,
-      "url": "http://127.0.0.1:7335/mcp/",
-      "timeout": 60000
-    },
-    "hmopt_seq_thinking": {
-      "type": "remote",
-      "enabled": true,
-      "url": "http://127.0.0.1:7333/mcp/",
-      "timeout": 30000
-    }
-  }
-}
-```
+The settings are inside the root of this repo.
 
 **Port summary for MCP services:**
 
@@ -251,12 +169,15 @@ curl -s http://127.0.0.1:7332/health
 
 ## Step 4: Deploy the OpenCode Multi-Agent Harness to the Kernel Directory
 
-### 4.1 Copy the `.opencode/` directory to your kernel workspace
+### 4.1 Copy opencode configuration to your kernel workspace
 
-The `.opencode/` directory contains the full multi-agent harness — agents, pipelines, skills, memory, and state tracking. Copy it to the kernel directory where you will run OpenCode:
+The `.opencode/` directory contains the full multi-agent harness — agents, pipelines, skills, memory, and state tracking. Make a symlink in the kernel directory where you will run OpenCode:
 
 ```bash
-cp -r /path/to/hm-kernel-llm-opt/.opencode/ /path/to/your/kernel/source/.opencode/
+HMOPT_PATH=/path/to/hm-kernel-llm-opt
+KERNEL_PATH=/path/to/hm-verif-kernel
+ln -s "$HMOPT_PATH/.opencode" "$KERNEL_PATH/.opencode"
+ln -s "$HMOPT_PATH/opencode.jsonc" "$KERNEL_PATH/opencode.jsonc"
 ```
 
 This copies:

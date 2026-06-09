@@ -14,7 +14,7 @@ Every idea gets a stable `id` (e.g. `L001`, `L002`).  IDs are never reused even 
 - **mechanism**: one-line description (the *what*, not the target function)
 - **scope**: files / functions / structs that would be touched
 - **status**: `approved` | `landed` | `reverted` | `rejected` | `deferred`
-- **verdicted_by**: `kernel-research` | `kernel-plan` | `os-opt-manager` | `kernel-function-research`
+- **verdicted_by**: `kernel-research` | `kernel-plan` | `hm-opt-manager` | `kernel-function-research`
 - **verdicted_at**: free-text label for which turn / gate / stage produced the verdict (e.g. `kernel-plan turn 3`, `pipeline Gate D`)
 - **iteration**: pipeline iteration K if applicable, otherwise omit
 - **approved_on** / **rejected_on** / **landed_on** / **deferred_on**: UTC timestamp of the verdict
@@ -47,7 +47,7 @@ Example:
 ### L001 hoist invariant lock check out of sched_tick_load_update
 - **scope**: kernel/sched/sched_indicator.c :: sched_tick_load_update
 - **status**: landed
-- **verdicted_by**: os-opt-manager
+- **verdicted_by**: hm-opt-manager
 - **verdicted_at**: pipeline decision stage
 - **iteration**: 1
 - **approved_on**: 2026-04-24 15:30 UTC

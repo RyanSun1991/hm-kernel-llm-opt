@@ -1,3 +1,8 @@
+---
+name: flash-device-operations
+description: Flash protocol for deploying stock and feature kernel images to the target device via Flash MCP and Windows relay, including the mandatory 10-minute post-flash settle window.
+---
+
 # Flash Device Operations
 
 This skill defines the flash protocol that agents must follow when flashing kernel images to the target device via the Flash MCP and Windows relay.
@@ -176,7 +181,7 @@ flash_feature(device_serial="<serial>")
 
 Both tools auto-resolve `server_images` from the configured image directory and default partitions. Override via arguments when needed (e.g., when Build MCP outputs images to a non-default path).
 
-See `ab-test-comparison.md` for the full A/B protocol.
+See `ab-test-comparison/SKILL.md` for the full A/B protocol.
 
 ## Security
 

@@ -1,3 +1,8 @@
+---
+name: validation-flight-check
+description: Validation ladder covering static sanity, plan and code review, build validation, auto-test, instruction-count comparison, and final memory update with required output artifacts.
+---
+
 # Validation Flight Check
 
 ## Validation Ladder

@@ -1,3 +1,12 @@
+---
+name: iterative-optimization
+description: Continuous close-loop optimization — when one pipeline pass completes with a pass verdict, the manager auto-starts the next pass to find further wins on top of what was landed.
+depends_on:
+  - handoff-contract
+  - stage-gate-enforcement
+  - memory-accumulation
+---
+
 # Iterative Close-Loop Optimization
 
 This skill governs **continuous** pipeline runs — when one pass completes with a clean pass verdict, the manager automatically starts the next pass on the same target to find further instruction-count wins **on top of what the previous pass landed**.

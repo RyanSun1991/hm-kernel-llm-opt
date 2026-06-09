@@ -1,3 +1,8 @@
+---
+name: research-discipline
+description: Non-negotiable research order — Sequential Thinking, Kernel Index, local files, design doc, structural audit across five dimensions, then IC hypothesis. No optimization before the model is stable.
+---
+
 # Research Discipline
 
 ## Non-Negotiable Order

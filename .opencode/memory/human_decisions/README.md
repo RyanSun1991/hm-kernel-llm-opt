@@ -1,6 +1,6 @@
 # Human Decision Log
 
-Per-target chronological log of every significant human-agent exchange under primary-agent workflows that load `.opencode/skills/human-interaction-memory.md` (e.g. `kernel-research`, `kernel-plan`, `kernel-function-research`).
+Per-target chronological log of every significant human-agent exchange under primary-agent workflows that load `.opencode/skills/human-interaction-memory/SKILL.md` (e.g. `kernel-research`, `kernel-plan`, `kernel-function-research`).
 
 ## File Layout
 
@@ -21,7 +21,7 @@ This log exists for **three** reasons:
 - **Agent on resume** reads the whole file, scans for the most recent block whose status is `pending-human-review` or whose verdict is missing, and rebuilds from there.
 - **Researcher at an iteration** reads only the latest `Turn <N> — Human Verdict` block to extract the human's questions/scope additions.
 - **Planner re-proposing ideas** reads recent turn blocks to avoid repeating conversational ground.
-- Pipeline sub-agents (inside an `os-opt-manager` run) do NOT read this file; the idea ledger carries the distilled verdicts they care about.
+- Pipeline sub-agents (inside an `hm-opt-manager` run) do NOT read this file; the idea ledger carries the distilled verdicts they care about.
 
 ## Write Rules
 

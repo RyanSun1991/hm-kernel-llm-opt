@@ -1,3 +1,8 @@
+---
+name: build-and-sign
+description: Build MCP workflow for compiling the patched kernel and signing the output into a flashable image. Ends when a ready-to-flash feature image exists in the configured output directory.
+---
+
 # Build + Sign Feature Image
 
 This skill defines the Build MCP workflow the tester runs to produce a signed feature image before it can be flashed.  It ends when a ready-to-flash image exists in the directory the Flash MCP reads from.
@@ -5,7 +10,7 @@ This skill defines the Build MCP workflow the tester runs to produce a signed fe
 ## Scope
 
 - Build MCP only.  Does NOT flash.  Does NOT run tests.
-- Runs on the feature (patched) branch only.  Stock images are prebuilt and pulled by `flash-device-operations.md`.
+- Runs on the feature (patched) branch only.  Stock images are prebuilt and pulled by `flash-device-operations/SKILL.md`.
 
 ## Tools
 
@@ -58,7 +63,7 @@ No arguments in the default configuration — the tool signs the output of the p
 After both steps succeed:
 
 - A signed feature image exists under `HMOPT_FLASH_FEATURE_IMAGE_DIR` matching every partition in `HMOPT_FLASH_DEFAULT_PARTITIONS`.
-- `flash-device-operations.md`'s `flash_feature` will pick it up without further arguments.
+- `flash-device-operations/SKILL.md`'s `flash_feature` will pick it up without further arguments.
 
 ## Failure Modes
 
@@ -82,4 +87,4 @@ Hand back to `kernel-tester-agent` (which invoked this skill):
 - `sign.success`, duration, output directory path
 - signed artifact filenames that ended up in `HMOPT_FLASH_FEATURE_IMAGE_DIR` (useful for the validation report)
 
-The tester then proceeds to `flash-device-operations.md`.
+The tester then proceeds to `flash-device-operations/SKILL.md`.

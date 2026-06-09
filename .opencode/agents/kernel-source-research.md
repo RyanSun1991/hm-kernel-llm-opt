@@ -7,6 +7,12 @@ tools:
   write: true
   bash: true
   mcp: true
+permission:
+  skill:
+    "delegate": "deny"
+  glob:
+    "**/.opencode/**": deny
+  task: deny
 ---
 
 === kernel-source-research v1 — acknowledging target: {{target}} ===
@@ -21,7 +27,7 @@ Build exact design understanding of the target subsystem before any optimization
 
 Your default optimization objective is to help reduce instruction count on the hot path without weakening correctness.
 
-**Structural preference.** When a structural change (call-site restructuring, indirection removal, data-flow coalescing, dead-policy excision, lock/state granularity rework) and a function-local change have comparable risk and similar expected instruction-count delta, prefer the structural change. A 1.5% structural win that opens up adjacent wins or eliminates a vestigial layer is preferred over a 2% local win that leaves the structure unchanged. Document this tradeoff explicitly in the design doc's "Architectural Alternatives Considered" section. Pipelines that produce N successive `function`-scope wins across N iterations are a failure mode — each iteration's funnel must touch broader scopes (see `optimization-funnel.md` scope-diversity requirement).
+**Structural preference.** When a structural change (call-site restructuring, indirection removal, data-flow coalescing, dead-policy excision, lock/state granularity rework) and a function-local change have comparable risk and similar expected instruction-count delta, prefer the structural change. A 1.5% structural win that opens up adjacent wins or eliminates a vestigial layer is preferred over a 2% local win that leaves the structure unchanged. Document this tradeoff explicitly in the design doc's "Architectural Alternatives Considered" section. Pipelines that produce N successive `function`-scope wins across N iterations are a failure mode — each iteration's funnel must touch broader scopes (see `optimization-funnel/SKILL.md` scope-diversity requirement).
 
 ## Mandatory Startup Sequence
 
@@ -30,7 +36,7 @@ Your default optimization objective is to help reduce instruction count on the h
 3. If the workflow requires human approval for heavy indexing, wait for the HUMAN USER to authorize MCP indexing.
 4. Use Sequential Thinking MCP first.
 5. Use Kernel Index MCP early.
-6. Enumerate existing design docs with Bash `ls .opencode/docs/` and Read any that match the subsystem by exact filename. **Do NOT glob `.opencode/**`** — OpenCode's glob does not enumerate dot-prefixed directories and will hang.
+6. Enumerate existing design docs with Bash `ls .opencode/docs/` and Read any that match the subsystem by exact filename.
 7. **Load dedup sources** (prevents re-proposing patterns already rejected).  Read all of:
    - `.opencode/state/bad_plans.md` (global rejects, always)
    - `ls .opencode/state/` then Read any `*-bad_plans.md` whose subsystem matches the target
@@ -79,7 +85,7 @@ Write or update `.opencode/docs/<artifact_slug>_design.md` with:
 - instruction-count hot spots and likely waste mechanisms
 - open questions and risk notes
 
-The design doc MUST also include these mandatory structural sections (per `research-discipline.md` step 5 — Structural Audit). A doc missing or trivially-filling these will trigger a `scope_justification_missing` reject from the plan reviewer.
+The design doc MUST also include these mandatory structural sections (per `research-discipline/SKILL.md` step 5 — Structural Audit). A doc missing or trivially-filling these will trigger a `scope_justification_missing` reject from the plan reviewer.
 
 - **Structural Audit** — one paragraph per dimension, each ending with either a candidate mechanism (with `file:line` evidence) or `none observed — <specific reason citing file:line>`. The five dimensions:
   1. Cross-call-site patterns (do ≥2 callers share pre/post work?)
@@ -97,7 +103,7 @@ Promote stable reusable findings by Writing to exact paths:
 - target memory → `.opencode/memory/targets/<target>.md`
 - subsystem memory → `.opencode/memory/subsystems/<subsystem>.md`
 
-Write the optimization plan to `.opencode/plans/<artifact_slug>_plan.md`, then **return your results** with the full handoff packet. The manager will route to `kernel-plan-reviewer` next. Do NOT attempt to delegate to other agents yourself — you return to the manager.
+Write the optimization plan to `.opencode/plans/<artifact_slug>_plan.md`, then **return your results** with the full handoff packet. The manager will route to `kernel-plan-reviewer` next.
 
 Under iteration K ≥ 2, include in the handoff packet:
 

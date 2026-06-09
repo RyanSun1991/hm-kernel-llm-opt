@@ -8,9 +8,9 @@ Caller-graph depth (0–2, default 1): 1
 Objective: Produce a complete design + implementation + multi-level callee-graph report for the named function. Explain-only — do NOT propose optimizations and do NOT hand off to the optimization pipeline. Write the artifact to `.opencode/docs/function_<sym>_detail.md` (with a `__<basename>` suffix if the symbol is a static duplicated across TUs).
 
 Skill packs:
-- @.opencode/skills/language-config.md
-- @.opencode/skills/research-discipline.md
-- @.opencode/skills/handoff-contract.md
+- @.opencode/skills/language-config/SKILL.md
+- @.opencode/skills/research-discipline/SKILL.md
+- @.opencode/skills/handoff-contract/SKILL.md
 
 Memory packs:
 - @.opencode/memory/global_lessons.md

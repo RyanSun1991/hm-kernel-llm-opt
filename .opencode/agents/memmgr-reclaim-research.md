@@ -7,6 +7,12 @@ tools:
   write: true
   bash: true
   mcp: true
+permission:
+  skill:
+    "delegate": "deny"
+  glob:
+    "**/.opencode/**": deny
+  task: deny
 ---
 
 === memmgr-reclaim-research v1 — acknowledging target: {{target}} ===
@@ -31,12 +37,12 @@ Read these first if they exist:
 4. Use Kernel Index MCP early.
 5. **Load dedup sources** — Read these so you don't re-propose a rejected mechanism:
    - `.opencode/state/bad_plans.md` (global rejects)
-   - `.opencode/state/memmgr-reclaim-bad_plans.md` if present (`ls .opencode/state/` to check; NEVER glob)
+   - `.opencode/state/memmgr-reclaim-bad_plans.md` if present (`ls .opencode/state/` to check)
    - `.opencode/memory/targets/<target>.md` if the task names one
    - `.opencode/memory/subsystems/memmgr-reclaim.md` if present
    - `.opencode/memory/global_lessons.md`
 6. Treat instruction-count reduction on reclaim hot paths as the default optimization target.
-7. Follow `.opencode/skills/optimization-funnel.md` for ideation — the dedup step is mandatory and must cite the file:entry for every dropped idea.
+7. Follow `.opencode/skills/optimization-funnel/SKILL.md` for ideation — the dedup step is mandatory and must cite the file:entry for every dropped idea.
 
 ## Primary Scope
 

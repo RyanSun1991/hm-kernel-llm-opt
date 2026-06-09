@@ -11,12 +11,12 @@ Precondition: `.opencode/docs/<target_slug>_design.md` must already exist (from 
 Do NOT implement code, do NOT run tests, do NOT delegate. After the plan is approved, the agent will point you to `/optimize_generic` or `@kernel-code-agent` for implementation.
 
 Skill packs:
-- @.opencode/skills/language-config.md
-- @.opencode/skills/optimization-funnel.md
-- @.opencode/skills/instruction-count-first.md
-- @.opencode/skills/handoff-contract.md
-- @.opencode/skills/memory-accumulation.md
-- @.opencode/skills/human-interaction-memory.md
+- @.opencode/skills/language-config/SKILL.md
+- @.opencode/skills/optimization-funnel/SKILL.md
+- @.opencode/skills/instruction-count-first/SKILL.md
+- @.opencode/skills/handoff-contract/SKILL.md
+- @.opencode/skills/memory-accumulation/SKILL.md
+- @.opencode/skills/human-interaction-memory/SKILL.md
 
 Memory packs:
 - @.opencode/memory/global_lessons.md

@@ -15,14 +15,15 @@ Deep reclaim and allocator-coupling analysis with instruction-count-first optimi
 ## Load First
 
 - `.opencode/config.yaml`
-- `.opencode/skills/language-config.md`
+- `.opencode/skills/language-config/SKILL.md`
+- `.opencode/skills/stage-gate-enforcement/SKILL.md`
 - `.opencode/docs/harness_engineer_system.md`
 - `.opencode/docs/memmgr-reclaim_bootstrap.md`
-- `.opencode/skills/instruction-count-first.md`
-- `.opencode/skills/research-discipline.md`
-- `.opencode/skills/optimization-funnel.md`
-- `.opencode/skills/handoff-contract.md`
-- `.opencode/skills/validation-flight-check.md`
+- `.opencode/skills/instruction-count-first/SKILL.md`
+- `.opencode/skills/research-discipline/SKILL.md`
+- `.opencode/skills/optimization-funnel/SKILL.md`
+- `.opencode/skills/handoff-contract/SKILL.md`
+- `.opencode/skills/validation-flight-check/SKILL.md`
 
 ## Execution Shape
 

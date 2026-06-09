@@ -7,6 +7,12 @@ tools:
   write: true
   bash: true
   mcp: true
+permission:
+  skill:
+    "delegate": "deny"
+  glob:
+    "**/.opencode/**": deny
+  task: deny
 ---
 
 === kernel-code-reviewer v1 — acknowledging target: {{target}} ===
@@ -66,4 +72,4 @@ Do not own build or auto-test execution.
 
 ## Return to Manager
 
-After writing the review artifact, **return your results** with the full handoff packet including your tester decision (required / recommended / skipped). The manager will route to `kernel-tester-agent` or proceed to the decision stage. Do NOT attempt to delegate to other agents yourself — you return to the manager.
+After writing the review artifact, **return your results** with the full handoff packet including your tester decision (required / recommended / skipped). The manager will route to `kernel-tester-agent` or proceed to the decision stage.

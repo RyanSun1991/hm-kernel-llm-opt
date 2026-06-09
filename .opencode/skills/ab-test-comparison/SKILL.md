@@ -1,3 +1,11 @@
+---
+name: ab-test-comparison
+description: A/B instruction-count test and compare protocol for Auto-Test MCP — covers async test submission, polling, per-function compare loop, aggregation, and verdict criteria for stock-vs-feature validation.
+depends_on:
+  - build-and-sign
+  - flash-device-operations
+---
+
 # A/B Instruction-Count Test + Compare Protocol
 
 This skill defines the Auto-Test MCP workflow the tester runs **after** stock / feature images have been flashed and settled.  It covers only the instruction-count test execution and the compare step — nothing about build/sign/flash/settle.
@@ -5,7 +13,7 @@ This skill defines the Auto-Test MCP workflow the tester runs **after** stock / 
 ## Scope
 
 - Auto-Test MCP only.
-- Assumes `build-and-sign.md` produced a signed feature image *and* `flash-device-operations.md` flashed both stock and feature (each followed by a ~10 min settle).
+- Assumes `build-and-sign/SKILL.md` produced a signed feature image *and* `flash-device-operations/SKILL.md` flashed both stock and feature (each followed by a ~10 min settle).
 
 ## Tools
 
@@ -46,7 +54,7 @@ A full A/B cycle is 1–4 hours of device time.  The tester must stay alive:
 ### Phase A — Stock Instruction-Count Test
 
 ```
-# Precondition: stock image is already flashed + settled (flash-device-operations.md).
+# Precondition: stock image is already flashed + settled (flash-device-operations/SKILL.md).
 
 # A1. Submit the async test.
 task_stock = run_instruction_test_async(
@@ -286,7 +294,7 @@ If the patch touched no function bodies, print "no function bodies modified — 
 
 1. NEVER use `run_instruction_test` (sync).  Only `run_instruction_test_async` + `instruction_test_status` polling.
 2. NEVER return to the manager, delegate, or end the session while an async task (either instruction-test OR compare) is still `pending` or `running`.
-3. NEVER start the test before the image is flashed AND settled.  This skill assumes `flash-device-operations.md` already ran.
+3. NEVER start the test before the image is flashed AND settled.  This skill assumes `flash-device-operations/SKILL.md` already ran.
 4. Both phases MUST use identical test workspace + parameters — the only legitimate delta is the flashed image.
 5. If stock phase fails, report infrastructure failure — not a patch failure.
 6. The `compare_level` in Phase B MUST match the metric named in the plan.

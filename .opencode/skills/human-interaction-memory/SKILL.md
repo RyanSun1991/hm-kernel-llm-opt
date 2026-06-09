@@ -1,6 +1,11 @@
+---
+name: human-interaction-memory
+description: Per-turn persist protocol for primary agents that iterate with a human expert — decision log, idea ledger, and live design-doc amendments for session survival across compaction.
+---
+
 # Human Interaction Memory
 
-This skill defines how **primary agents that iterate with a human expert** persist that dialogue to durable memory.  It is the complement to `memory-accumulation.md`: the latter records stable structural/heuristic findings at the end of a non-trivial run, while this skill records **per-turn human decisions in real time** so sessions survive compaction and new sessions can resume from disk.
+This skill defines how **primary agents that iterate with a human expert** persist that dialogue to durable memory.  It is the complement to `memory-accumulation/SKILL.md`: the latter records stable structural/heuristic findings at the end of a non-trivial run, while this skill records **per-turn human decisions in real time** so sessions survive compaction and new sessions can resume from disk.
 
 Primary agents that load this skill:
 
@@ -8,7 +13,7 @@ Primary agents that load this skill:
 - `kernel-plan` — funnels optimization ideas past a human expert, records per-idea verdicts, produces `<target>_plan.md`
 - `kernel-function-research` — existing per-function deep-dive; may optionally adopt the same stores
 
-Any sub-agent under the full `os-opt-manager` pipeline does NOT use this skill — the pipeline has its own stage-gate handoffs.  This skill is specifically for primary agents that own a human-facing iterative loop.
+Any sub-agent under the full `hm-opt-manager` pipeline does NOT use this skill — the pipeline has its own stage-gate handoffs.  This skill is specifically for primary agents that own a human-facing iterative loop.
 
 ## Three Persistent Stores
 
@@ -29,7 +34,7 @@ All paths are relative to the project root; always resolve with `git rev-parse -
 
 - Structured registry of every optimization mechanism the human has verdicted on this target.
 - Statuses: `approved` | `landed` | `reverted` | `rejected` | `deferred`.
-- Feeds the dedup step in `optimization-funnel.md` — ideas matching a rejected entry MUST be dropped on the next round with a citation.
+- Feeds the dedup step in `optimization-funnel/SKILL.md` — ideas matching a rejected entry MUST be dropped on the next round with a citation.
 - Survives across sessions and (if a pipeline run later lands a patch) across pipeline passes.
 - Template: `.opencode/memory/idea_ledger/template.md`.
 
@@ -129,7 +134,7 @@ See `.opencode/memory/idea_ledger/template.md` for the ledger structure.  Update
 
 ## Dedup Feedback Loop
 
-`optimization-funnel.md` lists the dedup sources a researcher/planner must check before emitting ideas.  When the idea ledger exists for the target (i.e. any primary-agent human-mode work has happened on it), it is **added** to that list:
+`optimization-funnel/SKILL.md` lists the dedup sources a researcher/planner must check before emitting ideas.  When the idea ledger exists for the target (i.e. any primary-agent human-mode work has happened on it), it is **added** to that list:
 
 - any idea whose mechanism matches a `rejected` entry in `.opencode/memory/idea_ledger/<target_slug>.md` MUST be dropped with a citation like `dropped: <idea>; matches idea_ledger:<ledger-id>; reason: <verbatim reason>`.
 - any idea whose mechanism matches a `landed` entry behaves like a prior-iteration landed plan: do not re-propose.
@@ -150,7 +155,7 @@ The new stores are **additive**, not replacements:
 | `memory/idea_ledger/<target_slug>.md` | ✓ | ✓ | per-idea row | forever |
 | `state/bad_plans.md` | ✓ | global | per-mechanism | forever |
 
-When a `kernel-research` or `kernel-plan` session ends cleanly (human says "done, this is good"), the agent still runs the normal `memory-accumulation.md` promotion step — distill stable findings into the target / subsystem / global memory.  This skill adds the live per-turn writes on top; it does not replace end-of-session promotion.
+When a `kernel-research` or `kernel-plan` session ends cleanly (human says "done, this is good"), the agent still runs the normal `memory-accumulation/SKILL.md` promotion step — distill stable findings into the target / subsystem / global memory.  This skill adds the live per-turn writes on top; it does not replace end-of-session promotion.
 
 ## Safety Rules
 

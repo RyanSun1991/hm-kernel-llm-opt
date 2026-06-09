@@ -1,3 +1,8 @@
+---
+name: handoff-contract
+description: Non-negotiable handoff packet requirements for every stage transition — defines mandatory artifacts, delegation message structure, naming conventions, and receiving-agent verification rules.
+---
+
 # Handoff Contract
 
 ## Rule
@@ -6,7 +11,7 @@ No agent should hand work to the next stage without a compact handoff packet.
 
 ## Manager-Visible Return Cap — Hard Limit ≤500 tokens
 
-When a sub-agent (researcher / plan-reviewer / coder / code-reviewer / tester) returns to `os-opt-manager`, the chat-visible return that the manager sees in its conversation context MUST stay under ~500 tokens. This is a compaction-survival measure: the manager runs many iterations in one session, and full sub-agent outputs in chat would balloon the manager's context until OpenCode auto-compacts and key state is summarized away.
+When a sub-agent (researcher / plan-reviewer / coder / code-reviewer / tester) returns to `hm-opt-manager`, the chat-visible return that the manager sees in its conversation context MUST stay under ~500 tokens. This is a compaction-survival measure: the manager runs many iterations in one session, and full sub-agent outputs in chat would balloon the manager's context until OpenCode auto-compacts and key state is summarized away.
 
 The chat-visible return MUST contain ONLY:
 
@@ -84,10 +89,10 @@ The manager Reads the artifact only when its decision needs the details — not 
 - feature async task_id, wait time, terminal status, report_path
 - compare result: level, target names, aggregate baseline / candidate / delta / delta_pct, pairs_compared, any missing pairs
 - per-pair breakdown for the cases that moved most
-- **per-modified-function compare rows** (one per function touched by the patch) with baseline / candidate / delta / delta_pct when the tester was given the patch diff — see `ab-test-comparison.md` "Per-Modified-Function Comparison"
+- **per-modified-function compare rows** (one per function touched by the patch) with baseline / candidate / delta / delta_pct when the tester was given the patch diff — see `ab-test-comparison/SKILL.md` "Per-Modified-Function Comparison"
 - notable stderr_tail findings (crashes, exceptions) from either phase
 - remaining validation gaps
 - whether the instruction-count thesis still looks plausible
 - verdict: pass, fail, inconclusive, or skipped
 - confidence: high, medium, or low
-- recommended next route: `accept` | `kernel-code-agent` | `kernel-source-research` | `iterate` | `reject` — see `kernel-tester-agent.md` → "Recommended Next Route" for which failure maps to which agent, and `os-opt-manager.md` → "Feedback Routing Table" for the manager-side rules
+- recommended next route: `accept` | `kernel-code-agent` | `kernel-source-research` | `iterate` | `reject` — see `kernel-tester-agent.md` → "Recommended Next Route" for which failure maps to which agent, and `hm-opt-manager.md` → "Feedback Routing Table" for the manager-side rules
