@@ -4,6 +4,21 @@ All notable changes to `hm-skill-hub`. Semver: MAJOR.MINOR.PATCH.
 
 ## [Unreleased]
 
+### Phase 4 review hardening
+
+- The optimizer now bumps the skill patch version and writes a **new** scorecard
+  per accepted edit (keeping prior cards), so the dashboard trend + auto-merge
+  trust **actually accumulate** instead of overwriting a single card (were inert).
+- The nightly **Validate** step now checks the optimizer's result against the
+  PRE-optimize baseline it captured (not the card it just wrote), so it is a real
+  monotone check rather than a self-comparison.
+- `optimize()` / eval-suite resolution use the skill's own hub (eval_id), not a
+  module constant — an alternate/temp hub uses its own suite.
+- `dashboard.render()` sorts by semver internally; `auto_merge_gate` trust uses a
+  post-last-rollback window (a rollback resets, recovery possible — matches the
+  policy); `release.infer_bump` flags a version/maturity change (incl. downgrade)
+  instead of "no asset change"; `auto_merge_gate` CLI errors on a non-hub dir.
+
 ## [0.2.0] — 2026-06-09
 
 Phases 0.5–4 (schema convergence → read/write path → central curation → eval gate

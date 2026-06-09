@@ -31,7 +31,7 @@ jobs:
       - name: nightly loop (dry-run unless explicitly applied)
         run: |
           set -euo pipefail
-          if [ "${{ inputs.apply }}" = "true" ]; then
+          if [ "${{ github.event.inputs.apply }}" = "true" ]; then
             python tools/nightly.py --apply | tee nightly-report.md
           else
             python tools/nightly.py | tee nightly-report.md

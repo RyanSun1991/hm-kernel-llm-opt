@@ -2,7 +2,7 @@
 
 Conservative regex sweep for the secrets most likely to leak from kernel /
 flash / test workflows: device serials, /dev/serial paths, ssh-style keys,
-generic hex keys >= 32 chars, AKIA-style tokens.
+generic hex keys >= 40 chars, AKIA-style tokens.
 
 Exit codes:
     0 — no hits

@@ -111,14 +111,22 @@ def infer_bump(old: Inventory, new: Inventory) -> tuple[str, list[str]]:
         return "major", reasons
     if added:
         reasons.append(f"new skill(s): {sorted(added)}")
+    common = set(old.skills) & set(new.skills)
     raised = [
-        ref for ref in set(old.skills) & set(new.skills)
+        ref for ref in common
         if _semver(new.skills[ref].get("version", "0.0.0")) > _semver(old.skills[ref].get("version", "0.0.0"))
         or _RANK.get(new.skills[ref].get("maturity"), 0) > _RANK.get(old.skills[ref].get("maturity"), 0)
     ]
+    changed = [
+        ref for ref in common
+        if (new.skills[ref].get("version") != old.skills[ref].get("version")
+            or new.skills[ref].get("maturity") != old.skills[ref].get("maturity"))
+    ]
     if raised:
         reasons.append(f"skill version/maturity raised: {sorted(raised)}")
-    if added or raised:
+    elif changed:
+        reasons.append(f"skill version/maturity changed: {sorted(changed)}")  # e.g. a revert
+    if added or raised or changed:
         return "minor", reasons
     if new.knowledge_count != old.knowledge_count:
         reasons.append(f"knowledge {old.knowledge_count}→{new.knowledge_count}")

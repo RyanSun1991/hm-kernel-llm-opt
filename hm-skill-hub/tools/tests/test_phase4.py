@@ -51,6 +51,15 @@ def test_infer_bump_patch_on_knowledge_only():
     assert release.infer_bump(old, new)[0] == "patch"
 
 
+def test_infer_bump_minor_on_version_change_even_downgrade():
+    # review #7: a version change (incl. a downgrade/revert) is a real change, not
+    # "no asset change".
+    old = Inventory(skills={"core/a": {"version": "1.1.0", "maturity": "L2"}}, schema_hash="h")
+    new = Inventory(skills={"core/a": {"version": "1.0.0", "maturity": "L2"}}, schema_hash="h")
+    bump, reasons = release.infer_bump(old, new)
+    assert bump == "minor" and any("changed" in r for r in reasons)
+
+
 def test_scan_inventory_finds_real_skills():
     inv = release.scan_inventory(HUB)
     assert "core/instruction-count-first" in inv.skills
@@ -79,16 +88,18 @@ def test_broadcast_write_lock(tmp_path: Path):
 
 # ---- dashboard -------------------------------------------------------------
 
-def test_dashboard_renders_trend():
+def test_dashboard_render_sorts_unsorted_input():
+    # feed an UNSORTED list: render() must order rows by semver itself (review #3)
     by_skill = {"s": [
+        {"skill": "s", "version": "0.10.0", "pass_rate": 1.0, "mean_score": 1.0, "n": 9},
         {"skill": "s", "version": "0.1.0", "pass_rate": 0.6, "mean_score": 0.7, "n": 9},
         {"skill": "s", "version": "0.2.0", "pass_rate": 0.8, "mean_score": 0.85, "n": 9},
-        {"skill": "s", "version": "0.10.0", "pass_rate": 1.0, "mean_score": 1.0, "n": 9},
     ]}
     md = dashboard.render(by_skill)
     assert "▲ +0.20" in md          # 0.6 -> 0.8 improvement arrow
-    # table rows are in semver order (not lexical: 0.2.0 before 0.10.0)
+    # rows in semver order (not input order, not lexical: 0.2.0 before 0.10.0)
     assert md.index("| 0.1.0 |") < md.index("| 0.2.0 |") < md.index("| 0.10.0 |")
+    assert "latest 0.10.0" in md     # latest is the semver-max, not the last input
 
 
 def test_dashboard_collect_real():
@@ -109,6 +120,18 @@ def test_decide_half_automatic_until_trusted():
     assert amg.decide(young)[0] == "human"
     proven = [{"version": f"0.{i}.0", "pass_rate": 0.5 + 0.1 * i} for i in range(4)]
     assert amg.decide(proven)[0] == "auto"
+
+
+def test_trust_recovers_after_rollback_window():
+    # review #6: a rollback resets the counter; rebuilding N improvements regains trust
+    assert amg.is_trusted([0.5, 0.6, 0.4, 0.5, 0.6, 0.7], 3)[0] is True   # 3 ups since the dip
+    assert amg.is_trusted([0.5, 0.6, 0.7, 0.4, 0.5], 3)[0] is False        # only 1 up since the dip
+
+
+def test_auto_merge_gate_main_errors_on_non_hub_dir(tmp_path: Path):
+    # review #5: a path that is neither a hub root nor a skills/ dir must error,
+    # not silently scan the real hub
+    assert amg.main([str(tmp_path)]) == 2
 
 
 # ---- nightly orchestrator --------------------------------------------------

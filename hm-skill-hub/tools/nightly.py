@@ -27,7 +27,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import broadcast  # type: ignore
 import dashboard  # type: ignore
-import eval_gate  # type: ignore
 import lint  # type: ignore
 import redact  # type: ignore
 import release  # type: ignore
@@ -101,22 +100,31 @@ def run_nightly(hub_root: str | Path = HUB, *, apply: bool = False,
     rep.cluster = {"counts": cr.counts(), "promotion_signals": cr.promotion_signals,
                    "promotions": [c.proposed_skill for c in cr.promotions]}
 
-    # (4) Optimize — engine B (bounded edit under the gate)
+    # (4) Optimize — engine B (bounded edit under the gate). Each result carries
+    # its PRE-optimize baseline (captured before any write).
     skill_dirs = [p.parent for p in sorted((hub_root / "skills").rglob("SKILL.md"))
                   if (p.parent / "best_skill.md").exists()]
+    results: dict = {}
     accepted_any = False
     for d in skill_dirs:
         res = so.optimize(d, apply=apply)
+        results[d] = res
         accepted_any = accepted_any or bool(res.accepted)
         rep.optimize.append({"skill": d.name,
                              "baseline": round(res.baseline.pass_rate, 3),
                              "final": round(res.final.pass_rate, 3),
                              "accepted": [e.mechanism for e in res.accepted]})
 
-    # (5) Validate — eval gate
-    for d in skill_dirs:
-        ok, msg = eval_gate.check_skill(d)
-        rep.validate_msgs.append(msg)
+    # (5) Validate — the optimizer's `final` must not regress vs the PRE-optimize
+    # baseline (independent of the scorecard it just wrote; this is the real
+    # monotone gate in the loop — eval_gate.py is the separate cross-PR tool, run
+    # in CI for hand edits).
+    for d, res in results.items():
+        reg = res.final.regression_rate_vs(res.baseline)
+        ok = reg == 0.0 and res.final.pass_rate >= res.baseline.pass_rate
+        rep.validate_msgs.append(
+            f"{d.name}: pass_rate {res.baseline.pass_rate:.2f}→{res.final.pass_rate:.2f}, "
+            f"regression={reg:.2f}")
         rep.validate_ok = rep.validate_ok and ok
 
     # (6) Promote — release bump (escalate to minor if a skill improved)

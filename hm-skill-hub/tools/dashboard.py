@@ -54,7 +54,7 @@ def render(by_skill: dict[str, list[dict]]) -> str:
         lines.append("_(no scorecards yet)_")
         return "\n".join(lines) + "\n"
     for skill in sorted(by_skill):
-        cards = by_skill[skill]
+        cards = sorted(by_skill[skill], key=lambda c: _semver(c.get("version", "0.0.0")))
         latest = cards[-1]
         lines += [f"## `{skill}` — latest {latest.get('version')} "
                   f"(pass_rate {latest.get('pass_rate', 0):.2f}, suite `{latest.get('suite', '')}`)",

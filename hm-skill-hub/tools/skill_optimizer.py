@@ -33,9 +33,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover
+    sys.stderr.write("PyYAML required\n")
+    sys.exit(2)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pareto import ParetoFrontier  # type: ignore
@@ -45,6 +52,40 @@ from run_evals import (  # type: ignore
 
 HUB = Path(__file__).resolve().parent.parent
 _PLAYBOOK_HEADER = "## Mechanism playbook"
+_FM_RE = re.compile(r"^---\n(.*?)\n---\n(.*)$", re.DOTALL)
+
+
+def _resolve_suite_dir(skill_dir: Path) -> Path:
+    """Resolve the skill's eval suite from ITS hub (eval_id is hub-relative), not
+    a module constant — so an alternate/temp hub uses its own suite."""
+    sk = skill_dir / "SKILL.md"
+    eval_id = ""
+    if sk.exists():
+        m = _FM_RE.match(sk.read_text(encoding="utf-8"))
+        if m:
+            eval_id = (yaml.safe_load(m.group(1)) or {}).get("eval_id", "")
+    # hub root = .../skills/<kind>/<name> -> parents[2]
+    hub_root = skill_dir.parents[2] if len(skill_dir.parents) >= 3 else HUB
+    cand = hub_root / eval_id if eval_id else HUB / "eval" / "task_suites" / "core_optimization_suite"
+    return cand if (cand / "cases").exists() else HUB / "eval" / "task_suites" / "core_optimization_suite"
+
+
+def _bump_skill_patch(skill_dir: Path) -> str:
+    """Bump the skill's patch version in SKILL.md, return the new version. Lets the
+    optimizer write a NEW scorecard per accepted edit so history accumulates
+    (feeding the dashboard trend + auto-merge trust, P4-4/P4-5)."""
+    sk = skill_dir / "SKILL.md"
+    m = _FM_RE.match(sk.read_text(encoding="utf-8"))
+    if not m:
+        return ""
+    fm = yaml.safe_load(m.group(1)) or {}
+    parts = re.match(r"(\d+)\.(\d+)\.(\d+)", str(fm.get("version", "0.0.0")))
+    a, b, c = (int(x) for x in parts.groups()) if parts else (0, 0, 0)
+    new = f"{a}.{b}.{c + 1}"
+    fm["version"] = new
+    sk.write_text("---\n" + yaml.safe_dump(fm, sort_keys=False, allow_unicode=True)
+                  + "---\n" + m.group(2), encoding="utf-8")
+    return new
 
 
 @dataclass
@@ -150,7 +191,7 @@ def optimize(skill_dir: str | Path, suite_dir: str | Path | None = None, *, scor
     skill_dir = Path(skill_dir)
     scorer = scorer or ProxyScorer()
     if suite_dir is None:
-        suite_dir = HUB / "eval" / "task_suites" / "core_optimization_suite"
+        suite_dir = _resolve_suite_dir(skill_dir)
     suite = load_suite(suite_dir)
     name, version, text = load_skill(skill_dir)
 
@@ -184,10 +225,15 @@ def optimize(skill_dir: str | Path, suite_dir: str | Path | None = None, *, scor
 
     result.final = current
     if apply and result.accepted:
+        # Bump the patch version and write a NEW scorecard, keeping the prior one,
+        # so the eval history (and thus dashboard trend + auto-merge trust)
+        # accumulates instead of overwriting a single file.
+        new_version = _bump_skill_patch(skill_dir) or version
+        current.version = new_version
         (skill_dir / "best_skill.md").write_text(text, encoding="utf-8")
         out_dir = skill_dir / "scorecards"
         out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / f"{name}__{version}.json").write_text(
+        (out_dir / f"{name}__{new_version}.json").write_text(
             json.dumps(current.to_json(), indent=2), encoding="utf-8")
         (skill_dir / "candidates").mkdir(exist_ok=True)
         (skill_dir / "candidates" / "pareto.json").write_text(

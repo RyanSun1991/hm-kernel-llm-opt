@@ -24,19 +24,19 @@ def _semver(v: str) -> tuple[int, int, int]:
 
 
 def is_trusted(pass_rates: list[float], min_improvements: int = 3) -> tuple[bool, str]:
-    """`pass_rates` ordered oldest→newest. Trusted iff 0 rollbacks and at least
-    `min_improvements` strict improvements (so the skill has a proven upward,
-    never-regressing track record)."""
-    if len(pass_rates) < min_improvements + 1:
-        return False, f"only {len(pass_rates)} scorecard(s); need >= {min_improvements + 1}"
+    """`pass_rates` ordered oldest→newest. Trusted iff there have been at least
+    `min_improvements` strict improvements **since the last rollback** (a rollback
+    resets the trust counter; the skill can rebuild it). Matches
+    `policies/auto_merge_policy.md`."""
     deltas = [pass_rates[i] - pass_rates[i - 1] for i in range(1, len(pass_rates))]
-    rollbacks = sum(1 for d in deltas if d < -1e-9)
-    improvements = sum(1 for d in deltas if d > 1e-9)
-    if rollbacks:
-        return False, f"{rollbacks} rollback(s) in history"
+    last_rollback = max((i for i, d in enumerate(deltas) if d < -1e-9), default=-1)
+    window = deltas[last_rollback + 1:]
+    improvements = sum(1 for d in window if d > 1e-9)
+    since = " since last rollback" if last_rollback >= 0 else ""
     if improvements < min_improvements:
-        return False, f"{improvements} improvement(s) < {min_improvements} required"
-    return True, f"{improvements} improvements, 0 rollbacks"
+        return False, (f"{improvements} consecutive improvement(s){since} "
+                       f"< {min_improvements} required")
+    return True, f"{improvements} consecutive improvements{since}, 0 rollbacks in window"
 
 
 def decide(scorecards: list[dict], min_improvements: int = 3) -> tuple[str, str]:
@@ -62,8 +62,18 @@ def _collect(hub_root: Path) -> dict[str, list[dict]]:
 
 
 def main(argv: list[str]) -> int:
-    root = Path(next((a for a in argv if not a.startswith("--")), HUB / "skills")).resolve()
-    hub_root = root.parent if root.name == "skills" else HUB
+    explicit = next((a for a in argv if not a.startswith("--")), None)
+    if explicit:
+        p = Path(explicit).resolve()
+        if p.name == "skills":
+            hub_root = p.parent
+        elif (p / "skills").exists():
+            hub_root = p
+        else:
+            sys.stderr.write(f"{p} is neither a hub root nor a skills/ dir\n")
+            return 2
+    else:
+        hub_root = HUB
     min_improvements = int(next((a.split("=", 1)[1] for a in argv if a.startswith("--min=")), "3"))
     by_skill = _collect(hub_root)
     if not by_skill:

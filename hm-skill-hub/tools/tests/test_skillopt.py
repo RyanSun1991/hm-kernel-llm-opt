@@ -135,6 +135,26 @@ def test_optimize_improves_under_gate_no_regression(tmp_path: Path):
     assert (dst / "candidates" / "pareto.json").exists()
 
 
+def test_optimize_apply_bumps_version_and_accumulates_scorecards(tmp_path: Path):
+    # review #2: an accepted optimization bumps the patch version and writes a NEW
+    # scorecard, keeping the prior one — so history accumulates (feeds dashboard
+    # trend + auto-merge trust), instead of overwriting one card forever.
+    import json as _json
+
+    dst = _tmp_skill(tmp_path)
+    before = {p.name for p in (dst / "scorecards").glob("*.json")}
+    assert before == {"instruction-count-first__0.1.0.json"}
+    res = so.optimize(dst, SUITE, apply=True)
+    assert res.accepted
+    after = {p.name for p in (dst / "scorecards").glob("*.json")}
+    assert "instruction-count-first__0.1.0.json" in after        # prior card kept
+    assert "instruction-count-first__0.1.1.json" in after        # new card added
+    # SKILL.md version was bumped
+    assert "version: 0.1.1" in (dst / "SKILL.md").read_text(encoding="utf-8")
+    new_card = _json.loads((dst / "scorecards" / "instruction-count-first__0.1.1.json").read_text())
+    assert new_card["pass_rate"] == 1.0
+
+
 def test_bad_edits_buffer_skips_known_bad(tmp_path: Path):
     _, _, text = load_skill(SKILL)
     suite = load_suite(SUITE)
