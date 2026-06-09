@@ -1,0 +1,6 @@
+id: mm_005
+required_terms:
+  - "review"
+  - "regression"
+forbidden_terms:
+weight: 1.0

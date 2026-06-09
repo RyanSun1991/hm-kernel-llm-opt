@@ -1,0 +1,24 @@
+name: hub-nightly
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 18 * * *'
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: install deps
+        run: pip install -r tools/requirements.txt
+      - name: collect and lint
+        run: |
+          python tools/lint.py
+          python tools/redact.py --check
+      - name: run proxy evals
+        run: python tools/run_evals.py --skill skills/core/example/SKILL.md --suite eval/task_suites/core_kernel_optimization
+      - name: update pareto frontier
+        run: python tools/pareto.py eval/scorecards/*.json --output eval/scorecards/pareto_frontier.json

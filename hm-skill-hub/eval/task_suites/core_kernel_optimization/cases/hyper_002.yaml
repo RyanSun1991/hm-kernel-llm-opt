@@ -1,0 +1,7 @@
+id: hyper_002
+required_terms:
+  - "flash"
+  - "stock"
+  - "feature"
+forbidden_terms:
+weight: 1.0

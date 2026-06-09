@@ -1,0 +1,6 @@
+id: wq_005
+required_terms:
+  - "rollback"
+  - "scorecard"
+forbidden_terms:
+weight: 1.0

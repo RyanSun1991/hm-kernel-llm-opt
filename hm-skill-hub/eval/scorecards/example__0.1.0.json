@@ -1,0 +1,135 @@
+{
+  "metrics": {
+    "instr_count_delta": 1.0,
+    "n_cases": 20,
+    "pass_rate": 1.0,
+    "regression_rate": 0.0
+  },
+  "per_case": [
+    {
+      "case_id": "core_001",
+      "notes": "hits=['stage gate', 'plan review']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "core_002",
+      "notes": "hits=['bad plan', 'anti-pattern']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "core_003",
+      "notes": "hits=['skill', 'knowledge']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "core_004",
+      "notes": "hits=['semver', 'lockfile']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "core_005",
+      "notes": "hits=['redact', 'secret']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "hyper_001",
+      "notes": "hits=['hyperhold', 'i/o']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "hyper_002",
+      "notes": "hits=['flash', 'stock', 'feature']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "hyper_003",
+      "notes": "hits=['paired', 'delta']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "hyper_004",
+      "notes": "hits=['validation', 'artifact']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "hyper_005",
+      "notes": "hits=['device', 'fallback']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "mm_001",
+      "notes": "hits=['instruction-count', 'hot path', 'evidence']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "mm_002",
+      "notes": "hits=['a/b', 'baseline', 'delta']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "mm_003",
+      "notes": "hits=['re-measure', 'iteration', 'gate']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "mm_004",
+      "notes": "hits=['cold path', 'noise floor']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "mm_005",
+      "notes": "hits=['review', 'regression']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "wq_001",
+      "notes": "hits=['workqueue', 'threadpool']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "wq_002",
+      "notes": "hits=['inline', 'i-cache']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "wq_003",
+      "notes": "hits=['batch', 'wake']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "wq_004",
+      "notes": "hits=['kworker', 'hot path']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "wq_005",
+      "notes": "hits=['rollback', 'scorecard']; misses=[]; forbidden_hits=[]",
+      "pass": true,
+      "score": 1.0
+    }
+  ],
+  "run_at": "2026-06-08T20:18:54+00:00",
+  "runner": "static-proxy-v1",
+  "skill": "example",
+  "suite": "core_kernel_optimization",
+  "version": "0.1.0"
+}

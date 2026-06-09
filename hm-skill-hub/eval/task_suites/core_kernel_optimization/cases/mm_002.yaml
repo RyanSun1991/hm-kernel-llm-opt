@@ -1,0 +1,7 @@
+id: mm_002
+required_terms:
+  - "A/B"
+  - "baseline"
+  - "delta"
+forbidden_terms:
+weight: 1.0

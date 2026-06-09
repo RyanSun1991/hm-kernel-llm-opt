@@ -1,0 +1,6 @@
+id: wq_002
+required_terms:
+  - "inline"
+  - "i-cache"
+forbidden_terms:
+weight: 1.0

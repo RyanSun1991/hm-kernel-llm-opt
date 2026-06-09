@@ -95,40 +95,57 @@ def lint_skill_md(path: Path) -> list[tuple[str, str]]:
     return []
 
 
-def discover(root: Path) -> tuple[list[Path], list[Path]]:
+def lint_json_doc(path: Path, schema_name: str) -> list[tuple[str, str]]:
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        jsonschema.validate(instance=doc, schema=load_schema(schema_name))
+        return []
+    except (json.JSONDecodeError, jsonschema.ValidationError) as e:
+        return [(str(path), f"{schema_name}: {e}")]
+
+
+def discover(root: Path) -> tuple[list[Path], list[Path], list[Path]]:
     md_records: list[Path] = []
     skills: list[Path] = []
+    scorecards: list[Path] = []
     for sub in (root / "knowledge", root / "state"):
         if sub.exists():
             md_records.extend(p for p in sub.rglob("*.md") if p.name not in {"README.md"})
     for p in (root / "skills").rglob("SKILL.md") if (root / "skills").exists() else []:
         skills.append(p)
-    return md_records, skills
+    if (root / "eval" / "scorecards").exists():
+        scorecards.extend(p for p in (root / "eval" / "scorecards").glob("*.json"))
+    return md_records, skills, scorecards
 
 
 def main(argv: list[str]) -> int:
     targets = [Path(a).resolve() for a in argv] or [HUB]
     all_errors: list[tuple[str, str]] = []
-    n_records, n_skills = 0, 0
+    n_records, n_skills, n_scorecards = 0, 0, 0
     for t in targets:
         if t.is_dir():
-            md, sk = discover(t)
+            md, sk, sc = discover(t)
         elif t.suffix == ".md" and t.name == "SKILL.md":
-            md, sk = [], [t]
+            md, sk, sc = [], [t], []
+        elif t.suffix == ".json" and "scorecards" in str(t):
+            md, sk, sc = [], [], [t]
         else:
-            md, sk = [t], []
+            md, sk, sc = [t], [], []
         for p in md:
             n_records += 1
             all_errors.extend(lint_md_records(p))
         for p in sk:
             n_skills += 1
             all_errors.extend(lint_skill_md(p))
+        for p in sc:
+            n_scorecards += 1
+            all_errors.extend(lint_json_doc(p, "scorecard"))
     if all_errors:
         for path, msg in all_errors:
             sys.stderr.write(f"{path}: {msg}\n")
-        sys.stderr.write(f"\n{len(all_errors)} error(s) across {n_records} record file(s), {n_skills} skill(s)\n")
+        sys.stderr.write(f"\n{len(all_errors)} error(s) across {n_records} record file(s), {n_skills} skill(s), {n_scorecards} scorecard(s)\n")
         return 1
-    print(f"OK — {n_records} record file(s), {n_skills} skill(s) validated.")
+    print(f"OK — {n_records} record file(s), {n_skills} skill(s), {n_scorecards} scorecard(s) validated.")
     return 0
 
 

@@ -1,0 +1,6 @@
+id: core_002
+required_terms:
+  - "bad plan"
+  - "anti-pattern"
+forbidden_terms:
+weight: 1.0
