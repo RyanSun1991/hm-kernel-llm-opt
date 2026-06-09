@@ -148,10 +148,12 @@ class HubRecord:
         if d is not None:
             return 1 if d < 0 else (-1 if d > 0 else 0)
         do = str(self.fields.get("do_or_dont") or "").lower()
+        # scan negatives first: "do: avoid X" / "do: don't Y" are negative despite
+        # the "do:" prefix.
+        if "don't" in do or "dont" in do or "avoid" in do or "watch out" in do:
+            return -1
         if do.startswith("do:") or do.startswith("do "):
             return 1
-        if "don't" in do or "dont" in do or do.startswith("avoid") or "watch out" in do:
-            return -1
         st = self.status
         if st in {"landed", "approved"}:
             return 1

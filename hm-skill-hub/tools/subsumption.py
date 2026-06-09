@@ -56,6 +56,13 @@ def heuristic_judge(a: HubRecord, b: HubRecord) -> str:
     """
     if not (a.is_claim and b.is_claim):
         return "none"  # ledger entries are verdicts, not generalizable claims
+    # opposite conclusions are a *contradiction*, not a generalization — a
+    # "don't inline" pattern must not subsume an "inlining helped" fact. Defer to
+    # the dedup/conflict route (subsumption runs first in curate_batch, so this
+    # guard is what keeps a real contradiction from being relabeled subsumption).
+    pa, pb = a.polarity(), b.polarity()
+    if pa != 0 and pb != 0 and pa != pb:
+        return "none"
     sim = text_similarity(a.text(), b.text())
     # same optimization concept: a shared mechanism is the strong signal; when one
     # side is a mechanism-less generalization (an `H` heuristic), require strong
@@ -156,12 +163,15 @@ def _as_list(v) -> list:
 
 
 def distinct_instances(general: HubRecord, links: list[SubsumptionLink]) -> int:
-    """Count distinct subsumed instances (by target_slug|contributor|id)."""
+    """Count distinct subsumed instances by (target_slug, contributor) — the
+    §11.5 distinctness criterion ("different target / different contributor").
+    Records with neither signal collapse to a single key (conservative: cannot
+    fabricate a promotion from anonymous instances)."""
     keys = set()
     for link in links:
         if link.general_id == general.id:
             sp = link.specific
-            keys.add(sp.target_slug or sp.contributor or sp.id)
+            keys.add((sp.target_slug or "", sp.contributor or ""))
     return len(keys)
 
 

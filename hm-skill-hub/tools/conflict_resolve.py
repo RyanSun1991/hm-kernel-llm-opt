@@ -50,18 +50,24 @@ def resolve(incoming: HubRecord, existing: HubRecord, *, high_risk: bool = False
     if stronger:
         loser = dict(existing.fields)
         loser["status"] = "superseded"
-        loser["valid_until"] = _now()
-        loser["superseded_by"] = _as_list(loser.get("superseded_by")) + [incoming.id] \
-            if existing.schema == "memory_item" else incoming.id
+        # Double-time bound: only memory_item has valid_until / supersedes[] (array)
+        # in its schema. global_lesson / bad_plan use a scalar superseded_by and no
+        # valid_until — writing those fields there would fail lint (additionalProperties).
+        if existing.schema == "memory_item":
+            loser["valid_until"] = _now()
+            loser["superseded_by"] = _as_list(loser.get("superseded_by")) + [incoming.id]
+        else:
+            loser["superseded_by"] = incoming.id
         winner = dict(incoming.fields)
         if incoming.schema == "memory_item":
             winner["supersedes"] = _as_list(winner.get("supersedes")) + [existing.id]
+        vu = " + valid_until=now" if existing.schema == "memory_item" else ""
         return Resolution(
             decision="supersede", winner_id=incoming.id, loser_id=existing.id,
             winner_fields=winner, loser_fields=loser,
             actions=[
-                f"{existing.id}.status=superseded + valid_until=now",
-                f"{existing.id}.superseded_by += {incoming.id}",
+                f"{existing.id}.status=superseded{vu}",
+                f"{existing.id}.superseded_by = {incoming.id}",
                 f"{incoming.id}.supersedes += {existing.id}",
                 f"add {incoming.id} (auditable; no delete)",
             ],

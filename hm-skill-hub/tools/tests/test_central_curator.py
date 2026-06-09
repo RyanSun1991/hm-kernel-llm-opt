@@ -16,14 +16,24 @@ sys.path.insert(0, str(TOOLS))
 import central_curate  # type: ignore
 import conflict_resolve  # type: ignore
 import dedup  # type: ignore
+import lint  # type: ignore
 import promotion_detector  # type: ignore
 import subsumption  # type: ignore
-from hub_records import HubRecord, load_hub_knowledge, record_from_candidate  # type: ignore
+import yaml  # type: ignore
+from hub_records import HubRecord, load_hub_knowledge  # type: ignore
 from similarity import alias_hit, jaccard, text_similarity  # type: ignore
 
 
 def _rec(rid, schema="memory_item", body="", **fields) -> HubRecord:
     return HubRecord(id=rid, schema=schema, path="x", fields=fields, body=body)
+
+
+def _write_record(tmp, rel: str, fm: dict, body: str = "body") -> "Path":
+    p = tmp / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    text = "---\n" + yaml.safe_dump(fm, sort_keys=False, allow_unicode=True) + "---\n\n" + body + "\n"
+    p.write_text(text, encoding="utf-8")
+    return p
 
 
 def _specific(rid="F010", target="mm-vmscan-c-shrink-node", contrib="alice", delta=-0.8) -> HubRecord:
@@ -85,6 +95,24 @@ def test_dedup_new_on_unrelated():
     assert dedup.classify_one(inc, [ex]).verdict == "new"
 
 
+def test_dedup_different_target_same_mechanism_is_new_not_merge():
+    # review #2: near-identical prose but different target_slug => distinct
+    # per-target instances, must be `new` (not collapsed to `merge`).
+    ex = _rec("F100", type="fact", mechanism="hoist-invariant",
+              scope={"level": "function", "target_slug": "t-a"}, status="active",
+              body="hoist the loop-invariant read out of the reclaim loop")
+    inc = _rec("F900", type="fact", mechanism="hoist-invariant",
+               scope={"level": "function", "target_slug": "t-b"}, status="active",
+               body="hoist the loop-invariant read out of the reclaim loop")
+    assert dedup.classify_one(inc, [ex]).verdict == "new"
+
+
+def test_polarity_do_avoid_is_negative():
+    # review #6: "do: avoid X" is a negative despite the do: prefix
+    assert _rec("X", do_or_dont="do: avoid spending an iteration on cold paths").polarity() == -1
+    assert _rec("Y", do_or_dont="do: hoist the invariant").polarity() == 1
+
+
 # ---- conflict_resolve: double-time, never delete ---------------------------
 
 def test_conflict_resolve_supersedes_when_stronger_never_deletes():
@@ -116,6 +144,55 @@ def test_conflict_resolve_drops_when_weaker():
     assert res.decision == "drop"
 
 
+def test_superseded_loser_lints_clean_for_all_schema_families(tmp_path):
+    """Review #1: a superseded loser must still pass lint. memory_item carries
+    valid_until; global_lesson / bad_plan do NOT (additionalProperties:false)."""
+    # memory_item
+    wm = _write_record(tmp_path, "knowledge/targets/t/facts/F101-w.md",
+                       {"id": "F101", "type": "fact", "title": "w",
+                        "scope": {"level": "function", "target_slug": "t"},
+                        "source": [{"kind": "doc", "ref": "x"}], "maturity": "L3",
+                        "status": "active", "created_at": "2026-01-01T00:00:00Z",
+                        "evidence": {"confirmations": 4}})
+    lm = _write_record(tmp_path, "knowledge/targets/t/facts/F100-l.md",
+                       {"id": "F100", "type": "fact", "title": "l",
+                        "scope": {"level": "function", "target_slug": "t"},
+                        "source": [{"kind": "doc", "ref": "y"}], "maturity": "L1",
+                        "status": "active", "created_at": "2026-01-01T00:00:00Z"})
+    assert conflict_resolve.apply_to_files(wm, lm).decision == "supersede"
+    assert "valid_until" in lm.read_text(encoding="utf-8")
+    assert lint.lint_record_file(lm) == []
+    # global_lesson — must NOT get valid_until, must still lint
+    wg = _write_record(tmp_path, "knowledge/global/heuristics/H101-w.md",
+                       {"id": "H101", "lesson": "w", "kind": "heuristic", "applies_when": "c",
+                        "do_or_dont": "do: x", "tags": ["a"], "evidence": [{"kind": "doc", "ref": "x"}],
+                        "confidence": "confirmed", "added_on": "2026-01-01", "added_by": "m",
+                        "status": "active"})
+    lg = _write_record(tmp_path, "knowledge/global/heuristics/H100-l.md",
+                       {"id": "H100", "lesson": "l", "kind": "heuristic", "applies_when": "c",
+                        "do_or_dont": "do: y", "tags": ["a"], "evidence": [{"kind": "doc", "ref": "y"}],
+                        "confidence": "tentative", "added_on": "2026-01-01", "added_by": "m",
+                        "status": "active"})
+    assert conflict_resolve.apply_to_files(wg, lg).decision == "supersede"
+    assert "valid_until" not in lg.read_text(encoding="utf-8")
+    assert lint.lint_record_file(lg) == []
+    # bad_plan — same: superseded_by scalar, no valid_until
+    wb = _write_record(tmp_path, "knowledge/global/bad_plans/B101-w.md",
+                       {"id": "B101", "mechanism": "inline-callee", "target_pattern": "x",
+                        "scope": "function", "applies_to": {"subsystems": ["*"]}, "reason": "w",
+                        "evidence": [{"kind": "bench", "ref": "x"}, {"kind": "review", "ref": "y"},
+                                     {"kind": "commit", "ref": "z"}],
+                        "rejected_on": "2026-01-01", "rejected_by": "m", "status": "active"})
+    lb = _write_record(tmp_path, "knowledge/global/bad_plans/B100-l.md",
+                       {"id": "B100", "mechanism": "inline-callee", "target_pattern": "x",
+                        "scope": "function", "applies_to": {"subsystems": ["*"]}, "reason": "l",
+                        "evidence": [{"kind": "bench", "ref": "x"}], "rejected_on": "2026-01-01",
+                        "rejected_by": "m", "status": "active"})
+    assert conflict_resolve.apply_to_files(wb, lb).decision == "supersede"
+    assert "valid_until" not in lb.read_text(encoding="utf-8")
+    assert lint.lint_record_file(lb) == []
+
+
 # ---- subsumption (AC: §10.1.b mock) ----------------------------------------
 
 def test_subsumption_is_not_dup_or_contradiction():
@@ -124,6 +201,37 @@ def test_subsumption_is_not_dup_or_contradiction():
     assert subsumption.judge_subsumption(sp, gn) == "b_subsumes_a"
     # and dedup does NOT call this a merge or conflict (different scope)
     assert dedup.classify_one(sp, [gn]).verdict == "new"
+
+
+def test_subsumption_polarity_guard_blocks_contradiction():
+    # review #3: a bad_plan ("don't inline", -1) must NOT subsume a positive fact
+    # ("inlining helped", +1) — that's a contradiction, deferred to dedup/conflict.
+    bad = _rec("B100", schema="bad_plan", mechanism="inline-callee",
+               applies_to={"subsystems": ["*"]}, status="active", rejected_by="x",
+               reason="blanket inline regresses i-cache",
+               body="blanket inline of kworker entries regresses i-cache")
+    good = _rec("F100", type="fact", mechanism="inline-callee",
+                scope={"level": "function", "target_slug": "t"}, status="active",
+                evidence={"delta_pct": -0.5, "compare_level": "function"},
+                body="inlining this kworker entry helped on this target")
+    assert subsumption.judge_subsumption(good, bad) == "none"
+    # in a batch the opposite-polarity pair must not be routed to subsumption
+    report = central_curate.curate_batch(
+        [{"schema": "memory_item", "record": {"id": "F100", **good.fields, "body": good.body}}],
+        [bad])
+    assert report.decisions[0].kind != "subsumption"
+
+
+def test_subsumption_anonymous_instances_do_not_fake_promotion():
+    # review #10: two subsumed records with no target_slug + no contributor collapse
+    # to a single distinct key -> cannot fabricate a >=2-instance promotion.
+    gn = _general()
+    a = _rec("F010", type="fact", mechanism="hoist-invariant",
+             scope={"level": "function"}, body="hoist invariant out of loop A")
+    b = _rec("F011", type="fact", mechanism="hoist-invariant",
+             scope={"level": "function"}, body="hoist invariant out of loop B")
+    links = subsumption.detect_in_set([a, b, gn])
+    assert subsumption.should_emit_promotion(gn, links) is False
 
 
 def test_subsumption_build_links_keeps_specific_as_evidence():
@@ -146,9 +254,18 @@ def test_subsumption_emits_only_with_two_distinct_instances():
 
 
 def test_subsumption_quiet_on_real_hub_except_h001_f001():
-    links = subsumption.detect_in_set([r for r in load_hub_knowledge() if r.is_claim])
+    claims = [r for r in load_hub_knowledge() if r.is_claim]
+    links = subsumption.detect_in_set(claims)
     pairs = {(x.general_id, x.specific_id) for x in links}
     assert pairs == {("H001", "F001")}  # exactly the designed link, no false positives
+    # H001 (heuristic) carries no `mechanism`, so this link rests on a text-overlap
+    # margin over the toy embedder. Assert the margin explicitly so threshold
+    # erosion (e.g. rewording H001/F001) surfaces in CI instead of silently flipping.
+    recs = {r.id: r for r in claims}
+    sim_link = text_similarity(recs["H001"].text(), recs["F001"].text())
+    nearest_non_link = max(
+        text_similarity(recs[g].text(), recs["F001"].text()) for g in ("A001", "B001", "V001"))
+    assert sim_link >= 0.30 and sim_link - nearest_non_link >= 0.03
 
 
 # ---- promotion detector (P2-8, both paths) ---------------------------------
@@ -228,12 +345,19 @@ def test_central_curate_real_hub_smoke():
 # ---- standalone runner -----------------------------------------------------
 
 def _run_standalone() -> int:
+    import inspect
+    import tempfile
+
     g = dict(globals())
     tests = sorted((n, f) for n, f in g.items() if n.startswith("test_") and callable(f))
     failed = 0
     for name, fn in tests:
         try:
-            fn()
+            if "tmp_path" in inspect.signature(fn).parameters:
+                with tempfile.TemporaryDirectory() as d:
+                    fn(Path(d))
+            else:
+                fn()
             print(f"  PASS {name}")
         except Exception as e:  # noqa: BLE001
             failed += 1

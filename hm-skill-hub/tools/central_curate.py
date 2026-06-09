@@ -64,8 +64,9 @@ def curate_batch(candidates: list[dict], hub: list[HubRecord], *, llm=None) -> C
         links = detect_for_incoming(inc, working, llm=llm)
         if links:
             link = links[0]
+            other = link.specific_id if link.general_id == inc.id else link.general_id
             report.decisions.append(Decision(
-                inc.id, "subsumption", link.general_id,
+                inc.id, "subsumption", other,
                 f"{link.general_id} subsumes {link.specific_id} (kept as evidence)"))
             working.append(inc)
             continue

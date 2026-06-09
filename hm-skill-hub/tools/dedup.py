@@ -77,7 +77,10 @@ def classify_one(inc: HubRecord, existing: list[HubRecord], threshold: float = D
     if opposite and same_cond:
         return DedupVerdict(inc.id, "conflict", ex.id, sim,
                             "same (scope, mechanism, condition), opposite conclusion")
-    if sim >= threshold and not opposite:
+    # `merge` (= duplicate) requires the SAME scope — two near-identical facts at
+    # different target_slug are distinct per-target instances, not duplicates
+    # (collapsing them loses provenance + starves the >=2-instance promotion rule).
+    if sim >= threshold and not opposite and _same_scope(inc, ex):
         return DedupVerdict(inc.id, "merge", ex.id, sim,
                             "near-duplicate: same scope/mechanism/conclusion")
     return DedupVerdict(inc.id, "new", ex.id, sim, "related but distinct (additive)")
@@ -98,14 +101,24 @@ def _read_candidates(path: Path) -> list[dict]:
 
 
 def main(argv: list[str]) -> int:
-    args = [a for a in argv if not a.startswith("--")]
     check = "--check" in argv
     threshold = DEFAULT_THRESHOLD
-    for a in argv:
-        if a.startswith("--threshold"):
-            threshold = float(a.split("=", 1)[1]) if "=" in a else threshold
+    positional: list[str] = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--threshold" and i + 1 < len(argv):  # space form
+            threshold = float(argv[i + 1])
+            i += 2
+            continue
+        if a.startswith("--threshold="):              # equals form
+            threshold = float(a.split("=", 1)[1])
+        elif not a.startswith("--"):
+            positional.append(a)
+        i += 1
+    args = positional
     if not args:
-        sys.stderr.write("usage: dedup.py <incoming.jsonl> [--check] [--threshold=0.82]\n")
+        sys.stderr.write("usage: dedup.py <incoming.jsonl> [--check] [--threshold 0.82]\n")
         return 2
     candidates = _read_candidates(Path(args[0]))
     existing = load_hub_knowledge()

@@ -25,7 +25,7 @@ jobs:
         run: python tools/redact.py --check
       - name: dedup gate (engine A) — fail on unresolved conflict
         run: |
-          shopt -s nullglob
+          shopt -s nullglob globstar
           for f in staging/*.jsonl staging/**/*.jsonl; do
             echo "dedup $f"; python tools/dedup.py "$f" --check
           done
