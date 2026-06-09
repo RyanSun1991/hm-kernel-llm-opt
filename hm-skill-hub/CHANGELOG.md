@@ -4,6 +4,18 @@ All notable changes to `hm-skill-hub`. Semver: MAJOR.MINOR.PATCH.
 
 ## [Unreleased]
 
+### Phase 1 — hub-side additions (consumer read/write path lives in the business repo `src/hmopt/`)
+
+- Example skill scaffolds so the resolver's `selector → domain → requires` chain
+  is exercisable end-to-end: `skills/domain/mm-reclaim/` + `skills/technique/hoist-loop-invariant/`.
+- Retrieval-eval assets (plan P1-10): `eval/retrieval/{corpus.yaml,queries.yaml,baseline.json}`
+  — a fixture corpus + 26 labelled queries (target/mechanism/free-form, >=8 each)
+  with must/optional-hit tags and bare-symbol ablation discriminators. Lives
+  under `eval/` so `lint.py` (knowledge/ + skills/ only) ignores it.
+- Example target knowledge renamed to the `_slugify` convention
+  (`targets/mm-vmscan-c-shrink-node/`) so target_slug aligns across resolver /
+  runs / sediment.
+
 ### Phase 0.5 — schema / markdown convergence gate (design §6.1 / §7, blocking gate for Phase 1)
 
 - **One record = one file**: every knowledge record is now a `.md` with YAML
