@@ -14,8 +14,12 @@ jobs:
         with:
           python-version: '3.11'
       - name: install deps
-        run: pip install -r tools/requirements.txt
-      - name: schema lint
+        run: |
+          pip install -r tools/requirements.txt
+          pip install -r tools/requirements-dev.txt
+      - name: toolchain tests
+        run: python -m pytest tools/tests/ -q
+      - name: schema lint + path<->scope consistency
         run: python tools/lint.py
       - name: secret scan
         run: python tools/redact.py --check

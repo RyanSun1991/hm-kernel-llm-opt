@@ -4,6 +4,27 @@ All notable changes to `hm-skill-hub`. Semver: MAJOR.MINOR.PATCH.
 
 ## [Unreleased]
 
+### Phase 0.5 — schema / markdown convergence gate (design §6.1 / §7, blocking gate for Phase 1)
+
+- **One record = one file**: every knowledge record is now a `.md` with YAML
+  frontmatter (full schema fields) + markdown body. Dropped the legacy
+  heading-delimited (`### A001` + `- **key**: value`) multi-record format.
+- **Path encodes scope, CI-enforced consistency**: new `tools/path_scope.py`
+  derives the expected schema + scope from a record's path and `lint.py` now
+  rejects any path↔frontmatter scope mismatch with a precise message.
+- **Schema fields added** (design §7): `memory_item` gains `applies_when`,
+  `superseded_by[]`, `subsumes[]`, `subsumed_by[]` (+ a status=superseded ⇒
+  superseded_by rule); `global_lesson` / `bad_plan` gain `subsumes[]` /
+  `subsumed_by[]`; `idea` gains `target_slug` (path-consistency anchor).
+- **Tools rewritten**: `parse_memory.py` is now a frontmatter→schema-object
+  converter (one file → one record); `lint.py` is schema-driven + path-scope.
+- **Backfill**: A001 / H001 / B001 / V001 migrated to the new format; added a
+  worked target example (`targets/mm-vmscan-shrink_node/` facts F001 + idea
+  L001) exercising the new fields and a subsumption link (H001 subsumes F001).
+- **Tests**: `tools/tests/test_tools.py` (22 cases, runnable via pytest **or**
+  standalone) covering parse, path-scope derivation, mismatch detection, and
+  end-to-end lint; wired into hub CI.
+
 ## [0.1.0] — 2026-05-27
 
 Phase 0 skeleton:

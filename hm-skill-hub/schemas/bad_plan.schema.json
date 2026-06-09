@@ -37,7 +37,9 @@
     "rejected_by":    {"type": "string"},
     "status":         {"enum": ["active", "superseded", "revisited"]},
     "superseded_by":  {"type": "string", "pattern": "^B[0-9]{3,}$"},
-    "related_ids":    {"type": "array", "items": {"type": "string"}}
+    "related_ids":    {"type": "array", "items": {"type": "string"}},
+    "subsumes":       {"type": "array", "items": {"type": "string"}, "description": "More-specific records (any schema) this bad_plan generalizes (design §10.1.b / §11.5). Kept as evidence, never absorbed."},
+    "subsumed_by":    {"type": "array", "items": {"type": "string"}, "description": "More-general record(s) that generalize this one."}
   },
   "allOf": [
     {

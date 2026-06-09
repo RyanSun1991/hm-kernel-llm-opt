@@ -9,6 +9,7 @@
   "properties": {
     "id":            {"type": "string", "pattern": "^L[0-9]{3,}$"},
     "mechanism":     {"type": "string", "description": "Canonical mechanism name from _registry/mechanisms.yaml."},
+    "target_slug":   {"type": "string", "description": "Target this ledger entry belongs to. Must match the <slug> in path targets/<slug>/idea_ledger/ (CI-enforced path↔frontmatter scope consistency, design §6.1)."},
     "scope":         {"type": "string", "description": "files / functions / structs touched"},
     "status":        {"enum": ["approved", "landed", "reverted", "rejected", "deferred"]},
     "verdicted_by":  {"type": "string"},

@@ -51,6 +51,10 @@ Phase 4 自动优化 10w+   ┃
 
 **Phase 0.5（独立小会话）—— 含 Phase 1 前置阻塞 gate**：
 
+> **状态：P0.5-2 gate ✅ 已完成（本会话）。** 交付：① 一记录一文件 frontmatter（A001/H001/B001/V001 回填 + target 示例 F001/L001）；② `tools/path_scope.py` 路径编码 scope + `lint.py` 路径/frontmatter 一致性强校验；③ `parse_memory.py` 改 frontmatter→schema object；④ schema 补 `applies_when/subsumes[]/subsumed_by[]/superseded_by[]`（+ `idea.target_slug`）；⑤ `tools/tests/test_tools.py` 22 例（pytest 或 standalone 均可跑）接入 hub CI。**gate AC 全绿**：`python tools/lint.py` exit 0、路径/scope 不一致精准报错、schema 含新字段。P0.5-1（内容迁移 symlink）仍待独立会话。
+
+
+
 - **P0.5-1 内容迁移**——把现有 `.opencode/skills`、`agents`、`commands`、`pipelines`、`docs`（harness 规范部分）切入 `hm-skill-hub/`，在 `.opencode/` 下用 symlink 保持旧路径可用。带回归：跑一次现有 `/optimize_generic` 验证 pipeline 行为不变。
 - **P0.5-2 schema / markdown 落盘格式收敛 ★前置阻塞**（v1.2 升级，评审反馈 ①，对应设计 §6.1 / §7 / §17 议题 7）：lint / dedup / retrieval scalar filter / Curator 七路分类全部依赖 schema 字段稳定，故**必须先于 Phase 1 完成**。交付：① **一记录一文件**（拆掉 `### A001` 多记录堆叠），frontmatter 用标准 schema 全字段，**禁止每类自扩字段**；② **文件路径编码 scope**（`knowledge/targets/<slug>/facts/<ID>.md` 等，§6.1）；③ `parse_memory.py` 升级为「frontmatter → 标准 schema object」转换器；④ `lint.py` 改 schema-driven + **新增路径 scope 与 frontmatter scope 一致性校验**；⑤ schema 补 `subsumes[]/subsumed_by[]/superseded_by[]/applies_when`；⑥ 现有内容一次性回填。**AC（gate）**：`python tools/lint.py` 对全部示例 + 任意新条目 exit 0；路径/frontmatter scope 不一致能精准报错；schema 含新字段；**此 gate 不过，Phase 1 不开工**。
 
