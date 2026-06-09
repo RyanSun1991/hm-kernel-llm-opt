@@ -36,7 +36,15 @@ jobs:
         run: python hm-skill-hub/tools/lint.py
       - name: hub secret scan
         run: python hm-skill-hub/tools/redact.py --check
-      - name: hub toolchain tests
+      - name: hub dedup gate (engine A) — fail on unresolved conflict
+        run: |
+          cd hm-skill-hub
+          shopt -s nullglob
+          for f in staging/*.jsonl staging/**/*.jsonl; do
+            echo "dedup $f"; python tools/dedup.py "$f" --check
+          done
+          echo "dedup gate ok"
+      - name: hub toolchain tests (lint/scope/curator/dedup/subsumption/promotion)
         run: cd hm-skill-hub && python -m pytest tools/tests/ -q
 
   consumer:

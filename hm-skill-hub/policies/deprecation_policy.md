@@ -51,3 +51,21 @@ idea_ledger 的 `deferred + reopen_trigger` 机制是同一思路的另一形态
 - ❌ 物理删除任何记录（除非违法/泄密；用 `git filter-repo` 必须经 owners 团队批准 + 留 ADR）。
 - ❌ 改 stable ID。
 - ❌ 直接 reset `confirmations / score`；应当通过新增 counter-evidence 让 score 自然衰减。
+
+## 实际命令（评审人可直接执行）
+
+```bash
+# 超越（supersede）：新证据更强 → 旧记 superseded + valid_until + superseded_by（不删）
+python tools/conflict_resolve.py <winner_path.md> <loser_path.md>
+
+# 标 deprecated（invalidation 命中 / 连续反例 / mechanism 下线）：人工编辑 frontmatter
+#   status: deprecated
+#   （可加 deprecation_reason、related_ids 指向 successor）
+python tools/lint.py            # 确认 status 改动后仍过 schema（superseded ⇒ 需 superseded_by）
+
+# 清理（Phase 4 nightly）：superseded/deprecated 留仓但排除出索引重建与 @-inline
+#   见 nightly 作业；当前阶段手工核对 status 字段即可
+```
+
+`memory_item` 的新约束：`status: superseded` 必须同时给 `superseded_by[]`（schema 强校验），
+保证双时态链完整、可审计回溯。

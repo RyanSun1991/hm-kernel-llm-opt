@@ -1,0 +1,23 @@
+# Hub code ownership -> dual-review enforcement (design §9 gate 3, plan P2-7).
+# GitHub requires a matching owner's approval before merge. Pair with branch
+# protection (see GOVERNANCE.md): require review from Code Owners + ≥1 process
+# reviewer, no self-approval, no force-push to main.
+
+# Default: any change needs a process reviewer.
+*                               @process-reviewers
+
+# L3 core skills — strictest gate: core owners + process review.
+/skills/core/                   @core-skill-owners @process-reviewers
+
+# Technique / domain skills — domain owners.
+/skills/technique/              @skill-owners @process-reviewers
+/skills/domain/                 @domain-owners @process-reviewers
+
+# Schemas, registry, policies, tools — platform owns the contract surface.
+/schemas/                       @platform-owners @process-reviewers
+/_registry/                     @platform-owners @process-reviewers
+/policies/                      @platform-owners @process-reviewers
+/tools/                         @platform-owners @process-reviewers
+
+# Curated knowledge — domain reviewer signs off on correctness.
+/knowledge/                     @domain-owners @process-reviewers

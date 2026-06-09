@@ -77,3 +77,27 @@ def merge_skill_edit(skill, edit):
 | `slack-token` | `xox?-...` |
 
 人工脱敏后用 `[REDACTED]` 占位即可重提。
+
+## 实际命令（引擎 A 中央批量，Phase 2）
+
+七路关系分类、双时态消解、subsumption 建链都已工具化（`tools/`，仅 stdlib + pyyaml +
+jsonschema，离线确定性，拆仓后 CI 直接跑）：
+
+```bash
+# 1) 一键 dry-run：对一批候选跑 subsumption→dedup→conflict→promotion，出 merge plan
+python tools/central_curate.py staging/<batch>.jsonl --report=report.md
+
+# 2) 单独跑各judgment（CI 门 / 排错）
+python tools/dedup.py staging/<batch>.jsonl --check    # merge/new/conflict；conflict→exit 1
+python tools/subsumption.py                            # 列泛化包含链（general subsumes specific）
+
+# 3) 冲突消解：incoming 更强 → 旧记 superseded + valid_until（双时态，不删）
+python tools/conflict_resolve.py <winner_path.md> <loser_path.md>
+```
+
+`central_curate.py` 是 `merge_curator.md`（Curator-agent 提示词）背后的确定性引擎：
+agent 产出的 merge plan 必须与它一致，CI 用它做 dry-run。
+
+**铁律重申**：除「contradiction 且新证据更强」走 `superseded` 外，任何分支都**不物理删除**；
+temporal / conditional / selector / evidence / subsumption 一律保留双方。subsumption 把具体
+实例挂为泛化记录的 `source`，**绝不去重吞掉**。

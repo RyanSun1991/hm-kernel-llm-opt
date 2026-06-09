@@ -91,6 +91,8 @@ Phase 4 自动优化 10w+   ┃
 
 **目标**：知识合并上线（引擎 A），CI 强校验，policies 落地。
 
+> **状态：Phase 2 核心 ✅ 已落地（本会话）。** `hm-skill-hub/tools/` 新增独立 Curator 工具链（stdlib+pyyaml+jsonschema，离线确定性）：`dedup.py`(P2-2 三态) · `conflict_resolve.py`(P2-3 双时态不删) · `subsumption.py`(P2-9 泛化建链 + ≥2 实例 emit) · `promotion_detector.py`(P2-8 聚类+subsumption 两路) · `central_curate.py`+`merge_curator.md`(P2-1 §10.1.b 编排) · `similarity.py`/`hub_records.py`(原语)。P2-4 CI dedup gate（hub ci + 根 ci）· P2-5 PR 模板 · P2-6 policies 实际命令段 · P2-7 CODEOWNERS。**测试**：`tools/tests/test_central_curator.py` 15 例含 §10.1.b mock（subsumption≠dup/contradiction、≥2 实例才晋升、被包含实例留 evidence）+ 真实 hub 仅识别 H001→F001 无误报；hub 工具共 **43 测试**绿。**后续**：真实 LLM 蕴含判定接入、Curator-agent 在 OpenCode 实跑、subsumption 算力预算上限（§17 议题 8）留 Phase 2 收尾/Phase 3。
+
 | ID | 任务 | 交付物 | AC |
 |---|---|---|---|
 | P2-1 | Curator-agent 提示词 | `hm-skill-hub/tools/merge_curator.md` | OpenCode 可加载；输入候选 + 现有 hub knowledge，输出去重 / 冲突 / 消解决策 |

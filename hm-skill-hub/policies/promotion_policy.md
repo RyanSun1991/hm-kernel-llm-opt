@@ -55,3 +55,22 @@ score = w1·evidence_strength + w2·confirmations + w3·recency
 - 措辞未稳定的"经验之谈"（无 evidence，留 L1 草稿）。
 - 含设备 serial / key 未脱敏的原始日志（脱敏后再投）。
 - 未在 `_registry/mechanisms.yaml` 注册的 mechanism（先开 PR 注册）。
+
+## 实际命令（评审人可直接执行，Phase 2）
+
+```bash
+# 门 1 — schema/lint/redact
+python tools/lint.py                          # schema + 路径/scope 一致性 + ID 唯一性
+python tools/redact.py --check                # 密钥扫描
+
+# 门 3 — 策展（先看自动检测，再人工裁决）
+python tools/central_curate.py staging/<batch>.jsonl --report=report.md
+python tools/dedup.py staging/<batch>.jsonl --check     # 有未消解 conflict 即 exit 1
+
+# 晋升候选自动检测（只建议、绝不自动 merge）
+python tools/promotion_detector.py            # 聚类路 + subsumption 路
+python tools/promotion_detector.py --pr-body  # 生成 promote-candidate PR 正文
+python tools/subsumption.py --emit-only       # 仅列 ≥2 实例的泛化（可晋升）
+```
+
+晋升候选检测器**只提建议**：任何 `promote-candidate` PR 仍走本文件三道门 + 双评审，无豁免。被包含的具体实例在 PR 里作为 evidence 保留，不删。

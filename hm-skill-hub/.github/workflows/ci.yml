@@ -23,6 +23,13 @@ jobs:
         run: python tools/lint.py
       - name: secret scan
         run: python tools/redact.py --check
+      - name: dedup gate (engine A) — fail on unresolved conflict
+        run: |
+          shopt -s nullglob
+          for f in staging/*.jsonl staging/**/*.jsonl; do
+            echo "dedup $f"; python tools/dedup.py "$f" --check
+          done
+          echo "dedup gate ok (no staged conflicts)"
 
   # NOTE: Until the hub is git subtree-split into its own repo, this workflow
   # file lives here as a scaffold. GitHub only triggers workflows from .github/

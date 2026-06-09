@@ -4,6 +4,32 @@ All notable changes to `hm-skill-hub`. Semver: MAJOR.MINOR.PATCH.
 
 ## [Unreleased]
 
+### Phase 2 — central curation + merge (engine A second level, design §10.1.b / §11.5)
+
+- **Curator toolchain** (`tools/`, stdlib + pyyaml + jsonschema, offline-deterministic,
+  split-out-ready): `similarity.py` (token-hashing + Jaccard), `hub_records.py`
+  (normalized loader reusing parse_memory + path_scope).
+- **P2-2 `dedup.py`** — three-state (merge / new / conflict); `--check` fails CI on
+  any unresolved conflict.
+- **P2-3 `conflict_resolve.py`** — Zep double-time: stronger evidence supersedes
+  (status=superseded + valid_until + superseded_by / supersedes), **never deletes**.
+- **P2-9 `subsumption.py`** — generalization detector (B subsumes A): builds links,
+  carries the specific instance as a `source` of the general (not absorbed), emits a
+  promotion signal only at ≥ 2 distinct instances (anti over-generalization).
+- **P2-8 `promotion_detector.py`** — two paths: clustering (mechanism+scope,
+  confirmations ≥ 3 across ≥ 2 contributors) + subsumption (subsumes ≥ 2); suggests
+  `promote-candidate` PRs, never auto-merges; subsumed instances kept as evidence.
+- **P2-1 `central_curate.py` + `merge_curator.md`** — orchestrator realizing the
+  §10.1.b seven-route decision (subsumption-before-dedup) + the Curator agent prompt.
+- **P2-4 CI** — hub `ci.yml` + root `skill-hub-ci.yml` gain a dedup gate; toolchain
+  tests cover the new tools.
+- **P2-5 / P2-6 / P2-7** — sediment PR template, CODEOWNERS (dual-review), and
+  "actual commands" sections in promotion / merge / deprecation policies.
+- **Tests**: `tools/tests/test_central_curator.py` (15 cases) incl. the §10.1.b mock
+  (subsumption ≠ dup/contradiction; ≥2-instance promotion; evidence preserved) and a
+  real-hub assertion that only the designed H001→F001 link is detected (no false
+  positives). 43 hub-tool tests total (pytest or standalone).
+
 ### Phase 1 — hub-side additions (consumer read/write path lives in the business repo `src/hmopt/`)
 
 - Example skill scaffolds so the resolver's `selector → domain → requires` chain
