@@ -22,14 +22,14 @@ def _normalize_prompt_value(value: Any) -> str:
     return str(value)
 
 
-def load_prompt_template(name: str, fallback: str) -> str:
-    path = _PROMPTS_DIR / name
+def load_prompt_template(template_name: str, fallback: str) -> str:
+    path = _PROMPTS_DIR / template_name
     if not path.exists():
         return fallback.strip()
     return path.read_text(encoding="utf-8").strip()
 
 
-def render_prompt_template(name: str, fallback: str, **kwargs: Any) -> str:
-    template = load_prompt_template(name, fallback)
+def render_prompt_template(template_name: str, fallback: str, **kwargs: Any) -> str:
+    template = load_prompt_template(template_name, fallback)
     values = {key: _normalize_prompt_value(value) for key, value in kwargs.items()}
     return template.format_map(_SafeFormatDict(values)).strip()

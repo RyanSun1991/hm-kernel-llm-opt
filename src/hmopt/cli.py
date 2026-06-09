@@ -17,20 +17,10 @@ from hmopt.opencode import (
     load_pipeline_profiles,
     resume_pipeline_session,
 )
-from hmopt.orchestration import run_artifact_analysis, run_pipeline, run_runtime_ingest
-from hmopt.indexing import (
-    build_kernel_index,
-    build_runtime_index,
-    fetch_code_snippets,
-    retrieve_call_chain,
-    route_query,
-)
 from hmopt.storage.artifact_store import ArtifactStore
 from hmopt.storage.db.engine import init_engine
 from hmopt.storage.db import models
 from hmopt.storage.db.engine import session_scope
-from hmopt.core.config import load_yaml, normalize_raw_config
-from hmopt.models.hiperf_report import HiperfReport, Frame
 
 app = typer.Typer(help="HM-VERIF kernel optimization platform")
 
@@ -45,6 +35,8 @@ def run(config: str = typer.Option("configs/app.yaml", help="Path to config YAML
     # Purpose: run full optimization pipeline (baseline profile + iterative loop).
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
+    from hmopt.orchestration import run_pipeline
+
     run_id = run_pipeline(cfg)
     typer.echo(f"Run completed: {run_id}")
 
@@ -59,6 +51,8 @@ def optimize(
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
     cfg.iterations = iterations
+    from hmopt.orchestration import run_pipeline
+
     run_id = run_pipeline(cfg)
     typer.echo(f"Optimization finished. run_id={run_id}")
 
@@ -87,6 +81,8 @@ def analyze(config: str = typer.Option("configs/app.yaml", help="Config YAML")) 
     # Purpose: run a single-iteration baseline analysis (no extra iterations).
     cfg = _load_config(config)
     cfg.iterations = 1
+    from hmopt.orchestration import run_pipeline
+
     run_id = run_pipeline(cfg)
     typer.echo(f"Analysis baseline run_id={run_id}")
 
@@ -164,6 +160,8 @@ def analyze_artifacts(
         kind, path = spec.split(":", 1)
         artifacts.append({"kind": kind, "path": path})
     if legacy_pipeline or with_patch:
+        from hmopt.orchestration import run_artifact_analysis
+
         run_id = run_artifact_analysis(
             cfg,
             artifacts,
@@ -173,6 +171,8 @@ def analyze_artifacts(
             run_profile=with_profile,
         )
     else:
+        from hmopt.orchestration import run_runtime_ingest
+
         run_id = run_runtime_ingest(cfg, artifacts)
     typer.echo(f"Artifact analysis complete. run_id={run_id}")
 
@@ -215,6 +215,8 @@ def index_kernel(
             )
             raise typer.Exit(code=2)
         cfg.indexing.backend = normalized
+    from hmopt.indexing import build_kernel_index
+
     build_kernel_index(cfg, repo_path=cfg.project.repo_path)
     typer.echo(f"Kernel code index built (backend={cfg.indexing.backend})")
 
@@ -228,6 +230,8 @@ def index_runtime(
     # Purpose: build runtime metrics/hotspots index for a run.
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
+    from hmopt.indexing import build_runtime_index
+
     build_runtime_index(cfg, run_id)
     typer.echo(f"Runtime index built for run_id={run_id}")
 
@@ -263,6 +267,8 @@ def query(
     cfg = _load_config(config)
     prompt_path = Path(prompt_file) if prompt_file else None
     symbol_list = [s.strip() for s in symbols.split(",")] if symbols else None
+    from hmopt.indexing import route_query
+
     response = route_query(
         cfg,
         query_str,
@@ -308,6 +314,8 @@ def call_chain_cmd(
     kinds_list = (
         [k.strip() for k in edge_kinds.split(",") if k.strip()] if edge_kinds else None
     )
+    from hmopt.indexing import retrieve_call_chain
+
     out = retrieve_call_chain(
         cfg,
         sym_list,
@@ -345,6 +353,8 @@ def get_snippets_cmd(
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
     sym_list = [s.strip() for s in symbols.split(",") if s.strip()]
+    from hmopt.indexing import fetch_code_snippets
+
     out = fetch_code_snippets(
         cfg,
         sym_list,
@@ -356,6 +366,37 @@ def get_snippets_cmd(
         typer.echo(json.dumps(out, indent=2, ensure_ascii=False))
     else:
         typer.echo(out)
+
+
+@app.command("sediment")
+def sediment(
+    run_id: str | None = typer.Option(
+        None, "--run-id", help="Run id under .opencode/local/runs/"
+    ),
+    run_dir: Path | None = typer.Option(
+        None, "--run-dir", help="Explicit run directory to scan"
+    ),
+    staging_dir: Path = typer.Option(
+        Path(".opencode/local/sediment_staging"), help="Tier-1 JSONL staging dir"
+    ),
+    bundle: bool = typer.Option(
+        False, "--bundle", help="Bundle staged JSONL files instead of extracting one run"
+    ),
+    output: Path | None = typer.Option(
+        None, "--output", "-o", help="Output JSONL path"
+    ),
+    open_pr: bool = typer.Option(False, "--open-pr", help="Prepare a PR bundle summary"),
+) -> None:
+    from hmopt.cli_sediment import sediment_command
+
+    sediment_command(
+        run_id=run_id,
+        run_dir=run_dir,
+        staging_dir=staging_dir,
+        bundle=bundle,
+        output=output,
+        open_pr=open_pr,
+    )
 
 
 @app.command()

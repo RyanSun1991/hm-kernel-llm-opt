@@ -19,6 +19,10 @@ jobs:
         run: python tools/lint.py
       - name: secret scan
         run: python tools/redact.py --check
+      - name: dedup check
+        run: python tools/dedup.py --fail-on-conflict
+      - name: proxy eval
+        run: python tools/run_evals.py --skill skills/core/example/SKILL.md --suite eval/task_suites/core_kernel_optimization
 
   # NOTE: Until the hub is git subtree-split into its own repo, this workflow
   # file lives here as a scaffold. GitHub only triggers workflows from .github/

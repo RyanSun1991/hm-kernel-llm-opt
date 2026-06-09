@@ -1,0 +1,6 @@
+id: wq_003
+required_terms:
+  - "batch"
+  - "wake"
+forbidden_terms:
+weight: 1.0

@@ -1,0 +1,8 @@
+id: mm_001
+required_terms:
+  - "instruction-count"
+  - "hot path"
+  - "evidence"
+forbidden_terms:
+  - "single image"
+weight: 1.0

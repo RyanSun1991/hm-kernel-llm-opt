@@ -1,0 +1,6 @@
+id: hyper_004
+required_terms:
+  - "validation"
+  - "artifact"
+forbidden_terms:
+weight: 1.0

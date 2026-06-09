@@ -1,0 +1,6 @@
+id: wq_004
+required_terms:
+  - "kworker"
+  - "hot path"
+forbidden_terms:
+weight: 1.0

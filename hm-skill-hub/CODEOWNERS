@@ -1,0 +1,6 @@
+# Team Skill Hub requires one domain owner plus one process owner in branch protection.
+/skills/core/ @core-skill-owners @hub-process-owners
+/skills/technique/ @technique-skill-owners @hub-process-owners
+/knowledge/ @knowledge-curators @hub-process-owners
+/policies/ @hub-process-owners
+/schemas/ @hub-process-owners
