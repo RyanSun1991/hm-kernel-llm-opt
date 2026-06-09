@@ -5,7 +5,7 @@ title: "Hoist the repeated sc->priority read out of shrink_node's per-page loop"
 scope:
   level: function
   subsystem: mm-reclaim
-  target_slug: mm-vmscan-shrink_node
+  target_slug: mm-vmscan-c-shrink-node
 applies_when: "shrink_node re-reads sc->priority on every page iteration while priority is invariant within the scan"
 source:
   - {kind: bench, ref: bench/mm_reclaim__iter1_validation.md}

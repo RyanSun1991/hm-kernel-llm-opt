@@ -72,7 +72,9 @@ def _knowledge_rel(path: Path) -> str | None:
     return None
 
 
-def lint_record_file(path: Path) -> list[tuple[str, str]]:
+def lint_record_file(
+    path: Path, id_sink: dict[str, str] | None = None
+) -> list[tuple[str, str]]:
     errors: list[tuple[str, str]] = []
     try:
         recs = parse(path)
@@ -83,6 +85,13 @@ def lint_record_file(path: Path) -> list[tuple[str, str]]:
     ps = derive_path_scope(rel) if rel else None
 
     for r in recs:
+        if id_sink is not None:
+            if r.id in id_sink:
+                errors.append(
+                    (str(path), f"{r.id}: duplicate id — already defined in {id_sink[r.id]}")
+                )
+            else:
+                id_sink[r.id] = str(path)
         schema_name = ps.schema if ps else _id_prefix_schema(r.id, str(path))
         if schema_name is None:
             errors.append(
@@ -150,6 +159,7 @@ def discover(root: Path) -> tuple[list[Path], list[Path]]:
 def main(argv: list[str]) -> int:
     targets = [Path(a).resolve() for a in argv] or [HUB]
     all_errors: list[tuple[str, str]] = []
+    id_sink: dict[str, str] = {}  # hub-wide stable-id uniqueness (never reused)
     n_records, n_skills = 0, 0
     for t in targets:
         if t.is_dir():
@@ -162,7 +172,7 @@ def main(argv: list[str]) -> int:
             md, sk = [], []
         for p in md:
             n_records += 1
-            all_errors.extend(lint_record_file(p))
+            all_errors.extend(lint_record_file(p, id_sink=id_sink))
         for p in sk:
             n_skills += 1
             all_errors.extend(lint_skill_md(p))

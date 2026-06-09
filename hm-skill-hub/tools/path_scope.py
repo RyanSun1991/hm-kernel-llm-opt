@@ -115,7 +115,9 @@ def check_scope_consistency(ps: PathScope, record_id: str, fields: dict[str, Any
     elif ps.schema == "bad_plan":
         subs = (fields.get("applies_to") or {}).get("subsystems")
         if ps.level == "global":
-            if subs is not None and subs != ["*"]:
+            if subs is None:
+                errs.append("global bad_plan must declare applies_to.subsystems=['*']")
+            elif subs != ["*"]:
                 errs.append(
                     f"global bad_plan must have applies_to.subsystems=['*'], got {subs!r}"
                 )
@@ -126,25 +128,30 @@ def check_scope_consistency(ps: PathScope, record_id: str, fields: dict[str, Any
                 )
 
     elif ps.schema == "memory_item":
+        # Path and frontmatter scope must be *redundant and consistent* (§6.1):
+        # a path that names a concrete subsystem / target requires the matching
+        # frontmatter field to be present, not merely non-contradictory.
         scope = fields.get("scope") or {}
         level = scope.get("level")
         if ps.level == "subsystem":
             if level != "subsystem":
                 errs.append(f"path is subsystems/ but scope.level={level!r} (expected 'subsystem')")
-            if scope.get("subsystem") not in (None, ps.subsystem):
-                errs.append(
-                    f"path subsystem={ps.subsystem!r} != scope.subsystem={scope.get('subsystem')!r}"
-                )
+            sub = scope.get("subsystem")
+            if sub is None:
+                errs.append(f"subsystems/{ps.subsystem}/ path requires scope.subsystem in frontmatter")
+            elif sub != ps.subsystem:
+                errs.append(f"path subsystem={ps.subsystem!r} != scope.subsystem={sub!r}")
         elif ps.target_slug is not None:
             if level in {"global", "subsystem"}:
                 errs.append(
                     f"path is targets/{ps.target_slug}/ but scope.level={level!r} "
                     f"(expected a target-relative level, e.g. one of {sorted(_TARGET_LEVELS)})"
                 )
-            if scope.get("target_slug") not in (None, ps.target_slug):
-                errs.append(
-                    f"path slug={ps.target_slug!r} != scope.target_slug={scope.get('target_slug')!r}"
-                )
+            slug = scope.get("target_slug")
+            if slug is None:
+                errs.append(f"targets/{ps.target_slug}/ path requires scope.target_slug in frontmatter")
+            elif slug != ps.target_slug:
+                errs.append(f"path slug={ps.target_slug!r} != scope.target_slug={slug!r}")
 
     elif ps.schema == "idea":
         slug = fields.get("target_slug")

@@ -29,7 +29,7 @@ def _write(tmp: Path, rel: str, text: str) -> Path:
     return p
 
 
-F001 = HUB / "knowledge/targets/mm-vmscan-shrink_node/facts/F001-hoist-sc-priority.md"
+F001 = HUB / "knowledge/targets/mm-vmscan-c-shrink-node/facts/F001-hoist-sc-priority.md"
 
 
 # ---- parse_memory ----------------------------------------------------------
@@ -46,7 +46,7 @@ def test_parse_one_file_one_record():
     r = recs[0]
     assert r.id == "F001"
     assert r.fields["type"] == "pattern"
-    assert r.fields["scope"]["target_slug"] == "mm-vmscan-shrink_node"
+    assert r.fields["scope"]["target_slug"] == "mm-vmscan-c-shrink-node"
     assert r.body.startswith("# F001")
 
 
@@ -104,7 +104,7 @@ def test_derive_unrecognized_returns_none():
 # ---- path_scope.check (the gate AC: mismatches must be caught precisely) ----
 
 def test_scope_ok_for_real_F001():
-    ps = derive_path_scope("targets/mm-vmscan-shrink_node/facts/F001-x.md")
+    ps = derive_path_scope("targets/mm-vmscan-c-shrink-node/facts/F001-x.md")
     recs = parse(F001)
     assert check_scope_consistency(ps, recs[0].id, recs[0].fields) == []
 
@@ -146,6 +146,26 @@ def test_subsystem_memory_item_wrong_subsystem_is_mismatch():
     fields = {"scope": {"level": "subsystem", "subsystem": "sched"}}
     errs = check_scope_consistency(ps, "G009", fields)
     assert any("subsystem" in e for e in errs)
+
+
+def test_subsystem_memory_item_omitted_subsystem_is_mismatch():
+    # review finding #1: omitting scope.subsystem under a named subsystem path
+    # must be flagged (redundancy invariant, not just non-contradiction).
+    ps = derive_path_scope("subsystems/mm-reclaim/G009-x.md")
+    errs = check_scope_consistency(ps, "G009", {"scope": {"level": "subsystem"}})
+    assert any("requires scope.subsystem" in e for e in errs)
+
+
+def test_target_memory_item_omitted_target_slug_is_mismatch():
+    ps = derive_path_scope("targets/foo/facts/F009-x.md")
+    errs = check_scope_consistency(ps, "F009", {"scope": {"level": "function"}})
+    assert any("requires scope.target_slug" in e for e in errs)
+
+
+def test_global_bad_plan_omitted_subsystems_is_mismatch():
+    ps = derive_path_scope("global/bad_plans/B009-x.md")
+    errs = check_scope_consistency(ps, "B009", {"applies_to": {}})
+    assert any("['*']" in e for e in errs)
 
 
 def test_global_lesson_kind_mismatch_with_path():
@@ -197,6 +217,50 @@ def test_lint_unrecognized_path_is_flagged(tmp_path: Path):
     )
     errs = lint.lint_record_file(bad)
     assert any("unrecognized" in m or "dispatch" in m for _, m in errs)
+
+
+def test_lint_duplicate_id_across_files_is_flagged(tmp_path: Path):
+    # two records sharing a stable id must be rejected (ids never reused, §7).
+    common = (
+        "type: fact\ntitle: t\nscope: {{level: function, target_slug: {slug}}}\n"
+        "source: [{{kind: doc, ref: x}}]\nmaturity: L2\nstatus: active\n"
+        "created_at: 2026-01-01T00:00:00Z\n"
+    )
+    a = _write(tmp_path, "knowledge/targets/foo/facts/F001-a.md",
+               "---\nid: F001\n" + common.format(slug="foo") + "---\n\nbody\n")
+    b = _write(tmp_path, "knowledge/targets/bar/facts/F001-b.md",
+               "---\nid: F001\n" + common.format(slug="bar") + "---\n\nbody\n")
+    sink: dict[str, str] = {}
+    errs = lint.lint_record_file(a, id_sink=sink)
+    errs += lint.lint_record_file(b, id_sink=sink)
+    assert any("duplicate id" in m for _, m in errs)
+
+
+def test_lint_crlf_file_on_disk_is_clean(tmp_path: Path):
+    # CRLF on disk must lint fine (read_text normalizes newlines).
+    p = tmp_path / "knowledge/global/heuristics/H050-x.md"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    text = (
+        "---\nid: H050\nlesson: x\nkind: heuristic\napplies_when: y\n"
+        "do_or_dont: 'do: z'\ntags: [a]\nevidence: [{kind: doc, ref: r}]\n"
+        "confidence: tentative\nadded_on: 2026-01-01\nadded_by: me\nstatus: active\n---\n\nbody\n"
+    )
+    p.write_bytes(text.replace("\n", "\r\n").encode("utf-8"))
+    assert lint.lint_record_file(p) == []
+
+
+def test_lint_superseded_requires_superseded_by(tmp_path: Path):
+    # new allOf rule on memory_item: status=superseded => superseded_by required.
+    bad = _write(
+        tmp_path,
+        "knowledge/targets/foo/facts/F097-bad.md",
+        "---\nid: F097\ntype: fact\ntitle: t\n"
+        "scope: {level: function, target_slug: foo}\n"
+        "source: [{kind: doc, ref: x}]\nmaturity: L2\nstatus: superseded\n"
+        "created_at: 2026-01-01T00:00:00Z\n---\n\nbody\n",
+    )
+    errs = lint.lint_record_file(bad)
+    assert any("superseded_by" in m for _, m in errs)
 
 
 # ---- standalone runner -----------------------------------------------------

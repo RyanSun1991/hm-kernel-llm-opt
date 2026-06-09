@@ -1,6 +1,6 @@
 ---
 id: L001
-target_slug: mm-vmscan-shrink_node
+target_slug: mm-vmscan-c-shrink-node
 mechanism: hoist-invariant
 scope: "mm/vmscan.c :: shrink_node"
 status: landed
