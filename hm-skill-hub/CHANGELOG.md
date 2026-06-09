@@ -4,6 +4,36 @@ All notable changes to `hm-skill-hub`. Semver: MAJOR.MINOR.PATCH.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-06-09
+
+Phases 0.5–4 (schema convergence → read/write path → central curation → eval gate
+→ auto-optimization). Cut by `tools/release.py` (minor: four new skills).
+
+### Phase 4 — auto-optimization loop (design §11, plan P4-1..P4-5)
+
+- **P4-1 `nightly.py` + `.github/workflows/nightly.yml`** — the nightly closed
+  loop: Collect → Normalize → Cluster → Optimize → Validate → Promote → Broadcast,
+  composing the engine-A and engine-B tools. **Dry-run / half-automatic by
+  default** (§11 early-safety); `--apply` is the trusted path, parameterized on
+  the hub it is handed (never mutates a module-level constant).
+- **P4-2 `release.py`** — semver bump inference (major: removal/schema change;
+  minor: new/raised skill; patch: knowledge-only) + `registry.yaml` rewrite +
+  release notes.
+- **P4-3 `broadcast.py`** — regenerates the consumer `skill-memory.lock`
+  (in-repo + submodule forms); `--open-pr` is a stub (half-automatic).
+- **P4-4 `dashboard.py`** — `eval/scorecards/_dashboard.md` per-skill score trend
+  (semver-ordered, ▲/▼ deltas).
+- **P4-5 `auto_merge_gate.py` + `policies/auto_merge_policy.md`** — trust
+  threshold: auto-merge only after ≥ N eval improvements with 0 rollbacks;
+  half-automatic (human merge) until then.
+- **registry.yaml** cut to **0.2.0** reflecting the four real skills; consumer
+  lock pinned to 0.2.0.
+- **Policies are now English-only** (promotion / merge / deprecation /
+  auto_merge), per request.
+- **Tests**: `tools/tests/test_phase4.py` (14 cases) incl. the nightly dry-run
+  safety (mutates nothing) and an `--apply`-on-a-temp-hub round-trip. 78 hub-tool
+  tests total.
+
 ### Phase 3 — eval gate + SkillOpt (engine B, design §9 / §10.2 / §13)
 
 - **Skill under optimization**: `skills/core/instruction-count-first/` with a

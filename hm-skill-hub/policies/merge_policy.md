@@ -1,20 +1,20 @@
 # Merge Policy
 
-固化设计 §10。**两类资产，两台合并引擎**，不可混用。
+Encodes design §10. **Two asset classes, two merge engines** — never mix them.
 
-## 引擎 A — Knowledge（追加型）：集合并 + 去重 + 冲突消解
+## Engine A — Knowledge (append-type): set-merge + dedup + conflict resolution
 
-**绝不用 git 行级合并。** Curator-agent 在 PR 上跑：
+**Never use git line-level merge.** The Curator agent runs on the PR:
 
 ```
 for item in incoming:
-    dup = near_duplicate(item, hub_items)       # embedding 相似度 ≥ 0.92
+    dup = near_duplicate(item, hub_items)       # embedding similarity >= 0.92
     if dup:
-        merge_provenance(dup, item)              # 合并 source[]；confirmations += 1
+        merge_provenance(dup, item)              # merge source[]; confirmations += 1
         continue
-    conflict = contradiction(item, hub_items)    # 同 (target, mechanism) 断言相反
+    conflict = contradiction(item, hub_items)    # same (target, mechanism), opposite assertion
     if conflict:
-        if stronger_evidence(item):              # 证据/新近度加权（Zep 双时态）
+        if stronger_evidence(item):              # evidence/recency weighted (Zep double-time)
             conflict.status = "superseded"
             conflict.valid_until = now()
             item.supersedes = [conflict.id]
@@ -27,15 +27,17 @@ for item in incoming:
         add(item)
 ```
 
-**CRDT 纪律**：追加 + tombstone（`active / superseded / deprecated`），**永不删除**。
+**CRDT discipline**: append + tombstone (`active / superseded / deprecated`),
+**never delete**.
 
-## 引擎 B — Skills（编辑型）：SkillOpt 验证门 + GEPA Pareto
+## Engine B — Skills (edit-type): SkillOpt validation gate + GEPA Pareto
 
-**绝不用集合并。** 每个 skill 改动 = 一份 `skill_patch` manifest（有界 add/del/replace）：
+**Never use set-merge.** Each skill change = one `skill_patch` manifest (bounded
+add/del/replace):
 
 ```
 def merge_skill_edit(skill, edit):
-    if edit ∈ skill.bad_edits:        return REJECT("known-bad edit")
+    if edit in skill.bad_edits:       return REJECT("known-bad edit")
     edit = clip_to_budget(edit, textual_learning_rate)
     cand = apply(skill, edit)
     score = run_evals(cand, skill.eval_suite)
@@ -44,60 +46,69 @@ def merge_skill_edit(skill, edit):
         write_scorecard(skill, score)
     else:
         skill.bad_edits.append(edit)
-    pareto = update_pareto(pareto, cand, per_instance_scores)   # 互补候选→ candidates/
+    pareto = update_pareto(pareto, cand, per_instance_scores)   # complementary -> candidates/
 ```
 
-- **文本学习率** = 每次发布的有界编辑预算。
-- **Pareto 前沿** = 多人提编辑时保留「各自在某实例最优」的一组候选到 `skills/<name>/candidates/`，定期合并互补 lesson。
+- **Textual learning rate** = the bounded edit budget per release.
+- **Pareto frontier** = when several members propose edits, keep the set that is
+  "each best on some instance" in `skills/<name>/candidates/`, and periodically
+  merge complementary lessons.
 
-## 双评审
+## Dual review
 
-每个 PR 需：
-- **1 名领域 reviewer**（结论对不对、机制合理性）；
-- **1 名流程 reviewer**（schema 合规、stable ID 唯一性、双时态字段完整、未被去重源命中）。
+Every PR requires:
+- **1 domain reviewer** (is the conclusion correct? is the mechanism sound?);
+- **1 process reviewer** (schema compliance, stable-id uniqueness, complete
+  double-time fields, not a hit against a deduped source).
 
-`skills/core/` 改动 = **2 名 owner** 必须签字。
+A `skills/core/` change requires **2 owners** to sign off.
 
-## 无豁免
+## No exemption
 
-`metrics.pass_rate` 不增、`regression_rate` 增加 → 一律拒。**唯一破例路径**：降级为 L1 候选 + owner 签字 + 下个评测周期复核。**不允许 "merge despite eval"**。
+`metrics.pass_rate` not increasing, or `regression_rate` increasing → always
+reject. **The only exception path**: downgrade to an L1 candidate + owner
+sign-off + re-review next eval cycle. **"Merge despite eval" is not allowed.**
 
-## 脱敏（贯穿所有合并）
+## Redaction (across every merge)
 
-`tools/redact.py` 命中以下即拒：
+`tools/redact.py` rejects on a hit for any of:
 
-| pattern | 例 |
+| pattern | example |
 |---|---|
 | `aws-akid` | `AKIA...` |
 | `ssh-priv` | `-----BEGIN ... PRIVATE KEY-----` |
-| `generic-hex-key` | 长度 ≥ 40 的 hex 串 |
+| `generic-hex-key` | hex string of length ≥ 40 |
 | `device-serial` | `serial=...` / `imei=...` |
 | `dev-serial-path` | `/dev/ttyUSB<N>` / `/dev/serial/by-id/<…>` |
 | `github-pat` | `ghp_...` |
 | `slack-token` | `xox?-...` |
 
-人工脱敏后用 `[REDACTED]` 占位即可重提。
+After manual redaction, replace with a `[REDACTED]` placeholder to resubmit.
 
-## 实际命令（引擎 A 中央批量，Phase 2）
+## Actual commands (engine A central batch, Phase 2)
 
-七路关系分类、双时态消解、subsumption 建链都已工具化（`tools/`，仅 stdlib + pyyaml +
-jsonschema，离线确定性，拆仓后 CI 直接跑）：
+The seven-way relation classification, double-time resolution, and subsumption
+link-building are all tooled (`tools/`, stdlib + pyyaml + jsonschema only,
+offline-deterministic, runnable in CI straight after the subtree split):
 
 ```bash
-# 1) 一键 dry-run：对一批候选跑 subsumption→dedup→conflict→promotion，出 merge plan
+# 1) one-shot dry-run: run subsumption -> dedup -> conflict -> promotion on a batch, emit a merge plan
 python tools/central_curate.py staging/<batch>.jsonl --report=report.md
 
-# 2) 单独跑各judgment（CI 门 / 排错）
-python tools/dedup.py staging/<batch>.jsonl --check    # merge/new/conflict；conflict→exit 1
-python tools/subsumption.py                            # 列泛化包含链（general subsumes specific）
+# 2) run each judgment on its own (CI gate / debugging)
+python tools/dedup.py staging/<batch>.jsonl --check    # merge/new/conflict; conflict -> exit 1
+python tools/subsumption.py                            # list generalization links (general subsumes specific)
 
-# 3) 冲突消解：incoming 更强 → 旧记 superseded + valid_until（双时态，不删）
+# 3) conflict resolution: stronger incoming -> old record superseded + valid_until (double-time, no delete)
 python tools/conflict_resolve.py <winner_path.md> <loser_path.md>
 ```
 
-`central_curate.py` 是 `merge_curator.md`（Curator-agent 提示词）背后的确定性引擎：
-agent 产出的 merge plan 必须与它一致，CI 用它做 dry-run。
+`central_curate.py` is the deterministic engine behind `merge_curator.md` (the
+Curator agent prompt): the agent's merge plan must agree with it, and CI uses it
+as a dry-run.
 
-**铁律重申**：除「contradiction 且新证据更强」走 `superseded` 外，任何分支都**不物理删除**；
-temporal / conditional / selector / evidence / subsumption 一律保留双方。subsumption 把具体
-实例挂为泛化记录的 `source`，**绝不去重吞掉**。
+**Iron rule restated**: except "contradiction with stronger new evidence" (which
+goes `superseded`), no branch ever physically deletes; temporal / conditional /
+selector / evidence / subsumption all keep both records. Subsumption attaches the
+specific instance as a `source` of the generalizing record — **never deduped and
+absorbed**.

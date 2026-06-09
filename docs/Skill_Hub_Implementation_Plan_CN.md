@@ -135,6 +135,8 @@ Phase 4 自动优化 10w+   ┃
 
 **目标**：闭环自动迭代日常运行；每周小版本 / 每月稳定版。
 
+> **状态：Phase 4 核心 PoC ✅ 已落地（本会话）。** `nightly.py`+`nightly.yml`(P4-1，Collect→Normalize→Cluster→Optimize→Validate→Promote→Broadcast，默认 dry-run 半自动，--apply 按传入 hub_root 参数化) · `release.py`(P4-2，semver 推断 major/minor/patch + registry 重写 + release notes) · `broadcast.py`(P4-3，重生成 `skill-memory.lock` in-repo/submodule + --open-pr stub) · `dashboard.py`(P4-4，`eval/scorecards/_dashboard.md` 每技能趋势) · `auto_merge_gate.py`+`policies/auto_merge_policy.md`(P4-5，信任阈值 ≥N 次提升+0 回滚才自动 merge)。**registry 已 cut 到 0.2.0** 反映 4 个真实 skill，消费端 lock pin 到 0.2.0。**测试** `tools/tests/test_phase4.py` 14 例（含 nightly dry-run 零副作用 + --apply temp-hub 往返），hub 工具共 **78 测试**绿。**policies 全部改为英文**（用户要求）。**长杆/后续**：真机 A/B 指令数（P3-3）、真实 GitHub PR 自动化（broadcast/promotion --open-pr 实接）、eval 语料扩到 ≥20（P3-1）、subsumption 真实 LLM 蕴含判定。
+
 | ID | 任务 | 交付物 | AC |
 |---|---|---|---|
 | P4-1 | 定时优化作业 | `.github/workflows/nightly.yml`（hub 内）| nightly 跑 Collect→Normalize→Cluster→Optimize→Validate→Promote→Broadcast |
