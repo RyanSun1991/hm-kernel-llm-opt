@@ -59,6 +59,20 @@ def test_apply_never_deletes_for_no_delete_kinds():
         assert res.deleted == []
 
 
+def test_apply_never_deletes_for_any_relation_kind():
+    # CRDT invariant across EVERY relation (incl. contradiction/duplicate/
+    # subsumption/novel), both evidence directions — not just NO_DELETE_KINDS.
+    from hmopt.memory.local_curator import Relation
+
+    nb = _it("N", target_slug="t", mechanism="m", applies_when="c", delta_pct=-0.5)
+    inc = _it("I", target_slug="t", mechanism="m", applies_when="c", delta_pct=-0.4)
+    for kind in ("duplicate", "contradiction", "temporal", "conditional",
+                 "subsumption", "selector", "evidence", "novel"):
+        for stronger in (True, False):
+            res = apply_relation(Relation(kind=kind, target_id="N", stronger=stronger), inc, nb)
+            assert res.deleted == [], f"{kind} (stronger={stronger}) produced a delete"
+
+
 def test_conditional_coexists_without_superseding():
     inc = _it("I", target_slug="t", mechanism="m", applies_when="trip > 100", delta_pct=-0.4)
     nb = _it("N", target_slug="t", mechanism="m", applies_when="trip < 10", delta_pct=0.1)

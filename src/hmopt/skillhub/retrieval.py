@@ -7,9 +7,10 @@ Implements the read-path stack literally:
     3) weight by the record's promotion `score` (§9 feeds ranking)
     4) return top-k
 
-BM25 carries symbol-name queries (`shrink_node`) where pure vectors are weak;
-the vector arm carries paraphrase / free-form queries. The `mode` knob exposes
-bm25-only / vector-only / hybrid for the symbol-name ablation (plan P1-10 ④).
+BM25 carries symbol-name queries (`shrink_node`) where pure (bag-of-words)
+vectors dilute; the vector arm adds a fuzzy token-overlap signal — and, with a
+real embedder injected, paraphrase matching. The `mode` knob exposes bm25-only /
+vector-only / hybrid for the symbol-name ablation (plan P1-10 ④).
 """
 from __future__ import annotations
 

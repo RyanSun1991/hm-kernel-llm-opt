@@ -1,10 +1,12 @@
 """Embedders for skill-hub retrieval.
 
-The default `HashingEmbedder` is offline, deterministic, and *semantic-ish*: it
-uses the hashing trick (each token hashed into one of D buckets, tf-weighted,
-L2-normalized) so two texts that share tokens get a non-zero cosine. That makes
-the read path fully testable without a live embedding gateway, while real
-production runs can inject an OpenAI-compatible embedder via `ClientEmbedder`.
+The default `HashingEmbedder` is offline and deterministic. It is **fuzzy
+lexical, not semantic**: the hashing trick (each token hashed into one of D
+buckets, tf-weighted, L2-normalized) gives a non-zero cosine only when texts
+share *tokens* — a true paraphrase with zero token overlap scores 0.0. That is
+enough to make the read path fully testable without a live gateway and to add a
+soft token-overlap signal alongside BM25; real semantic paraphrase matching
+needs a real model, injected via `ClientEmbedder`.
 
 Design §12.3: index vectors are a *derived cache* of the markdown source; the
 embedder is swappable without touching the records.

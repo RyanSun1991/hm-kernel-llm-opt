@@ -22,6 +22,7 @@ class SedimentResult:
     run_id: str
     candidates: list[dict[str, Any]] = field(default_factory=list)
     invalid: list[tuple[dict[str, Any], list[str]]] = field(default_factory=list)
+    parse_errors: list[str] = field(default_factory=list)
     out_path: str | None = None
 
     @property
@@ -69,7 +70,7 @@ def sediment_run(
     arts = read_run(run_dir, run_id=run_id)
     raw = extract_candidates(arts, contributor=contributor, llm=llm, no_llm=no_llm)
 
-    result = SedimentResult(run_id=arts.run_id)
+    result = SedimentResult(run_id=arts.run_id, parse_errors=list(arts.parse_errors))
     hub = hub_root if hub_root is not None else run_dir
     for cand in raw:
         errs = validate_candidate(cand, hub)

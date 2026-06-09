@@ -258,7 +258,10 @@ class Resolver:
 
         kept = list(hits)
         used = sum(self._est_tokens(h.record.search_text()) for h in kept)
-        while kept and used > token_cap:
+        # Drop weakest first, but never below one record: a stage should still get
+        # the single strongest hit even if it alone exceeds the cap (truncate-at-
+        # consume-time rather than return nothing).
+        while len(kept) > 1 and used > token_cap:
             victim = min(kept, key=weakness)
             kept.remove(victim)
             used -= self._est_tokens(victim.record.search_text())

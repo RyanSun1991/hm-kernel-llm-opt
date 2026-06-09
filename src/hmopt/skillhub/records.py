@@ -146,11 +146,13 @@ def infer_kind(fields: dict[str, Any], path: Path) -> str:
         return "global_lesson"
     if fields.get("type") in {"fact", "rule", "pattern", "anti_pattern", "playbook_step"}:
         return "memory_item"
-    # default: dispatch by id prefix
+    # default: dispatch by id prefix. Note `A` is ambiguous (anti_pattern in BOTH
+    # global_lesson and memory_item); a real global_lesson carries lesson+kind and
+    # is caught above, so an underspecified `A` here falls through to memory_item.
     rid = str(fields.get("id", ""))
     if rid[:1] == "B":
         return "bad_plan"
-    if rid[:1] in {"H", "A", "V"}:
+    if rid[:1] in {"H", "V"}:
         return "global_lesson"
     if rid[:1] == "L":
         return "idea"

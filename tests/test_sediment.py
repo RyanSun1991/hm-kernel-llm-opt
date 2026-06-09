@@ -169,6 +169,35 @@ def test_bundle_staging_collates(tmp_path: Path):
     assert n == 3 and out.exists()
 
 
+def test_sediment_run_never_raises_on_garbage_manifest(tmp_path: Path):
+    # MAJOR contract: sediment_run must not raise (P1-3 close-out hooks rely on it).
+    run = tmp_path / "r_bad"
+    run.mkdir()
+    (run / "sediment_input.json").write_text("{ this is not json", encoding="utf-8")
+    res = sediment_run(run, out_dir=tmp_path / "s", hub_root=REPO, no_llm=True)
+    assert res.n_valid == 0
+    assert res.parse_errors and "sediment_input.json" in res.parse_errors[0]
+    assert Path(res.out_path).exists()  # still writes an (empty) staging file
+
+
+def test_sediment_run_skips_malformed_entries_keeps_good(tmp_path: Path):
+    run = tmp_path / "r_mixed"
+    run.mkdir()
+    manifest = {
+        "bench": [
+            {"mechanism": "x"},  # missing required fields -> skipped
+            {"mechanism": "hoist-invariant", "target": "mm/vmscan.c::shrink_node",
+             "delta_pct": -0.8, "compare_level": "function",
+             "validation_path": "b.md", "verdict": "landed"},  # good
+        ],
+        "ledger": [{"unexpected": "key", "mechanism": "m"}],  # bad -> skipped
+    }
+    (run / "sediment_input.json").write_text(json.dumps(manifest), encoding="utf-8")
+    res = sediment_run(run, out_dir=tmp_path / "s", hub_root=REPO, no_llm=True)
+    assert res.n_valid == 1  # only the one good bench fact
+    assert len(res.parse_errors) == 2  # the bad bench + bad ledger entry
+
+
 def test_markdown_bench_fallback(tmp_path: Path):
     # no manifest -> best-effort markdown bench scan
     run = tmp_path / "r_md"

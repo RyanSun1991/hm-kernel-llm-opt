@@ -117,6 +117,55 @@ def test_local_overlay_adds_non_promoted_and_hub_wins_on_same_id(tmp_path: Path)
     assert by_id["F001"].record.origin == "hub"  # hub wins on the shared stable id
 
 
+def _write_skill(hub: Path, kind: str, name: str, *, subsystems=None, requires=None) -> None:
+    d = hub / "skills" / kind / name
+    d.mkdir(parents=True, exist_ok=True)
+    lines = ["---", f"name: {name}", f"kind: {kind}", "version: 0.1.0", "maturity: L0",
+             'owners: ["@m"]', "status: experimental"]
+    if subsystems is not None:
+        lines += ["applies_to:", f"  subsystems: [{', '.join(subsystems)}]"]
+    if requires is not None:
+        lines.append(f"requires: [{', '.join(requires)}]")
+    lines += ["---", "", f"# {name}", "", "## When to use", "x", "## How to use", "y", ""]
+    (d / "SKILL.md").write_text("\n".join(lines), encoding="utf-8")
+
+
+def test_requires_cycle_terminates(tmp_path: Path):
+    # a requires-cycle (core/a <-> core/b) must not hang the closure resolver
+    hub = tmp_path / "hm-skill-hub"
+    (hub / "knowledge").mkdir(parents=True)
+    (hub / "_registry").mkdir(parents=True)
+    (hub / "_registry" / "subsystem_selectors.yaml").write_text(
+        "subsystems:\n  - name: s\n    path_globs: ['foo.c']\n    symbol_selectors: []\n",
+        encoding="utf-8")
+    _write_skill(hub, "domain", "d", subsystems=["s"], requires=["core/a"])
+    _write_skill(hub, "core", "a", requires=["core/b"])
+    _write_skill(hub, "core", "b", requires=["core/a"])  # cycle
+    r = Resolver(tmp_path, hub_root=hub)
+    ctx = r.resolve("foo.c", stage="research")  # must return, not hang
+    refs = {s.ref for s in ctx.skills}
+    assert {"domain/d", "core/a", "core/b"} <= refs
+
+
+def test_trim_keeps_strongest_when_single_record_oversized():
+    from hmopt.skillhub.records import Record
+    from hmopt.skillhub.retrieval import RetrievalHit
+
+    r = Resolver(REPO)
+    big = Record(id="BIG", kind="memory_item", path="x",
+                 fields={"title": "big", "maturity": "L2", "score": 1.0}, body="word " * 5000)
+    kept, used = r._trim_to_budget([RetrievalHit(record=big, score=1.0)], top_k=3, token_cap=10)
+    assert len(kept) == 1 and kept[0].record.id == "BIG"  # never returns empty
+
+
+def test_find_hub_root_none_and_resolver_errors_clearly(tmp_path: Path):
+    import pytest
+
+    assert find_hub_root(tmp_path) is None
+    with pytest.raises(FileNotFoundError):
+        Resolver(tmp_path)
+
+
 def test_token_trim_drops_weakest(tmp_path: Path):
     # build a local memory with many large records; ensure trim keeps under cap
     local = tmp_path / "memory"
