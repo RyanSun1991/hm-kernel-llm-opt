@@ -4,6 +4,35 @@ All notable changes to `hm-skill-hub`. Semver: MAJOR.MINOR.PATCH.
 
 ## [Unreleased]
 
+### Phase 3 — eval gate + SkillOpt (engine B, design §9 / §10.2 / §13)
+
+- **Skill under optimization**: `skills/core/instruction-count-first/` with a
+  deliberately-incomplete `best_skill.md` seed (pass_rate 0.67) so the
+  optimizer→gate→accept loop is reproducible.
+- **P3-1 task suite**: `eval/task_suites/core_optimization_suite/` — 9 cases
+  across mm-reclaim / workqueue / hyperhold mapping a hot pattern to its
+  expected mechanism + guidance terms (+ a bad_plan avoid_term).
+- **P3-2/P3-3 `run_evals.py`** — eval executor + **pluggable** `ProxyScorer`
+  (static keyword/mechanism-coverage proxy standing in for real-machine A/B
+  instruction-count delta — the long pole, §15); writes `scorecards/<skill>__<semver>.json`.
+- **P3-5/P3-7 `skill_optimizer.py`** — bounded-edit optimizer: proposes one
+  guidance edit for the heaviest failing mechanism group, accepts only a
+  **strictly-better, no-regression** candidate (monotone gate), buffers rejects
+  in `bad_edits.jsonl` and skips them next round (textual learning rate + slow
+  update). Demo: 0.67 → 1.00 via one `hoist-invariant` edit, zero regression.
+- **P3-6 `pareto.py`** — GEPA Pareto frontier (keeps complementary candidates,
+  drops dominated) so multi-member edits don't collapse to one local optimum.
+- **P3-4 `eval_gate.py` + CI** — re-evaluates each skill's `best_skill.md` vs its
+  committed scorecard; any `pass_rate` drop / instance regression rejects the
+  change. Wired into hub `ci.yml` + root `skill-hub-ci.yml`.
+- **Tests**: `tools/tests/test_skillopt.py` (11 cases) — proxy scoring, strict-
+  better/regression logic, Pareto dominance, the optimize loop (improves under
+  the gate, no regression), bad_edits skip, and the eval-gate (passes on seed,
+  flags a regression). 59 hub-tool tests total.
+- **Honesty**: the proxy is keyword/coverage-based, NOT a kernel-speedup claim;
+  it exercises the SkillOpt *control flow* end-to-end and the scorer is swappable
+  for a static instr-count estimator or a real-machine harness (P3-3 follow-up).
+
 ### Phase 2 — central curation + merge (engine A second level, design §10.1.b / §11.5)
 
 - **Curator toolchain** (`tools/`, stdlib + pyyaml + jsonschema, offline-deterministic,

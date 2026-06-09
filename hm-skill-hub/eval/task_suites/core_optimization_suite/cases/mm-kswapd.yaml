@@ -1,0 +1,7 @@
+id: mm-kswapd
+target: "mm/vmscan.c::kswapd"
+subsystem: mm-reclaim
+expected_mechanism: hoist-invariant
+expected_terms: [hoist, loop-invariant, re-measure]
+avoid_terms: []
+weight: 1.0

@@ -113,6 +113,8 @@ Phase 4 自动优化 10w+   ┃
 
 **目标**：技能修改安全反喂（引擎 B），SkillOpt 半自动闭环。
 
+> **状态：Phase 3 核心 PoC ✅ 已落地（本会话）。** 被优化技能 `skills/core/instruction-count-first/`（种子 `best_skill.md` 故意不完整，pass_rate 0.67）。P3-1 套件 `eval/task_suites/core_optimization_suite/` 9 case（mm/wq/hyperhold，机制+guidance 词+avoid_term）。`run_evals.py`(P3-2/P3-3，**可插拔 ProxyScorer** 代理真机指令数) · `skill_optimizer.py`(P3-5/P3-7，有界编辑+严格变好门+bad_edits 缓冲跳过) · `pareto.py`(P3-6，互补候选不塌缩) · `eval_gate.py`+CI(P3-4，pass_rate 降即拒)。**DoD 闭环演示**：优化器一条 `hoist-invariant` 有界编辑使 0.67→1.00、零回归、过 gate 接受、出 scorecard；regressing 编辑入 bad_edits。**测试** `tools/tests/test_skillopt.py` 11 例，hub 工具共 **59 测试**绿。**诚实标注**：proxy 为关键词/机制覆盖代理（非真机加速证明），交付的是 SkillOpt 控制流脚手架；真机指令数估计器/真机 A/B（P3-3 后续）为长杆。
+
 | ID | 任务 | 交付物 | AC |
 |---|---|---|---|
 | P3-1 | 评测样本采集 | `eval/task_suites/<suite>/cases/*.yaml` | 每条 case：input target + 期望优化方向 + grading rubric；初始 ≥ 20 case 覆盖 mm/wq/hyperhold |

@@ -1,0 +1,7 @@
+id: wq-pool
+target: "kernel/workqueue.c::worker_pool"
+subsystem: workqueue-threadpool
+expected_mechanism: lock-split
+expected_terms: [lock-split, per-shard, contention]
+avoid_terms: []
+weight: 1.0

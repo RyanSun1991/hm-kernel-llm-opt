@@ -44,7 +44,9 @@ jobs:
             echo "dedup $f"; python tools/dedup.py "$f" --check
           done
           echo "dedup gate ok"
-      - name: hub toolchain tests (lint/scope/curator/dedup/subsumption/promotion)
+      - name: hub eval-gate (engine B) — reject skill regressions
+        run: cd hm-skill-hub && python tools/eval_gate.py
+      - name: hub toolchain tests (lint/scope/curator/dedup/subsumption/promotion/skillopt)
         run: cd hm-skill-hub && python -m pytest tools/tests/ -q
 
   consumer:

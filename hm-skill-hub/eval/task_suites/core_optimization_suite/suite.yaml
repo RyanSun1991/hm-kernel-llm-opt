@@ -1,0 +1,8 @@
+name: core_optimization_suite
+description: >
+  Proxy eval suite for the instruction-count-first core skill. Each case maps a
+  hot pattern (target) to the mechanism that should lower instruction count, plus
+  the guidance terms an ideal skill would surface. The default scorer is a static
+  keyword/mechanism-coverage PROXY standing in for real-machine A/B instruction
+  delta (design §15: real-machine ground truth is the long pole; proxy first).
+pass_threshold: 0.6

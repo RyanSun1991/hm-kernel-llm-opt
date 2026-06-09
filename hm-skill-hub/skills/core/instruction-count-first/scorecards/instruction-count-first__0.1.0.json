@@ -1,0 +1,30 @@
+{
+  "skill": "instruction-count-first",
+  "version": "0.1.0",
+  "suite": "core_optimization_suite",
+  "n": 9,
+  "pass_rate": 0.6667,
+  "mean_score": 0.7333,
+  "per_instance": {
+    "hh-flush": 1.0,
+    "hh-submit": 1.0,
+    "hh-write": 1.0,
+    "mm-kswapd": 0.2,
+    "mm-rmqueue": 0.2,
+    "mm-shrink-node": 0.2,
+    "wq-pool": 1.0,
+    "wq-pwq": 1.0,
+    "wq-worker": 1.0
+  },
+  "passed": {
+    "hh-flush": true,
+    "hh-submit": true,
+    "hh-write": true,
+    "mm-kswapd": false,
+    "mm-rmqueue": false,
+    "mm-shrink-node": false,
+    "wq-pool": true,
+    "wq-pwq": true,
+    "wq-worker": true
+  }
+}
