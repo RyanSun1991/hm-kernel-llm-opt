@@ -162,16 +162,19 @@ def _as_list(v) -> list:
     return list(v) if isinstance(v, list) else [v]
 
 
+def instance_key(record: HubRecord) -> tuple[str, str]:
+    """The §11.5 distinctness key for a subsumed instance: (target_slug,
+    contributor). Records with NEITHER signal collapse to the empty key so two
+    anonymous instances cannot fabricate a >=2-instance promotion. Shared by both
+    promotion paths (the freshly-detected links here and the explicit `subsumes[]`
+    path in promotion_detector) so they cannot disagree on the same hub state."""
+    return (record.target_slug or "", record.contributor or "")
+
+
 def distinct_instances(general: HubRecord, links: list[SubsumptionLink]) -> int:
     """Count distinct subsumed instances by (target_slug, contributor) — the
-    §11.5 distinctness criterion ("different target / different contributor").
-    Records with neither signal collapse to a single key (conservative: cannot
-    fabricate a promotion from anonymous instances)."""
-    keys = set()
-    for link in links:
-        if link.general_id == general.id:
-            sp = link.specific
-            keys.add((sp.target_slug or "", sp.contributor or ""))
+    §11.5 distinctness criterion ("different target / different contributor")."""
+    keys = {instance_key(link.specific) for link in links if link.general_id == general.id}
     return len(keys)
 
 

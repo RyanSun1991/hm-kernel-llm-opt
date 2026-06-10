@@ -269,9 +269,11 @@ def main(argv: list[str]) -> int:
         print(f"  {'PASS' if card.passed[cid] else 'fail'}  {cid:<16} {s:.2f}")
     print(f"scorecard -> {out_path}")
     if baseline is not None:
-        bcard = Scorecard(skill=baseline["skill"], version=baseline["version"],
-                          suite=baseline["suite"], per_instance=baseline["per_instance"],
-                          pass_rate=baseline["pass_rate"], mean_score=baseline["mean_score"])
+        # Use from_json so a baseline in the schema shape (metrics{}/per_case[])
+        # — which is exactly what to_json writes and every committed scorecard
+        # uses — is parsed, not just the legacy flat-key shape. The old direct
+        # constructor raised KeyError('per_instance') on the tool's own output.
+        bcard = Scorecard.from_json(baseline)
         print(f"regression_rate vs baseline: {card.regression_rate_vs(bcard):.2f}; "
               f"strictly_better={card.strictly_better_than(bcard)}")
     return 0

@@ -38,9 +38,46 @@ from hub_records import load_hub_knowledge  # type: ignore
 HUB = Path(__file__).resolve().parent.parent
 
 
+def validate_candidates(candidates: list[dict]) -> tuple[list[dict], list[str]]:
+    """Schema-validate staged candidates against the hub JSON-Schemas.
+
+    `_collect` reads `staging/*.jsonl` as raw dicts that previously flowed
+    straight into the curator with no schema check — the "Normalize" step only
+    linted `knowledge/`, never the inbound candidates. A malformed candidate
+    (wrong id pattern, missing required fields) could enter central curation and
+    be "added". We validate here and drop invalid candidates before clustering.
+    """
+    import jsonschema  # provided via lint's dependency
+
+    valid: list[dict] = []
+    invalid: list[str] = []
+    for c in candidates:
+        schema_name = c.get("schema")
+        record = c.get("record")
+        if not schema_name or not isinstance(record, dict):
+            invalid.append(f"{c.get('schema', '?')}: missing 'schema' or 'record'")
+            continue
+        try:
+            schema = lint.load_schema(str(schema_name))
+        except OSError:
+            invalid.append(f"{schema_name}: unknown schema")
+            continue
+        errs = sorted(
+            jsonschema.Draft7Validator(schema).iter_errors(record),
+            key=lambda e: list(e.absolute_path),
+        )
+        if errs:
+            rid = record.get("id", "?")
+            invalid.append(f"{schema_name}/{rid}: {errs[0].message}")
+        else:
+            valid.append(c)
+    return valid, invalid
+
+
 @dataclass
 class NightlyReport:
     collected: int = 0
+    schema_invalid: list[str] = field(default_factory=list)
     normalize_ok: bool = False
     cluster: dict = field(default_factory=dict)
     optimize: list = field(default_factory=list)
@@ -90,12 +127,15 @@ def run_nightly(hub_root: str | Path = HUB, *, apply: bool = False,
     candidates = _collect(hub_root)
     rep.collected = len(candidates)
 
-    # (2) Normalize — schema + secrets
+    # (2) Normalize — schema + secrets. Validate BOTH the existing knowledge
+    # (lint) AND the inbound staged candidates (which lint does not cover), so a
+    # malformed candidate cannot slip into curation.
+    candidates, rep.schema_invalid = validate_candidates(candidates)
     lint_ok = lint.main([str(hub_root)]) == 0
     redact_ok = redact.main(["--check", str(hub_root)]) == 0
-    rep.normalize_ok = lint_ok and redact_ok
+    rep.normalize_ok = lint_ok and redact_ok and not rep.schema_invalid
 
-    # (3) Cluster — engine A
+    # (3) Cluster — engine A (only schema-valid candidates)
     cr = curate_batch(candidates, load_hub_knowledge(hub_root))
     rep.cluster = {"counts": cr.counts(), "promotion_signals": cr.promotion_signals,
                    "promotions": [c.proposed_skill for c in cr.promotions]}

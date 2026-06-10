@@ -131,17 +131,31 @@ def _read_candidates(path: Path) -> list[dict]:
 
 
 def main(argv: list[str]) -> int:
-    args = [a for a in argv if not a.startswith("--")]
-    if not args:
+    # Accept both --report=out.md and --report out.md (the agent prompt and the
+    # usage string both show the space form, which was previously dropped).
+    report_path: str | None = None
+    positional: list[str] = []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a.startswith("--report="):
+            report_path = a.split("=", 1)[1]
+        elif a == "--report" and i + 1 < len(argv):
+            report_path = argv[i + 1]
+            i += 2
+            continue
+        elif not a.startswith("--"):
+            positional.append(a)
+        i += 1
+    if not positional:
         sys.stderr.write("usage: central_curate.py <incoming.jsonl> [--report out.md]\n")
         return 2
-    candidates = _read_candidates(Path(args[0]))
+    candidates = _read_candidates(Path(positional[0]))
     report = curate_batch(candidates, load_hub_knowledge())
     md = render_report(report)
     print(md)
-    for a in argv:
-        if a.startswith("--report="):
-            Path(a.split("=", 1)[1]).write_text(md, encoding="utf-8")
+    if report_path:
+        Path(report_path).write_text(md, encoding="utf-8")
     return 0
 
 
