@@ -166,6 +166,29 @@ def test_find_hub_root_none_and_resolver_errors_clearly(tmp_path: Path):
         Resolver(tmp_path)
 
 
+def test_local_l1_does_not_outrank_curated_hub_l2(tmp_path: Path):
+    # review F2: a local L1 note with comparable raw relevance must NOT outrank
+    # curated hub L2 knowledge (single fused corpus + maturity weight, not two
+    # rank-relative corpora where each rank-1 ties).
+    local = tmp_path / "memory"
+    slug = _slugify(TARGET)
+    d = local / "targets" / slug / "facts"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "F500-local.md").write_text(
+        "---\nid: F500\ntype: fact\ntitle: local hoist sc priority note\n"
+        f"scope: {{level: function, target_slug: {slug}}}\n"
+        "source: [{kind: run_id, ref: r}]\nmaturity: L1\nstatus: active\n"
+        "created_at: 2026-06-01T00:00:00Z\n---\n\n"
+        "in shrink_node hoist the sc priority read out of the reclaim loop\n",
+        encoding="utf-8")
+    r = Resolver(REPO, local_memory_root=local)
+    ctx = r.resolve(TARGET, stage="research")
+    by_id = {h.record.id: h for h in ctx.knowledge}
+    assert "F001" in by_id and "F500" in by_id            # both surface
+    assert by_id["F001"].score > by_id["F500"].score      # hub L2 outranks local L1
+    assert by_id["F001"].record.origin == "hub"
+
+
 def test_token_trim_drops_weakest(tmp_path: Path):
     # build a local memory with many large records; ensure trim keeps under cap
     local = tmp_path / "memory"

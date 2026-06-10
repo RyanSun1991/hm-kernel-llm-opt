@@ -23,8 +23,19 @@ except ImportError:  # pragma: no cover
     raise ImportError("PyYAML required for skillhub.resolver") from None
 
 from .embeddings import Embedder
-from .records import load_records
+from .records import Record, load_records, maturity_at_least
 from .retrieval import HybridRetriever, RetrievalHit, ScopeFilter
+
+
+def _maturity_weight(r: Record) -> float:
+    """Calibration weight applied at merge time (review F2). Hub records are
+    curated -> full weight; local in-flight records are down-weighted by maturity
+    so a trivial local L1 note cannot outrank curated hub knowledge of comparable
+    raw relevance."""
+    if r.origin == "hub":
+        return 1.0
+    rank = {"L0": 0, "L1": 1, "L2": 2, "L3": 3}.get(r.maturity, 0)
+    return 0.4 + 0.2 * rank  # local L0=0.4, L1=0.6, L2=0.8, L3=1.0
 
 
 def _slugify(value: str) -> str:
@@ -181,12 +192,13 @@ class Resolver:
         self.skills = load_skills(self.hub_root)
         self.selectors = load_selectors(self.hub_root)
         self.hub_records = load_records(self.hub_root / "knowledge", origin="hub")
-        self.hub_retriever = HybridRetriever(self.hub_records, embedder=embedder)
-        self.local_retriever: HybridRetriever | None = None
+        self.local_records: list[Record] = []
         if local_memory_root and Path(local_memory_root).exists():
-            local_records = load_records(local_memory_root, origin="local")
-            if local_records:
-                self.local_retriever = HybridRetriever(local_records, embedder=embedder)
+            self.local_records = load_records(local_memory_root, origin="local")
+        # ONE retriever over hub + local so RRF ranks both on the SAME scale —
+        # otherwise each corpus's rank-1 ties (a trivial local L1 == curated hub L2,
+        # review F2). Per-origin maturity floor + weight are applied at merge time.
+        self.retriever = HybridRetriever(self.hub_records + self.local_records, embedder=embedder)
 
     # --- skills -------------------------------------------------------------
 
@@ -217,30 +229,29 @@ class Resolver:
 
     def _retrieve(self, queries: dict[str, str], scope: ScopeFilter, top_k: int,
                   mechanism: str | None) -> list[RetrievalHit]:
-        merged: dict[str, RetrievalHit] = {}
+        # Per-origin maturity floor: hub knowledge is gated at L2 (curated only);
+        # local in-flight memory is allowed at any maturity (the member's not-yet-
+        # promoted ideas). The single fused pass uses maturity_floor=None.
+        def keep(r: Record) -> bool:
+            return maturity_at_least(r.maturity, "L2") if r.origin == "hub" else True
 
-        def absorb(hits: list[RetrievalHit], prefer: bool) -> None:
-            for h in hits:
-                cur = merged.get(h.record.id)
-                if cur is None:
-                    merged[h.record.id] = h
-                elif prefer and h.record.origin == "hub" and cur.record.origin == "local":
-                    merged[h.record.id] = h  # hub precedence on same stable id
-
-        ta = self.hub_retriever.retrieve(queries["target_anchored"], k=top_k, scope=scope,
-                                         maturity_floor="L2", mechanism=mechanism)
-        absorb(ta, prefer=True)
+        raw = self.retriever.retrieve(queries["target_anchored"], k=top_k * 3, scope=scope,
+                                      maturity_floor=None, mechanism=mechanism)
         if "mechanism_anchored" in queries:
-            ma = self.hub_retriever.retrieve(queries["mechanism_anchored"], k=top_k, scope=scope,
-                                             maturity_floor="L2")
-            absorb(ma, prefer=True)
-        if self.local_retriever is not None:
-            la = self.local_retriever.retrieve(queries["target_anchored"], k=top_k, scope=scope,
-                                               maturity_floor="L0")
-            absorb(la, prefer=False)  # local only fills ids hub didn't supply
+            raw = raw + self.retriever.retrieve(queries["mechanism_anchored"], k=top_k * 3,
+                                                scope=scope, maturity_floor=None)
 
-        hits = sorted(merged.values(), key=lambda h: h.score, reverse=True)
-        return hits
+        merged: dict[str, RetrievalHit] = {}
+        for h in raw:
+            r = h.record
+            if not keep(r):
+                continue
+            h.score *= _maturity_weight(r)  # maturity-calibrated (review F2)
+            cur = merged.get(r.id)
+            # hub precedence on a shared stable id, regardless of arrival order
+            if cur is None or (r.origin == "hub" and cur.record.origin == "local"):
+                merged[r.id] = h
+        return sorted(merged.values(), key=lambda h: h.score, reverse=True)
 
     @staticmethod
     def _est_tokens(text: str) -> int:

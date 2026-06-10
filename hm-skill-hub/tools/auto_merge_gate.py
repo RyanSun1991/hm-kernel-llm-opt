@@ -15,6 +15,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from run_evals import Scorecard  # type: ignore
+
 HUB = Path(__file__).resolve().parent.parent
 
 
@@ -40,10 +43,11 @@ def is_trusted(pass_rates: list[float], min_improvements: int = 3) -> tuple[bool
 
 
 def decide(scorecards: list[dict], min_improvements: int = 3) -> tuple[str, str]:
-    """Return ('auto'|'human', reason) for a skill's scorecard history."""
-    cards = sorted(scorecards, key=lambda c: _semver(c.get("version", "0.0.0")))
-    prs = [float(c.get("pass_rate", 0.0)) for c in cards]
-    trusted, reason = is_trusted(prs, min_improvements)
+    """Return ('auto'|'human', reason) for a skill's scorecard history. Accepts raw
+    scorecard dicts (schema-conformant or legacy) — normalized via from_json."""
+    parsed = [Scorecard.from_json(c) for c in scorecards]
+    parsed.sort(key=lambda c: _semver(c.version))
+    trusted, reason = is_trusted([c.pass_rate for c in parsed], min_improvements)
     return ("auto" if trusted else "human"), reason
 
 

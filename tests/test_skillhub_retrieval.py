@@ -156,6 +156,24 @@ def test_extract_entities():
     assert "shrink_node" in ents
 
 
+def test_relevance_floor_drops_zero_signal_records():
+    # review F5: a record with no lexical (bm25) match and only stopword-level
+    # cosine must NOT be mounted (context pollution §12.1 warns about).
+    recs = [
+        Record(id="REL", kind="memory_item", path="x",
+               fields={"title": "shrink_node hoist invariant", "maturity": "L2",
+                       "scope": {"level": "function", "target_slug": "t"}},
+               body="in shrink_node hoist the loop-invariant read out of the reclaim loop"),
+        Record(id="NOISE", kind="memory_item", path="x",
+               fields={"title": "workqueue flush batch coalescing latency", "maturity": "L2",
+                       "scope": {"level": "function", "target_slug": "t"}},
+               body="coalesce small writes into one batch round-trip on the hyperhold path"),
+    ]
+    r = HybridRetriever(recs)
+    ids = [h.record.id for h in r.retrieve("shrink_node hoist invariant", k=5)]
+    assert "REL" in ids and "NOISE" not in ids
+
+
 def test_score_weighting_breaks_ties():
     recs = [
         Record(id="S1", kind="memory_item", path="x",

@@ -153,6 +153,7 @@ class HybridRetriever:
         mechanism: str | None = None,
         mode: Mode = "hybrid",
         entity_bonus_weight: float = 0.1,
+        vec_floor: float = 0.15,
     ) -> list[RetrievalHit]:
         cand = self._candidates(scope, maturity_floor, status, mechanism)
         if not cand:
@@ -166,8 +167,14 @@ class HybridRetriever:
         vec = {i: cosine(q_vec, self._vecs[i]) for i in cand}
 
         pool = 4 * k
+        # Both arms apply a relevance floor: a record only enters a ranking if it
+        # has positive signal in that arm. Without the cosine floor, when there are
+        # fewer candidates than the pool, EVERY in-scope record (incl. zero-overlap
+        # ones) lands in vec_rank and gets RRF mass — the context-pollution failure
+        # §12.1 quotes mem0 about. A record below the floor in BOTH arms is dropped.
         bm_rank = [i for i in sorted(cand, key=lambda j: bm[j], reverse=True) if bm[i] > 0][:pool]
-        vec_rank = sorted(cand, key=lambda j: vec[j], reverse=True)[:pool]
+        vec_rank = [i for i in sorted(cand, key=lambda j: vec[j], reverse=True)
+                    if vec[i] > vec_floor][:pool]
 
         if mode == "bm25":
             fused = {i: bm[i] for i in cand}

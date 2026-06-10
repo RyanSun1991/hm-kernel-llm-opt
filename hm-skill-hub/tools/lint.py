@@ -137,6 +137,21 @@ def lint_skill_md(path: Path) -> list[tuple[str, str]]:
     return []
 
 
+def lint_scorecard(path: Path) -> list[tuple[str, str]]:
+    """Validate a scorecards/*.json against scorecard.schema.json (the schema is a
+    real contract — emitters must conform, review F8)."""
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        return [(str(path), f"invalid scorecard JSON: {e}")]
+    try:
+        jsonschema.validate(instance=doc, schema=load_schema("scorecard"))
+    except jsonschema.ValidationError as e:
+        loc = ".".join(str(p) for p in e.absolute_path) or "(root)"
+        return [(str(path), f"scorecard@{loc}: {e.message}")]
+    return []
+
+
 def _is_record_md(p: Path) -> bool:
     if p.name in SKIP_NAMES:
         return False
@@ -156,16 +171,25 @@ def discover(root: Path) -> tuple[list[Path], list[Path]]:
     return sorted(md_records), sorted(skills)
 
 
+def discover_scorecards(root: Path) -> list[Path]:
+    sk = root / "skills"
+    return sorted(sk.rglob("scorecards/*.json")) if sk.exists() else []
+
+
 def main(argv: list[str]) -> int:
     targets = [Path(a).resolve() for a in argv] or [HUB]
     all_errors: list[tuple[str, str]] = []
     id_sink: dict[str, str] = {}  # hub-wide stable-id uniqueness (never reused)
-    n_records, n_skills = 0, 0
+    n_records, n_skills, n_cards = 0, 0, 0
     for t in targets:
+        cards: list[Path] = []
         if t.is_dir():
             md, sk = discover(t)
+            cards = discover_scorecards(t)
         elif t.name == "SKILL.md":
             md, sk = [], [t]
+        elif t.suffix == ".json" and t.parent.name == "scorecards":
+            md, sk, cards = [], [], [t]
         elif t.suffix == ".md":
             md, sk = [t], []
         else:
@@ -176,14 +200,18 @@ def main(argv: list[str]) -> int:
         for p in sk:
             n_skills += 1
             all_errors.extend(lint_skill_md(p))
+        for p in cards:
+            n_cards += 1
+            all_errors.extend(lint_scorecard(p))
     if all_errors:
         for path, msg in all_errors:
             sys.stderr.write(f"{path}: {msg}\n")
         sys.stderr.write(
-            f"\n{len(all_errors)} error(s) across {n_records} record file(s), {n_skills} skill(s)\n"
+            f"\n{len(all_errors)} error(s) across {n_records} record file(s), "
+            f"{n_skills} skill(s), {n_cards} scorecard(s)\n"
         )
         return 1
-    print(f"OK — {n_records} record file(s), {n_skills} skill(s) validated.")
+    print(f"OK — {n_records} record file(s), {n_skills} skill(s), {n_cards} scorecard(s) validated.")
     return 0
 
 

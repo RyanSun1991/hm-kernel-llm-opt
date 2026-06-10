@@ -76,10 +76,7 @@ def _committed_card(skill_dir: Path) -> Scorecard | None:
     chosen = next((c for c in cards if c.name.endswith(f"__{version}.json")), None)
     if chosen is None:
         chosen = max(cards, key=_semver_key)
-    raw = json.loads(chosen.read_text(encoding="utf-8"))
-    return Scorecard(skill=raw["skill"], version=raw["version"], suite=raw["suite"],
-                     per_instance=raw.get("per_instance", {}),
-                     pass_rate=raw.get("pass_rate", 0.0), mean_score=raw.get("mean_score", 0.0))
+    return Scorecard.from_json(json.loads(chosen.read_text(encoding="utf-8")))
 
 
 def check_skill(skill_dir: Path) -> tuple[bool, str]:

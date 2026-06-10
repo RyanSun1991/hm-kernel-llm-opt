@@ -7,9 +7,12 @@ so the main pipeline is never gated on sedimentation (design §8 cadence).
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+_ID_RE = re.compile(r"^([A-Z])([0-9]{3,})$")
 
 from . import extractors as ex
 from .readers import RunArtifacts, read_run
@@ -89,17 +92,49 @@ def sediment_run(
     return result
 
 
+def _namespace_id(cand: dict[str, Any], seen: dict[str, set[int]]) -> None:
+    """Renumber a candidate's provisional id so it is unique within the bundle.
+
+    Provisional ids reset per run (every run emits F901/A901/...), so concatenating
+    runs collides (review F7) and hub lint's id_sink rejects the duplicates. The
+    first occurrence of a number keeps it; later collisions get the next free
+    number for that prefix. Provenance is preserved via the record's `source[]`
+    (the run_id), and the Curator assigns final stable ids at promotion.
+    """
+    rec = cand.get("record")
+    if not isinstance(rec, dict):
+        return
+    m = _ID_RE.match(str(rec.get("id", "")))
+    if not m:
+        return
+    prefix, digits = m.group(1), m.group(2)
+    num = int(digits)
+    used = seen.setdefault(prefix, set())
+    if num in used:
+        num = max(used) + 1
+    used.add(num)
+    rec["id"] = f"{prefix}{num:0{len(digits)}d}"
+
+
 def bundle_staging(staging_dir: str | Path, out_path: str | Path) -> tuple[Path, int]:
-    """Collate all per-run staging jsonl into one bundle (for a hub PR)."""
+    """Collate all per-run staging jsonl into one bundle (for a hub PR), renumbering
+    colliding provisional ids so the bundle is hub-lint-clean (review F7)."""
     staging_dir = Path(staging_dir)
     out_path = Path(out_path)
+    seen: dict[str, set[int]] = {}
     n = 0
     with open(out_path, "w", encoding="utf-8") as out:
         for jf in sorted(staging_dir.glob("*.jsonl")):
             if jf.resolve() == out_path.resolve():
                 continue
             for line in jf.read_text(encoding="utf-8").splitlines():
-                if line.strip():
-                    out.write(line + "\n")
-                    n += 1
+                if not line.strip():
+                    continue
+                try:
+                    cand = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                _namespace_id(cand, seen)
+                out.write(json.dumps(cand, ensure_ascii=False) + "\n")
+                n += 1
     return out_path, n

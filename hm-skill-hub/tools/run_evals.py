@@ -21,8 +21,13 @@ import json
 import re
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 try:
     import yaml
@@ -62,6 +67,7 @@ class Scorecard:
     pass_rate: float = 0.0
     mean_score: float = 0.0
     n: int = 0
+    run_at: str = ""
 
     def regression_rate_vs(self, baseline: "Scorecard | None") -> float:
         if baseline is None or not self.per_instance:
@@ -87,13 +93,39 @@ class Scorecard:
         )
 
     def to_json(self) -> dict:
+        """Schema-conformant (schemas/scorecard.schema.json): metrics{} + per_case[]."""
         return {
-            "skill": self.skill, "version": self.version, "suite": self.suite,
-            "n": self.n, "pass_rate": round(self.pass_rate, 4),
-            "mean_score": round(self.mean_score, 4),
-            "per_instance": {k: round(v, 4) for k, v in self.per_instance.items()},
-            "passed": self.passed,
+            "skill": self.skill,
+            "version": self.version,
+            "suite": self.suite,
+            "run_at": self.run_at or _now_iso(),
+            "runner": "run_evals",
+            "metrics": {
+                "pass_rate": round(self.pass_rate, 4),
+                "n_cases": self.n,
+                "mean_score": round(self.mean_score, 4),
+            },
+            "per_case": [
+                {"case_id": cid, "pass": bool(self.passed.get(cid, False)), "score": round(s, 4)}
+                for cid, s in self.per_instance.items()
+            ],
         }
+
+    @classmethod
+    def from_json(cls, d: dict) -> "Scorecard":
+        """Parse a scorecard (schema-conformant; tolerates the legacy flat shape)."""
+        if "metrics" in d:
+            m = d.get("metrics", {}) or {}
+            per = {c["case_id"]: c.get("score", 0.0) for c in d.get("per_case", []) or []}
+            passed = {c["case_id"]: bool(c.get("pass", False)) for c in d.get("per_case", []) or []}
+            return cls(skill=d.get("skill", ""), version=d.get("version", ""),
+                       suite=d.get("suite", ""), per_instance=per, passed=passed,
+                       pass_rate=m.get("pass_rate", 0.0), mean_score=m.get("mean_score", 0.0),
+                       n=m.get("n_cases", len(per)), run_at=d.get("run_at", ""))
+        return cls(skill=d.get("skill", ""), version=d.get("version", ""),
+                   suite=d.get("suite", ""), per_instance=d.get("per_instance", {}),
+                   passed=d.get("passed", {}), pass_rate=d.get("pass_rate", 0.0),
+                   mean_score=d.get("mean_score", 0.0), n=d.get("n", 0), run_at=d.get("run_at", ""))
 
 
 # --- scorers ----------------------------------------------------------------
@@ -189,7 +221,7 @@ def load_skill(skill_dir: str | Path) -> tuple[str, str, str]:
 def run_evals(skill_name: str, version: str, skill_text: str, suite: Suite,
               scorer: Scorer | None = None) -> Scorecard:
     scorer = scorer or ProxyScorer()
-    card = Scorecard(skill=skill_name, version=version, suite=suite.name)
+    card = Scorecard(skill=skill_name, version=version, suite=suite.name, run_at=_now_iso())
     total_w = sum(c.weight for c in suite.cases) or 1.0
     wsum = 0.0
     npass = 0

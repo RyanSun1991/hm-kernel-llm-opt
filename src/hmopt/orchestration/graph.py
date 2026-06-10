@@ -1204,6 +1204,16 @@ def _report(services: PipelineServices, state: RunState) -> RunState:
     services.ctx.session.commit()
     state["report_artifact_id"] = art.artifact_id
     logger.info("Report generated: artifact=%s", art.artifact_id)
+
+    # Close-out: distill this run into Tier-1 skill-hub candidates (plan P1-3).
+    # Non-blocking by contract — the hook never raises, so the report step (and
+    # the run's success status, already committed above) is never affected.
+    try:
+        from hmopt.sediment.hook import sediment_at_closeout
+
+        sediment_at_closeout(services.ctx.run_dir, run_id=state["run_id"])
+    except Exception:  # noqa: BLE001 - belt-and-suspenders; hook is already guarded
+        logger.debug("sediment close-out unavailable", exc_info=True)
     return state
 
 

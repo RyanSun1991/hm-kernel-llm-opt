@@ -185,13 +185,15 @@
 
 ### P1 — 让闭环成真（~1-2 周）
 
-4. **接一个真实钩子端到端**：`graph.py::_report` 内 try/except 调 `sediment_run`，和/或 manager decision 阶段提示词中写入 `hmopt sediment` 指令——在此之前，计划中 P1-3/P1-6 应改标"未开始"。
-5. 跨语料排名校准（单一融合检索器带 origin 字段，或按 maturity 降权 local），加"hub L2 ≥ 平凡 local L1"测试。
-6. 检索相关性下限（`bm25==0 且 cosine<ε` 即丢弃），用无关记录测试（今天会失败）。
-7. 临时 ID 命名空间化（`F901@<run_id>` 或 bundle/curate 时重编号），双 run bundle 测试。
-8. 调和死 schema：run_evals 产物补 `run_at`/对齐字段并由 lint 校验 scorecard；skill_patch 要么真产出要么删 schema+模板要求。
-9. `load_hub_knowledge` fail-closed（收集并上抛解析失败，门禁有跳过即 fail）；staging JSONL 过 schema 校验（Gate 1 落地）。
-10. CLI 顶层重导入下沉到各命令内（恢复轻量命令的独立可运行性）；repo root 用 git toplevel 而非 CWD；读取 lock 文件并在 retrieval.jsonl 记录 hub_version。
+> **状态：核心 5 项（rec 1-5 对应）✅ 已修复（本会话）；余项 9/10 待后续。**
+
+4. **接一个真实钩子端到端**。**✅ 已修**：新增 `src/hmopt/sediment/hook.py::sediment_at_closeout`（非阻塞、永不抛、永不门控 run），在 `graph.py::_report` 收口处经 lazy-import + try/except 调用——sediment 写路径从"CLI-only"变为真实 run 触发。helper 全单测（写 staging + 空 run 不抛）；graph.py py_compile 通过（沙箱无 langgraph 故 e2e 不可跑，但 hook 轻量可独立导入）。
+5. **跨语料排名校准（F2）**。**✅ 已修**：Resolver 改用**单一融合检索器**（hub+local 同尺度 RRF，消除各语料 rank-1 平局）+ 按 origin/maturity 降权（hub=1.0，local L0/L1/L2/L3=0.4/0.6/0.8/1.0）；新增"hub L2 ≥ 平凡 local L1"测试。
+6. **检索相关性下限（F5）**。**✅ 已修**：`vec_rank` 加余弦下限 0.15（与 `bm_rank` 的 bm>0 对称）——零 bm + 停用词级余弦的记录不再注入；shrink_node 查询实测丢掉 V001/B001，retrieval eval 仍 1.0；新增"无关记录不返回"测试。
+7. **临时 ID 命名空间化（F7）**。**✅ 已修**：`bundle_staging` 去碰撞重编号（首条保留、撞号者顺延），bundle 对 hub id_sink 干净；新增双 run（两条 F901→F901/F902）测试。
+8. **调和死 schema（F8）**。**✅ 已修**：`Scorecard.to_json` 改为符合 `scorecard.schema.json`（metrics{}/per_case[]/run_at），schema 补 `mean_score`；加 `from_json` 双向解析，eval_gate/dashboard/auto_merge_gate 全改走它；**lint 现校验所有 scorecard**；种子卡重生成为 conformant 形态；新增"卡过 schema + from_json 往返"测试。
+9. `load_hub_knowledge` fail-closed；staging JSONL 过 schema 校验。**待后续。**
+10. CLI 顶层重导入下沉；repo root 用 git toplevel；读取 lock 并记录 hub_version。**待后续。**
 
 ### P2 — 设计 v2.4 修订（文档，~2-3 天）
 

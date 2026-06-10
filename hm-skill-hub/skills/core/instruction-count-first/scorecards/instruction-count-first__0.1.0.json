@@ -2,29 +2,58 @@
   "skill": "instruction-count-first",
   "version": "0.1.0",
   "suite": "core_optimization_suite",
-  "n": 9,
-  "pass_rate": 0.6667,
-  "mean_score": 0.7333,
-  "per_instance": {
-    "hh-flush": 1.0,
-    "hh-submit": 1.0,
-    "hh-write": 1.0,
-    "mm-kswapd": 0.2,
-    "mm-rmqueue": 0.2,
-    "mm-shrink-node": 0.2,
-    "wq-pool": 1.0,
-    "wq-pwq": 1.0,
-    "wq-worker": 1.0
+  "run_at": "2026-06-10T14:52:56+00:00",
+  "runner": "run_evals",
+  "metrics": {
+    "pass_rate": 0.6667,
+    "n_cases": 9,
+    "mean_score": 0.7333
   },
-  "passed": {
-    "hh-flush": true,
-    "hh-submit": true,
-    "hh-write": true,
-    "mm-kswapd": false,
-    "mm-rmqueue": false,
-    "mm-shrink-node": false,
-    "wq-pool": true,
-    "wq-pwq": true,
-    "wq-worker": true
-  }
+  "per_case": [
+    {
+      "case_id": "hh-flush",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "hh-submit",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "hh-write",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "mm-kswapd",
+      "pass": false,
+      "score": 0.2
+    },
+    {
+      "case_id": "mm-rmqueue",
+      "pass": false,
+      "score": 0.2
+    },
+    {
+      "case_id": "mm-shrink-node",
+      "pass": false,
+      "score": 0.2
+    },
+    {
+      "case_id": "wq-pool",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "wq-pwq",
+      "pass": true,
+      "score": 1.0
+    },
+    {
+      "case_id": "wq-worker",
+      "pass": true,
+      "score": 1.0
+    }
+  ]
 }

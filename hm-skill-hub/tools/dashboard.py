@@ -15,6 +15,9 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from run_evals import Scorecard  # type: ignore
+
 HUB = Path(__file__).resolve().parent.parent
 
 
@@ -24,16 +27,20 @@ def _semver(v: str) -> tuple[int, int, int]:
 
 
 def collect_scorecards(hub_root: str | Path = HUB) -> dict[str, list[dict]]:
+    """Per-skill scorecards as flat render dicts. Parses the schema-conformant
+    shape (metrics{}/per_case[]) via Scorecard.from_json (tolerates legacy)."""
     root = Path(hub_root) / "skills"
     by_skill: dict[str, list[dict]] = {}
     if not root.exists():
         return by_skill
     for p in sorted(root.rglob("scorecards/*.json")):
         try:
-            card = json.loads(p.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
+            card = Scorecard.from_json(json.loads(p.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, OSError, KeyError):
             continue
-        by_skill.setdefault(str(card.get("skill", p.parent.parent.name)), []).append(card)
+        flat = {"skill": card.skill, "version": card.version, "suite": card.suite,
+                "pass_rate": card.pass_rate, "mean_score": card.mean_score, "n": card.n}
+        by_skill.setdefault(card.skill or p.parent.parent.name, []).append(flat)
     for cards in by_skill.values():
         cards.sort(key=lambda c: _semver(c.get("version", "0.0.0")))
     return by_skill

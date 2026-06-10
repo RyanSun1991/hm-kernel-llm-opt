@@ -34,6 +34,24 @@ def test_seed_skill_scores_partial():
     assert not card.passed["mm-shrink-node"]
 
 
+def test_scorecard_is_schema_conformant_and_roundtrips():
+    # review F8: the card run_evals writes must pass its own schema, and from_json
+    # must round-trip it (so eval_gate/dashboard/auto_merge_gate read it correctly).
+    import json as _json
+
+    import jsonschema  # type: ignore
+    from run_evals import Scorecard  # type: ignore
+
+    card = evaluate_skill_dir(SKILL, SUITE)
+    d = card.to_json()
+    schema = _json.loads((HUB / "schemas" / "scorecard.schema.json").read_text(encoding="utf-8"))
+    jsonschema.validate(instance=d, schema=schema)          # conformant
+    back = Scorecard.from_json(d)
+    assert back.pass_rate == round(card.pass_rate, 4)
+    assert back.n == card.n and back.mean_score == round(card.mean_score, 4)
+    assert back.passed == card.passed
+
+
 def test_proxy_scorer_mechanism_alias_bonus():
     suite = load_suite(SUITE)
     case = next(c for c in suite.cases if c.id == "mm-shrink-node")
@@ -152,7 +170,7 @@ def test_optimize_apply_bumps_version_and_accumulates_scorecards(tmp_path: Path)
     # SKILL.md version was bumped
     assert "version: 0.1.1" in (dst / "SKILL.md").read_text(encoding="utf-8")
     new_card = _json.loads((dst / "scorecards" / "instruction-count-first__0.1.1.json").read_text())
-    assert new_card["pass_rate"] == 1.0
+    assert new_card["metrics"]["pass_rate"] == 1.0   # schema-conformant shape (F8)
 
 
 def test_bad_edits_buffer_skips_known_bad(tmp_path: Path):

@@ -169,6 +169,49 @@ def test_bundle_staging_collates(tmp_path: Path):
     assert n == 3 and out.exists()
 
 
+def test_bundle_staging_renumbers_colliding_provisional_ids(tmp_path: Path):
+    # review F7: provisional ids reset per run, so two runs both emit F901;
+    # the bundle must renumber collisions so it is hub-lint-clean (unique ids).
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    rec = '{{"schema":"memory_item","record":{{"id":"{i}","type":"fact","title":"t {i}"}}}}'
+    (staging / "r_a.jsonl").write_text(rec.format(i="F901") + "\n", encoding="utf-8")
+    (staging / "r_b.jsonl").write_text(
+        rec.format(i="F901") + "\n" + rec.format(i="A901") + "\n", encoding="utf-8")
+    out, n = bundle_staging(staging, tmp_path / "bundle.jsonl")
+    ids = [json.loads(line)["record"]["id"]
+           for line in out.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert n == 3
+    assert ids == ["F901", "F902", "A901"]   # first F901 kept, the collision -> F902
+    assert len(set(ids)) == len(ids)         # all unique -> passes hub id_sink
+
+
+def test_sediment_at_closeout_writes_staging(tmp_path: Path):
+    # plan P1-3 / review item-4: the close-out hook actually distills a finished
+    # run into Tier-1 staging candidates.
+    from hmopt.sediment.hook import sediment_at_closeout
+
+    run = tmp_path / "runs" / "r_hook"
+    run.mkdir(parents=True)
+    manifest = {"bench": [{"mechanism": "hoist-invariant",
+                           "target": "mm/vmscan.c::shrink_node", "delta_pct": -0.8,
+                           "compare_level": "function", "validation_path": "b.md",
+                           "verdict": "landed"}]}
+    (run / "sediment_input.json").write_text(json.dumps(manifest), encoding="utf-8")
+    res = sediment_at_closeout(run, repo_root=tmp_path, run_id="r_hook")  # hub via cwd fallback
+    assert res is not None and res.n_valid >= 1
+    staged = tmp_path / ".opencode" / "local" / "sediment_staging" / "r_hook.jsonl"
+    assert staged.exists()
+
+
+def test_sediment_at_closeout_never_raises(tmp_path: Path):
+    # contract: non-blocking. A missing run dir yields 0 candidates, never raises.
+    from hmopt.sediment.hook import sediment_at_closeout
+
+    res = sediment_at_closeout(tmp_path / "nope", repo_root=tmp_path, run_id="r_empty")
+    assert res is None or res.n_valid == 0
+
+
 def test_sediment_run_never_raises_on_garbage_manifest(tmp_path: Path):
     # MAJOR contract: sediment_run must not raise (P1-3 close-out hooks rely on it).
     run = tmp_path / "r_bad"
