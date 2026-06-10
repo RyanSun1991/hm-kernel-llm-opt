@@ -68,10 +68,12 @@ class CuratorItem:
             if self.delta_pct > 0:
                 return -1  # regression
         d = self.do_or_dont.lower()
+        # scan negatives first: "do: avoid X" / "do: don't Y" are negative despite
+        # the "do:" prefix. Must match hub_records.polarity (dual-tree parity).
+        if "don't" in d or "dont" in d or "avoid" in d or "watch out" in d:
+            return -1
         if d.startswith("do:") or d.startswith("do "):
             return 1
-        if "don't" in d or "dont" in d or d.startswith("avoid"):
-            return -1
         if self.status in {"landed", "approved"}:
             return 1
         if self.status in {"rejected", "reverted"}:

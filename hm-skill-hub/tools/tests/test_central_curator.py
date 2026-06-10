@@ -21,6 +21,7 @@ import promotion_detector  # type: ignore
 import subsumption  # type: ignore
 import yaml  # type: ignore
 from hub_records import HubRecord, load_hub_knowledge  # type: ignore
+from parse_memory import parse_frontmatter  # type: ignore
 from similarity import alias_hit, jaccard, text_similarity  # type: ignore
 
 
@@ -162,6 +163,10 @@ def test_superseded_loser_lints_clean_for_all_schema_families(tmp_path):
     assert conflict_resolve.apply_to_files(wm, lm).decision == "supersede"
     assert "valid_until" in lm.read_text(encoding="utf-8")
     assert lint.lint_record_file(lm) == []
+    # review P0-2: the forward edge is persisted too — winner.supersedes=[loser]
+    wm_fm, _ = parse_frontmatter(wm.read_text(encoding="utf-8"))
+    assert wm_fm.get("supersedes") == ["F100"]
+    assert lint.lint_record_file(wm) == []   # winner still lints with supersedes[]
     # global_lesson — must NOT get valid_until, must still lint
     wg = _write_record(tmp_path, "knowledge/global/heuristics/H101-w.md",
                        {"id": "H101", "lesson": "w", "kind": "heuristic", "applies_when": "c",

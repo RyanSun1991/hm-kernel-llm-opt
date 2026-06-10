@@ -101,13 +101,16 @@ def run_nightly(hub_root: str | Path = HUB, *, apply: bool = False,
                    "promotions": [c.proposed_skill for c in cr.promotions]}
 
     # (4) Optimize — engine B (bounded edit under the gate). Each result carries
-    # its PRE-optimize baseline (captured before any write).
+    # its PRE-optimize baseline (captured before any write). The optimizer only
+    # WRITES when Normalize (schema + secrets) passed — a hub failing lint/redact
+    # must never be mutated by the trusted path; it still runs dry for the report.
+    opt_apply = apply and rep.normalize_ok
     skill_dirs = [p.parent for p in sorted((hub_root / "skills").rglob("SKILL.md"))
                   if (p.parent / "best_skill.md").exists()]
     results: dict = {}
     accepted_any = False
     for d in skill_dirs:
-        res = so.optimize(d, apply=apply)
+        res = so.optimize(d, apply=opt_apply)
         results[d] = res
         accepted_any = accepted_any or bool(res.accepted)
         rep.optimize.append({"skill": d.name,

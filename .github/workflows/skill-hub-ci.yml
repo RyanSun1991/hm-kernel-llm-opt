@@ -18,6 +18,7 @@ on:
       - "tests/test_sediment*.py"
       - "tests/test_local_curator.py"
       - "tests/test_retrieval_eval.py"
+      - "tests/test_dual_tree_parity.py"
       - ".github/workflows/skill-hub-ci.yml"
 
 jobs:
@@ -67,4 +68,5 @@ jobs:
             tests/test_skillhub_resolver.py \
             tests/test_sediment.py \
             tests/test_local_curator.py \
-            tests/test_retrieval_eval.py -q
+            tests/test_retrieval_eval.py \
+            tests/test_dual_tree_parity.py -q

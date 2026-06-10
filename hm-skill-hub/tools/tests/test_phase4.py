@@ -136,8 +136,18 @@ def test_auto_merge_gate_main_errors_on_non_hub_dir(tmp_path: Path):
 
 # ---- nightly orchestrator --------------------------------------------------
 
+def _skill_snapshot(hub: Path) -> dict:
+    d = hub / "skills" / "core" / "instruction-count-first"
+    return {
+        "registry": (hub / "registry.yaml").read_bytes(),
+        "best_skill": (d / "best_skill.md").read_bytes(),
+        "skill_md": (d / "SKILL.md").read_bytes(),
+        "cards": sorted(p.name for p in (d / "scorecards").glob("*.json")),
+    }
+
+
 def test_nightly_dry_run_is_safe_and_promotes():
-    before = (HUB / "registry.yaml").read_bytes()
+    before = _skill_snapshot(HUB)
     rep = nightly.run_nightly(HUB, apply=False)
     assert rep.normalize_ok and rep.validate_ok
     assert sum(len(o["accepted"]) for o in rep.optimize) >= 1     # optimizer found a win
@@ -146,7 +156,24 @@ def test_nightly_dry_run_is_safe_and_promotes():
         rep.release["new_version"]
     assert "hub_version:" in rep.lock
     assert rep.auto_merge.get("instruction-count-first") == "human"   # not yet trusted
-    assert (HUB / "registry.yaml").read_bytes() == before            # dry-run mutated nothing
+    assert _skill_snapshot(HUB) == before    # dry-run mutated NOTHING (not just registry)
+
+
+def test_nightly_apply_aborts_writes_when_normalize_fails(tmp_path: Path):
+    # review P0-1: a hub failing the secret/lint gate must NOT have its skills
+    # mutated by the trusted --apply path.
+    import shutil
+    hub = tmp_path / "hub"
+    shutil.copytree(HUB, hub, ignore=shutil.ignore_patterns("__pycache__", ".git"))
+    before = _skill_snapshot(hub)
+    # inject a secret into a knowledge record -> redact fails -> normalize_ok False
+    rec = hub / "knowledge" / "global" / "heuristics" / "H001-hoist-before-inline.md"
+    rec.write_text(rec.read_text(encoding="utf-8") + "\n\nleaked AKIAIOSFODNN7EXAMPLE\n",
+                   encoding="utf-8")
+    rep = nightly.run_nightly(hub, apply=True)
+    assert rep.normalize_ok is False
+    # optimizer + release/lock/dashboard writes are all suppressed
+    assert _skill_snapshot(hub) == before
 
 
 def test_nightly_apply_on_temp_writes_artifacts(tmp_path: Path):

@@ -177,9 +177,11 @@
 
 ### P0 — 在沙箱外运行 `--apply` / 提交真实沉淀 PR 之前必须修（合计 ~1 天）
 
-1. `nightly.py --apply`：normalize 门失败时禁止 optimizer 写入（或 optimizer 先 dry-run，门过后再写）；测试改为钉住 best_skill/SKILL/scorecards 全部不变（当前只钉 registry.yaml）。
-2. `conflict_resolve.apply_to_files`：写回 winner 的 `supersedes[]`（双文件），在三家族测试中断言。
-3. 把 hub 的 polarity 修复回迁 `local_curator`，并为 polarity/strength/embedder 各加 parity 测试（仿 `_slugify` 模式）。
+> **状态：P0 全部 ✅ 已修复（本会话）。** 见下方各项后缀。
+
+1. `nightly.py --apply`：normalize 门失败时禁止 optimizer 写入。**✅ 已修**：`opt_apply = apply and rep.normalize_ok`，门失败时 optimizer 跑 dry（仍报告但不写）；新增 `test_nightly_apply_aborts_writes_when_normalize_fails`（注入 secret→redact 失败→断言 best_skill/SKILL/scorecards 全不变）+ 强化 dry-run 测试为快照全部技能文件（不只 registry）。
+2. `conflict_resolve.apply_to_files`：写回 winner 的 `supersedes[]`（双文件）。**✅ 已修**：supersede 时同时写 loser 墓碑与 winner 的 `supersedes[]`（仅 memory_item，避免对无该字段的家族造成 churn）；三家族测试新增 winner `supersedes==[loser]` + winner 重 lint 断言。
+3. 把 hub 的 polarity 修复回迁 `local_curator`，并加 parity 测试。**✅ 已修**：`local_curator.polarity` 先扫负词（"do: avoid X"→−1，与 hub 一致）；新增 `tests/test_dual_tree_parity.py`（polarity 9 例 / tokenize / embedder 字节等价 / strength 共同路径），接入 CI 消费侧 job——把"同一逻辑两棵树"从 8 面仅 1 面有 parity 测试，补上 polarity/embedder/tokenize/strength 四面。
 
 ### P1 — 让闭环成真（~1-2 周）
 

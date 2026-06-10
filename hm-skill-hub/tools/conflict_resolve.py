@@ -105,8 +105,14 @@ def apply_to_files(winner_path: Path, loser_path: Path, *, high_risk: bool = Fal
     winner = _load(winner_path)
     loser = _load(loser_path)
     res = resolve(winner, loser, high_risk=high_risk)
-    if res.decision == "supersede" and res.loser_fields is not None:
-        _write_frontmatter(loser_path, res.loser_fields)
+    if res.decision == "supersede":
+        if res.loser_fields is not None:
+            _write_frontmatter(loser_path, res.loser_fields)
+        # Persist the forward edge too: the winner's supersedes[] (memory_item
+        # only — global_lesson/bad_plan have no supersedes field, so resolve()
+        # leaves their winner_fields unchanged and we skip the churn).
+        if res.winner_fields is not None and winner.schema == "memory_item":
+            _write_frontmatter(winner_path, res.winner_fields)
     return res
 
 
