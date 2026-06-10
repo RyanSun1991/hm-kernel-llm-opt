@@ -4,9 +4,9 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        BASE_IMAGE: ${HMOPT_BASE_IMAGE:-kernel.dockerhub.rnd.huawei.com/hmci-docker-image:v3-4.2}
-        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.tools.huawei.com/pypi/simple}
-        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.tools.huawei.com}
+        BASE_IMAGE: ${HMOPT_BASE_IMAGE:-YOUR_REGISTRY/hmci-docker-image:v3-4.2}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-pypi.org}
         NEO4J_REPO_URL: ${NEO4J_REPO_URL:-https://debian.neo4j.com}
         NEO4J_VERIFY_PEER: ${NEO4J_VERIFY_PEER:-false}
         NEO4J_INSTALL_MODE: ${NEO4J_INSTALL_MODE:-offline}
@@ -31,7 +31,7 @@ services:
       HMOPT_AUTO_TEST_MCP_PORT: 7336
       HMOPT_START_NEO4J: ${HMOPT_START_NEO4J:-1}
       NEO4J_USER: ${NEO4J_USER:-neo4j}
-      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-@huawei2026}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-changeme}
       HMOPT_PATH_ALIAS: ${HMOPT_PATH_ALIAS:-}
     ports:
       - "7475:7474"

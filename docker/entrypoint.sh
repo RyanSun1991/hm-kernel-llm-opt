@@ -26,7 +26,7 @@ fi
 
 if [[ "${HMOPT_START_NEO4J:-1}" == "1" ]]; then
   NEO4J_USER="${NEO4J_USER:-neo4j}"
-  NEO4J_PASSWORD="${NEO4J_PASSWORD:-@huawei2026}"
+  NEO4J_PASSWORD="${NEO4J_PASSWORD:-changeme}"
 
   mkdir -p /var/lib/neo4j/plugins
   APOC_JAR=""

@@ -12,12 +12,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-_ID_RE = re.compile(r"^([A-Z])([0-9]{3,})$")
-
 from . import extractors as ex
 from .readers import RunArtifacts, read_run
 from .salience import llm_salience_pass
 from .validate import validate_candidate
+
+_ID_RE = re.compile(r"^([A-Z])([0-9]{3,})$")
 
 
 @dataclass

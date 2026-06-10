@@ -1,12 +1,12 @@
-ARG BASE_IMAGE=kernel.dockerhub.rnd.huawei.com/hmci-docker-image:v3-4.2
+ARG BASE_IMAGE=YOUR_REGISTRY/hmci-docker-image:v3-4.2
 FROM ${BASE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-ARG PIP_INDEX_URL=https://mirrors.tools.huawei.com/pypi/simple
-ARG PIP_TRUSTED_HOST=mirrors.tools.huawei.com
+ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG PIP_TRUSTED_HOST=pypi.org
 ARG NEO4J_REPO_URL=https://debian.neo4j.com
 ARG NEO4J_VERIFY_PEER=false
 ARG NEO4J_INSTALL_MODE=offline
