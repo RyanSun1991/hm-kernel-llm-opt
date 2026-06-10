@@ -5,14 +5,30 @@ from hmopt.opencode.pipeline import (
     build_pipeline_prompt,
     initialize_pipeline_session,
     load_pipeline_profiles,
+    validate_profile_assets,
 )
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_all_profiles_reference_existing_assets():
+    # Every entry agent / skill / card / doc a profile names must exist on disk.
+    # This pins the os-opt-manager -> hm-opt-manager and flat-skill-path fixes so
+    # the staged prompt can never silently point at nothing again.
+    profiles = load_pipeline_profiles("configs/pipeline_profiles.yaml")
+    problems = {
+        name: validate_profile_assets(prof, REPO_ROOT)
+        for name, prof in profiles.items()
+    }
+    problems = {name: missing for name, missing in problems.items() if missing}
+    assert not problems, f"profiles reference missing assets: {problems}"
 
 
 def test_load_pipeline_profiles_reads_expected_profile():
     profiles = load_pipeline_profiles("configs/pipeline_profiles.yaml")
     assert "generic_full" in profiles
     assert "hyperhold_full" in profiles
-    assert profiles["hyperhold_full"].entry_agent == "os-opt-manager"
+    assert profiles["hyperhold_full"].entry_agent == "hm-opt-manager"
     assert profiles["generic_full"].primary_goal == "instruction_count"
     assert profiles["generic_full"].plan_reviewer_agent == "kernel-plan-reviewer"
     assert profiles["generic_full"].code_reviewer_agent == "kernel-code-reviewer"
@@ -34,7 +50,7 @@ def test_initialize_pipeline_session_writes_state_and_prompt(tmp_path: Path):
     assert state["plan_reviewer_agent"] == "kernel-plan-reviewer"
     assert state["code_reviewer_agent"] == "kernel-code-reviewer"
     assert state["tester_agent"] == "kernel-tester-agent"
-    assert prompt.startswith("@os-opt-manager")
+    assert prompt.startswith("@hm-opt-manager")
     assert state["primary_metric"] == "instruction_count"
     assert state["plan_review_status"] == ""
     assert state["code_review_status"] == ""

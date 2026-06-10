@@ -2,8 +2,8 @@ profiles:
   generic_full:
     title: Generic Full Pipeline
     description: domain-agnostic staged pipeline for any kernel directory, subsystem, or file target with automatic routing, instruction-count-first planning, and long-term memory updates
-    entry_agent: os-opt-manager
-    manager_agent: os-opt-manager
+    entry_agent: hm-opt-manager
+    manager_agent: hm-opt-manager
     plan_reviewer_agent: kernel-plan-reviewer
     code_reviewer_agent: kernel-code-reviewer
     tester_agent: kernel-tester-agent
@@ -13,19 +13,19 @@ profiles:
     bootstrap_docs:
       - .opencode/docs/memory_system.md
     skills:
-      - .opencode/skills/instruction-count-first.md
-      - .opencode/skills/research-discipline.md
-      - .opencode/skills/optimization-funnel.md
-      - .opencode/skills/handoff-contract.md
-      - .opencode/skills/implementation-guardrails.md
-      - .opencode/skills/validation-flight-check.md
-      - .opencode/skills/memory-accumulation.md
-      - .opencode/skills/flash-device-operations.md
-      - .opencode/skills/ab-test-comparison.md
+      - .opencode/skills/instruction-count-first/SKILL.md
+      - .opencode/skills/research-discipline/SKILL.md
+      - .opencode/skills/optimization-funnel/SKILL.md
+      - .opencode/skills/handoff-contract/SKILL.md
+      - .opencode/skills/implementation-guardrails/SKILL.md
+      - .opencode/skills/validation-flight-check/SKILL.md
+      - .opencode/skills/memory-accumulation/SKILL.md
+      - .opencode/skills/flash-device-operations/SKILL.md
+      - .opencode/skills/ab-test-comparison/SKILL.md
     validation_mode: plan_review_code_review_tester
     research_first: true
     primary_goal: instruction_count
-    handoff_contract: .opencode/skills/handoff-contract.md
+    handoff_contract: .opencode/skills/handoff-contract/SKILL.md
     artifacts_expected:
       - flamegraph
       - hitrace
@@ -34,8 +34,8 @@ profiles:
   hyperhold_full:
     title: Hyperhold Full Pipeline
     description: full research -> plan review -> implementation -> code review -> validation pipeline for hyperhold, swap, hpio, and iotab paths with instruction-count reduction as the primary target
-    entry_agent: os-opt-manager
-    manager_agent: os-opt-manager
+    entry_agent: hm-opt-manager
+    manager_agent: hm-opt-manager
     plan_reviewer_agent: kernel-plan-reviewer
     code_reviewer_agent: kernel-code-reviewer
     tester_agent: kernel-tester-agent
@@ -45,19 +45,19 @@ profiles:
     bootstrap_docs:
       - .opencode/docs/memmgr-reclaim_bootstrap.md
     skills:
-      - .opencode/skills/instruction-count-first.md
-      - .opencode/skills/research-discipline.md
-      - .opencode/skills/optimization-funnel.md
-      - .opencode/skills/handoff-contract.md
-      - .opencode/skills/implementation-guardrails.md
-      - .opencode/skills/validation-flight-check.md
-      - .opencode/skills/memory-accumulation.md
-      - .opencode/skills/flash-device-operations.md
-      - .opencode/skills/ab-test-comparison.md
+      - .opencode/skills/instruction-count-first/SKILL.md
+      - .opencode/skills/research-discipline/SKILL.md
+      - .opencode/skills/optimization-funnel/SKILL.md
+      - .opencode/skills/handoff-contract/SKILL.md
+      - .opencode/skills/implementation-guardrails/SKILL.md
+      - .opencode/skills/validation-flight-check/SKILL.md
+      - .opencode/skills/memory-accumulation/SKILL.md
+      - .opencode/skills/flash-device-operations/SKILL.md
+      - .opencode/skills/ab-test-comparison/SKILL.md
     validation_mode: plan_review_code_review_tester
     research_first: true
     primary_goal: instruction_count
-    handoff_contract: .opencode/skills/handoff-contract.md
+    handoff_contract: .opencode/skills/handoff-contract/SKILL.md
     artifacts_expected:
       - flamegraph
       - hitrace
@@ -66,8 +66,8 @@ profiles:
   memmgr_reclaim_full:
     title: Memmgr Reclaim Full Pipeline
     description: full reclaim and allocator coupling research, plan review, implementation, code review, and validation pipeline with instruction-count reduction as the primary target
-    entry_agent: os-opt-manager
-    manager_agent: os-opt-manager
+    entry_agent: hm-opt-manager
+    manager_agent: hm-opt-manager
     plan_reviewer_agent: kernel-plan-reviewer
     code_reviewer_agent: kernel-code-reviewer
     tester_agent: kernel-tester-agent
@@ -77,18 +77,18 @@ profiles:
     bootstrap_docs:
       - .opencode/docs/memmgr-reclaim_bootstrap.md
     skills:
-      - .opencode/skills/instruction-count-first.md
-      - .opencode/skills/research-discipline.md
-      - .opencode/skills/optimization-funnel.md
-      - .opencode/skills/handoff-contract.md
-      - .opencode/skills/validation-flight-check.md
-      - .opencode/skills/memory-accumulation.md
-      - .opencode/skills/flash-device-operations.md
-      - .opencode/skills/ab-test-comparison.md
+      - .opencode/skills/instruction-count-first/SKILL.md
+      - .opencode/skills/research-discipline/SKILL.md
+      - .opencode/skills/optimization-funnel/SKILL.md
+      - .opencode/skills/handoff-contract/SKILL.md
+      - .opencode/skills/validation-flight-check/SKILL.md
+      - .opencode/skills/memory-accumulation/SKILL.md
+      - .opencode/skills/flash-device-operations/SKILL.md
+      - .opencode/skills/ab-test-comparison/SKILL.md
     validation_mode: plan_review_code_review_tester
     research_first: true
     primary_goal: instruction_count
-    handoff_contract: .opencode/skills/handoff-contract.md
+    handoff_contract: .opencode/skills/handoff-contract/SKILL.md
     artifacts_expected:
       - flamegraph
       - hitrace
@@ -97,8 +97,8 @@ profiles:
   sync_review:
     title: Synchronization Risk Review
     description: targeted correctness and performance review for locks, waiters, and refcount-sensitive changes with explicit instruction-count tradeoff analysis
-    entry_agent: os-opt-manager
-    manager_agent: os-opt-manager
+    entry_agent: hm-opt-manager
+    manager_agent: hm-opt-manager
     plan_reviewer_agent: kernel-plan-reviewer
     code_reviewer_agent: kernel-code-reviewer
     tester_agent: kernel-tester-agent
@@ -106,22 +106,22 @@ profiles:
     pipeline_card: .opencode/pipelines/sync_review.md
     objective_template: Review the synchronization, ownership, race implications, and instruction-count tradeoffs around {target}.
     skills:
-      - .opencode/skills/instruction-count-first.md
-      - .opencode/skills/research-discipline.md
-      - .opencode/skills/handoff-contract.md
-      - .opencode/skills/validation-flight-check.md
-      - .opencode/skills/memory-accumulation.md
+      - .opencode/skills/instruction-count-first/SKILL.md
+      - .opencode/skills/research-discipline/SKILL.md
+      - .opencode/skills/handoff-contract/SKILL.md
+      - .opencode/skills/validation-flight-check/SKILL.md
+      - .opencode/skills/memory-accumulation/SKILL.md
     validation_mode: plan_review_code_review
     research_first: true
     primary_goal: instruction_count
-    handoff_contract: .opencode/skills/handoff-contract.md
+    handoff_contract: .opencode/skills/handoff-contract/SKILL.md
     artifacts_expected: []
 
   workqueue_full:
     title: Workqueue Full Pipeline
     description: workqueue and thread-pool optimization pipeline with bad-plan memory, instruction-count-first plan review, code review, and tester validation
-    entry_agent: os-opt-manager
-    manager_agent: os-opt-manager
+    entry_agent: hm-opt-manager
+    manager_agent: hm-opt-manager
     plan_reviewer_agent: kernel-plan-reviewer
     code_reviewer_agent: kernel-code-reviewer
     tester_agent: kernel-tester-agent
@@ -129,19 +129,19 @@ profiles:
     pipeline_card: .opencode/pipelines/workqueue_full.md
     objective_template: Analyze and optimize {target} with hotspot-guided workqueue or thread-pool specialization, instruction-count-first planning, code review, and tester validation.
     skills:
-      - .opencode/skills/instruction-count-first.md
-      - .opencode/skills/research-discipline.md
-      - .opencode/skills/optimization-funnel.md
-      - .opencode/skills/handoff-contract.md
-      - .opencode/skills/implementation-guardrails.md
-      - .opencode/skills/validation-flight-check.md
-      - .opencode/skills/memory-accumulation.md
-      - .opencode/skills/flash-device-operations.md
-      - .opencode/skills/ab-test-comparison.md
+      - .opencode/skills/instruction-count-first/SKILL.md
+      - .opencode/skills/research-discipline/SKILL.md
+      - .opencode/skills/optimization-funnel/SKILL.md
+      - .opencode/skills/handoff-contract/SKILL.md
+      - .opencode/skills/implementation-guardrails/SKILL.md
+      - .opencode/skills/validation-flight-check/SKILL.md
+      - .opencode/skills/memory-accumulation/SKILL.md
+      - .opencode/skills/flash-device-operations/SKILL.md
+      - .opencode/skills/ab-test-comparison/SKILL.md
     validation_mode: plan_review_code_review_tester
     research_first: true
     primary_goal: instruction_count
-    handoff_contract: .opencode/skills/handoff-contract.md
+    handoff_contract: .opencode/skills/handoff-contract/SKILL.md
     artifacts_expected:
       - flamegraph
       - hiperf

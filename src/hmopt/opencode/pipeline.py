@@ -24,8 +24,8 @@ class PipelineProfile:
     name: str
     title: str
     description: str
-    entry_agent: str = "os-opt-manager"
-    manager_agent: str = "os-opt-manager"
+    entry_agent: str = "hm-opt-manager"
+    manager_agent: str = "hm-opt-manager"
     plan_reviewer_agent: str = "kernel-plan-reviewer"
     code_reviewer_agent: str = "kernel-code-reviewer"
     tester_agent: str = "kernel-tester-agent"
@@ -92,8 +92,8 @@ def load_pipeline_profiles(path: str | Path = DEFAULT_PROFILES_PATH) -> dict[str
             name=name,
             title=str(data.get("title") or name),
             description=str(data.get("description") or ""),
-            entry_agent=str(data.get("entry_agent") or "os-opt-manager"),
-            manager_agent=str(data.get("manager_agent") or "os-opt-manager"),
+            entry_agent=str(data.get("entry_agent") or "hm-opt-manager"),
+            manager_agent=str(data.get("manager_agent") or "hm-opt-manager"),
             plan_reviewer_agent=str(data.get("plan_reviewer_agent") or "kernel-plan-reviewer"),
             code_reviewer_agent=str(data.get("code_reviewer_agent") or "kernel-code-reviewer"),
             tester_agent=str(data.get("tester_agent") or "kernel-tester-agent"),
@@ -114,6 +114,34 @@ def load_pipeline_profiles(path: str | Path = DEFAULT_PROFILES_PATH) -> dict[str
             stock_image_dir=str(data.get("stock_image_dir") or ""),
         )
     return result
+
+
+def validate_profile_assets(profile: PipelineProfile, repo_root: str | Path) -> list[str]:
+    """Return a list of referenced asset paths that do not exist on disk.
+
+    The staged prompt names an entry agent and a set of skill/card/doc files.
+    If any are missing (e.g. a stale `os-opt-manager` reference or a flat
+    `skills/<name>.md` path), the prompt silently points the harness at nothing.
+    Surface those so the mismatch is visible instead of failing at runtime.
+    """
+    root = Path(repo_root)
+    missing: list[str] = []
+
+    agent_file = root / ".opencode" / "agents" / f"{profile.entry_agent}.md"
+    if not agent_file.exists():
+        missing.append(str(agent_file.relative_to(root)))
+
+    candidates: list[str] = list(profile.skills)
+    candidates += list(profile.bootstrap_docs)
+    if profile.pipeline_card:
+        candidates.append(profile.pipeline_card)
+    if profile.handoff_contract:
+        candidates.append(profile.handoff_contract)
+    for rel in candidates:
+        if (root / rel).exists():
+            continue
+        missing.append(rel)
+    return missing
 
 
 def _parse_artifact_specs(artifact_specs: list[str]) -> list[dict[str, str]]:
@@ -198,6 +226,15 @@ def initialize_pipeline_session(
     root = Path(repo_root).resolve()
     _ensure_workspace(root)
 
+    missing_assets = validate_profile_assets(profile, root)
+    if missing_assets:
+        logger.warning(
+            "Pipeline profile %r references %d missing asset(s): %s",
+            profile.name,
+            len(missing_assets),
+            ", ".join(missing_assets),
+        )
+
     task_id = f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{profile.name}-{_slugify(target)}"
     resolved_objective = objective or profile.objective_template.format(target=target).strip()
     if not resolved_objective:
@@ -249,6 +286,7 @@ def initialize_pipeline_session(
         "stock_image_dir": profile.stock_image_dir,
         "artifacts": _parse_artifact_specs(artifact_specs or []),
         "memory_files": memory_paths,
+        "missing_assets": missing_assets,
         "prompt_file": str(resolved_prompt_path.relative_to(root)),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "notes": [],
