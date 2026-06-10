@@ -24,6 +24,29 @@ def _expand_env(text: str) -> str:
     return os.path.expandvars(text)
 
 
+def _resolve_env(name: str | None) -> str | None:
+    """Resolve an env-var *name* from config to its value, tolerating shell
+    wrappers people commonly paste into YAML.
+
+    ``HMOPT_LLM_API_KEY``, ``$HMOPT_LLM_API_KEY``, ``${HMOPT_LLM_API_KEY}`` and
+    ``$(HMOPT_LLM_API_KEY)`` all resolve to the env var. The last form was a
+    silent footgun: ``os.getenv("$(HMOPT_LLM_API_KEY)")`` always returned None,
+    so the shipped config never had an API key and every run fell back to the
+    offline fake-LLM while reporting success.
+    """
+    if not name:
+        return None
+    var = name.strip()
+    if var.startswith("${") and var.endswith("}"):
+        var = var[2:-1]
+    elif var.startswith("$(") and var.endswith(")"):
+        var = var[2:-1]
+    elif var.startswith("$"):
+        var = var[1:]
+    var = var.strip()
+    return os.getenv(var) if var else None
+
+
 def _resolve_placeholder(value: Optional[str]) -> Optional[str]:
     """Return ``None`` when the value is an unresolved ${VAR} placeholder."""
 
@@ -58,7 +81,7 @@ class ProjectConfig(BaseModel):
 
 class ModelConfig(BaseModel):
     provider: str = "openai_compatible"
-    base_url: str = "http://10.90.56.33:20010/v1"
+    base_url: str = "http://localhost:8000/v1"
     api_key: Optional[str] = Field(
         default_factory=lambda: os.getenv("HMOPT_LLM_API_KEY")
     )
@@ -94,7 +117,7 @@ class Neo4jConfig(BaseModel):
     enabled: bool = False
     uri: str = "bolt://localhost:7687"
     user: str = "neo4j"
-    password: Optional[str] = "@huawei2026"
+    password: Optional[str] = Field(default_factory=lambda: os.getenv("HMOPT_NEO4J_PASSWORD"))
     database: str = "neo4j"
 
 
@@ -278,12 +301,12 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
 
     # Resolve API key from env if provided via env name
     api_key_env = llm_cfg.get("api_key_env")
-    api_key = llm_cfg.get("api_key") or (os.getenv(api_key_env) if api_key_env else None)
+    api_key = llm_cfg.get("api_key") or _resolve_env(api_key_env)
     llm_norm = {
         "provider": llm_cfg.get("provider", "openai_compatible"),
         "base_url": llm_cfg.get("base_url")
         or llm_cfg.get("api_base")
-        or "http://10.90.56.33:20010/v1",
+        or "http://localhost:8000/v1",
         "api_key": api_key,
         "model": llm_cfg.get("model", "qwen3-coder-30b"),
         "embedding_model": llm_cfg.get("embedding_model", "qwen3-embedding-8b"),
@@ -329,7 +352,7 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "uri": neo4j_cfg.get("uri", "bolt://localhost:7687"),
         "user": neo4j_cfg.get("user", "neo4j"),
         "password": neo4j_cfg.get("password")
-        or (os.getenv(neo4j_cfg.get("password_env")) if neo4j_cfg.get("password_env") else None),
+        or _resolve_env(neo4j_cfg.get("password_env")),
         "database": neo4j_cfg.get("database", "neo4j"),
     }
 
@@ -387,7 +410,7 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "enabled": bool(mcp_cfg.get("enabled", False)),
         "base_url": mcp_cfg.get("base_url", "http://localhost:20010/v1"),
         "api_key": mcp_cfg.get("api_key")
-        or (os.getenv(mcp_cfg.get("api_key_env")) if mcp_cfg.get("api_key_env") else None),
+        or _resolve_env(mcp_cfg.get("api_key_env")),
         "model": mcp_cfg.get("model", "gpt-4o-mini"),
         "timeout_sec": int(mcp_cfg.get("timeout_sec", 30)),
         "tool_name": mcp_cfg.get("tool_name", "kernel_index_code"),
@@ -401,7 +424,7 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "response_format": mcp_cfg.get("response_format", "markdown"),
         "mcp_base_url": mcp_cfg.get("mcp_base_url", "http://localhost:7331"),
         "mcp_api_key": mcp_cfg.get("mcp_api_key")
-        or (os.getenv(mcp_cfg.get("mcp_api_key_env")) if mcp_cfg.get("mcp_api_key_env") else None),
+        or _resolve_env(mcp_cfg.get("mcp_api_key_env")),
     }
 
     indexing_norm = {

@@ -4,13 +4,16 @@ includes:
 
 project:
   name: hm-verif-kernel
-  repo_path: /home/ryan/work/hmdev_rt/self_source/hm-verif-kernel/
+  # Absolute path to your local hm-verif-kernel checkout.
+  repo_path: /path/to/hm-verif-kernel
   build_system: auto   # auto|make|cmake|bazel|custom
 
 llm:
   provider: openai_compatible
-  base_url: http://10.90.56.33:20010/v1
-  api_key_env: $(HMOPT_LLM_API_KEY)
+  # Point at your OpenAI-compatible gateway.
+  base_url: ${HMOPT_LLM_BASE_URL}
+  # Name of the env var holding the API key (not the key itself).
+  api_key_env: HMOPT_LLM_API_KEY
   model: glm-4.7
   embedding_model: qwen3-embedding-8b
 
@@ -37,8 +40,11 @@ pipelines:
 indexing:
   enabled: true
   persist_dir: data/llamaindex
-  query_prompt_file: /home/ryan/work/hm-kernel-llm-opt-main/configs/analysis_prompt.md
-  hotspot_focus_symbol: reclaim_services
+  query_prompt_file: configs/analysis_prompt.md
+  # Optional: restrict hotspot evidence to a single symbol (debug aid). Leave
+  # empty to consider all hotspots. A non-empty value here silently filters out
+  # every other hotspot, so it must not be left set by accident.
+  hotspot_focus_symbol: ""
   llm_enrich: false
   llm_enrich_limit: 5000
   runtime_evidence_max_chars: 20000
@@ -93,13 +99,14 @@ indexing:
     relation_summary_max_items: 500
   neo4j:
     enabled: true
-    uri: bolt://10.123.104.98:7687
+    uri: ${HMOPT_NEO4J_URI}
     user: neo4j
-    password: '@huawei2026'
+    # Name of the env var holding the Neo4j password (not the password itself).
+    password_env: HMOPT_NEO4J_PASSWORD
     database: neo4j
   mcp:
     enabled: false
-    base_url: http://10.90.56.33:20010/v1
+    base_url: ${HMOPT_LLM_BASE_URL}
     api_key_env: HMOPT_LLM_API_KEY
     model: glm-4.7
     timeout_sec: 30

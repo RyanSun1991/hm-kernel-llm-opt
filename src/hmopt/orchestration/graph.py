@@ -738,11 +738,14 @@ def _hotspot_from_dict(data: dict) -> HotspotCandidate:
 def make_services(config: AppConfig) -> PipelineServices:
     ctx = build_context(config)
     safety = SafetyGuard(config.llm.allow_external_proxy_models)
+    # Offline (fake) LLM answers are only acceptable for dummy/demo runs. A real
+    # run with no key should fail loudly rather than fabricate "successful" work.
     llm = LLMClient(
         api_base=config.llm.base_url,
         api_key=config.llm.api_key,
         default_model=config.llm.model,
         allow_external_proxy_models=config.llm.allow_external_proxy_models,
+        allow_offline=config.adapters.dummy,
     )
 
     if config.adapters.dummy:
@@ -751,7 +754,8 @@ def make_services(config: AppConfig) -> PipelineServices:
         profiler_adapter = DummyProfilerAdapter()
     else:
         build_cmd = config.adapters.build_command or "make -j"
-        test_cmd = config.adapters.test_command or "ctest || true"
+        # No "|| true": a failing test must surface as a failure, not be masked.
+        test_cmd = config.adapters.test_command or "ctest"
         profile_cmd = config.adapters.profile_command or config.adapters.workload_command or "true"
         build_adapter = ShellBuildAdapter(build_cmd)
         test_adapter = ShellTestAdapter(test_cmd)
@@ -1508,10 +1512,19 @@ def run_artifact_analysis(
             state = _evaluate(services, state)
 
     state = _report(services, state)
-    run_row.status = "succeeded"
+    # Do not blanket-overwrite the status: _report already set "succeeded" or
+    # "stopped" based on stop_reason. Clobbering it with "succeeded" here made a
+    # rejected/stopped run report success. Re-read and only confirm success when
+    # there is genuinely no stop reason.
+    run_row = services.ctx.session.query(models.Run).filter(
+        models.Run.run_id == state["run_id"]
+    ).one()
+    run_row.status = "stopped" if state.get("stop_reason") else "succeeded"
     services.ctx.session.commit()
     services.ctx.session.close()
-    logger.info("Artifact analysis finished: run_id=%s", state["run_id"])
+    logger.info(
+        "Artifact analysis finished: run_id=%s status=%s", state["run_id"], run_row.status
+    )
     return state["run_id"]
 
 

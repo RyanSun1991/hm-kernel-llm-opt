@@ -1,8 +1,8 @@
-# Internal LLM API (OpenAI-compatible)
-# Source of truth: model_server.txt in the provided materials.
+# LLM API (OpenAI-compatible). Point api_base at your own gateway; keep the
+# token in the HMOPT_LLM_API_KEY env var rather than committing it here.
 
-api_base: "http://10.90.56.33:20010/v1"
-api_key: "<your_token>"
+api_base: "${HMOPT_LLM_BASE_URL}"
+api_key_env: HMOPT_LLM_API_KEY
 
 # Recommended defaults (adjust per task)
 models:
