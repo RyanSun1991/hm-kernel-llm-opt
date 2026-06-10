@@ -9,11 +9,44 @@ any failure is logged and swallowed so the pipeline's report step is unaffected.
 """
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+
+def write_sediment_input(
+    run_dir: str | Path,
+    *,
+    reviews: list[dict[str, Any]] | None = None,
+    bench: list[dict[str, Any]] | None = None,
+    ledger: list[dict[str, Any]] | None = None,
+    free_text: list[str] | None = None,
+) -> Path | None:
+    """Write the run's distillable signals into `<run_dir>/sediment_input.json`.
+
+    This is the missing producer: without it the close-out hook always read an
+    empty run and yielded 0 candidates. Returns the path, or None when there is
+    nothing to sediment (so an empty run stays honestly empty).
+    """
+    payload: dict[str, Any] = {}
+    if reviews:
+        payload["reviews"] = reviews
+    if bench:
+        payload["bench"] = bench
+    if ledger:
+        payload["ledger"] = ledger
+    if free_text:
+        payload["free_text"] = free_text
+    if not payload:
+        return None
+    run_dir = Path(run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    path = run_dir / "sediment_input.json"
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
 
 
 def sediment_at_closeout(

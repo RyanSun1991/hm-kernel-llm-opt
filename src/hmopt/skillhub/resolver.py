@@ -248,8 +248,15 @@ class Resolver:
                 continue
             h.score *= _maturity_weight(r)  # maturity-calibrated (review F2)
             cur = merged.get(r.id)
-            # hub precedence on a shared stable id, regardless of arrival order
-            if cur is None or (r.origin == "hub" and cur.record.origin == "local"):
+            # hub precedence on a shared stable id, regardless of arrival order;
+            # within the same origin keep the HIGHER-scored hit (the target- and
+            # mechanism-anchored passes can both surface one record — taking the
+            # first-arriving one dropped its stronger score).
+            if (
+                cur is None
+                or (r.origin == "hub" and cur.record.origin == "local")
+                or (r.origin == cur.record.origin and h.score > cur.score)
+            ):
                 merged[r.id] = h
         return sorted(merged.values(), key=lambda h: h.score, reverse=True)
 

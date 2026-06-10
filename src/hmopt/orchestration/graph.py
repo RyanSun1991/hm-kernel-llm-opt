@@ -1151,6 +1151,7 @@ def _review_candidate(services: PipelineServices, state: RunState) -> RunState:
     services.ctx.session.commit()
     state["review_artifact_id"] = art.artifact_id
     state["reviewer_decision"] = decision["decision"]
+    state["review_risk_summary"] = decision["risk_summary"]
     state.setdefault("logs", []).append(decision["rationale"])
     if decision["decision"] != "approve":
         state["force_stop"] = True
@@ -1222,7 +1223,27 @@ def _report(services: PipelineServices, state: RunState) -> RunState:
     # Non-blocking by contract — the hook never raises, so the report step (and
     # the run's success status, already committed above) is never affected.
     try:
-        from hmopt.sediment.hook import sediment_at_closeout
+        from hmopt.sediment.extractors import _slugify
+        from hmopt.sediment.hook import sediment_at_closeout, write_sediment_input
+
+        # Produce the run manifest the sediment reader consumes. Only the review
+        # verdict maps cleanly from this (fps-oriented) pipeline, so we emit just
+        # that — a rejected patch becomes a real anti-pattern/bad_plan candidate;
+        # a run with no review stays honestly empty.
+        reviews: list[dict[str, Any]] = []
+        decision = state.get("reviewer_decision")
+        if decision in ("approve", "reject"):
+            hs = state.get("hotspots") or []
+            target = (hs[0].get("symbol") if hs and isinstance(hs[0], dict) else None) \
+                or services.config.project.name
+            reviews.append({
+                "decision": decision,
+                "mechanism": _slugify(str(state.get("next_action") or "attempted-change")),
+                "target_pattern": str(target),
+                "reason": str(state.get("review_risk_summary") or state.get("stop_reason") or "n/a"),
+                "review_ref": f"run:{state['run_id']}",
+            })
+        write_sediment_input(services.ctx.run_dir, reviews=reviews)
 
         sediment_at_closeout(services.ctx.run_dir, run_id=state["run_id"])
     except Exception:  # noqa: BLE001 - belt-and-suspenders; hook is already guarded

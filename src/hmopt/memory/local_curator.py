@@ -35,6 +35,19 @@ _MATURITY_RANK = {"L0": 0, "L1": 1, "L2": 2, "L3": 3}
 _SELECTOR_RE = re.compile(r"rebase|offset|moved|relocat|path\s*chang", re.IGNORECASE)
 
 
+def _kver(value: object) -> tuple[int, ...] | None:
+    """Parse a kernel version into a component tuple for correct ordering.
+
+    A float was wrong: 6.10 parsed as 6.1, so every x.10+ kernel compared *less*
+    than x.9 and the temporal-staleness check fired backwards. '6.10' -> (6, 10)
+    sorts after '6.9' -> (6, 9). Accepts '6.6', 6.6, '6.10.2', etc.
+    """
+    if value is None:
+        return None
+    parts = re.findall(r"\d+", str(value))
+    return tuple(int(p) for p in parts) if parts else None
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
@@ -54,7 +67,9 @@ class CuratorItem:
     do_or_dont: str = ""
     status: str = "active"
     compare_level: str | None = None
-    kernel_version: float | None = None
+    # Accepts "6.10" / "6.6" / 6.6; compared component-wise via _kver (a float
+    # would order 6.10 before 6.9). Stored as given for provenance.
+    kernel_version: str | float | None = None
     invalidation: str = ""
     granularity: Literal["specific", "general"] = "specific"
     confirmations: int = 1
@@ -170,10 +185,8 @@ def classify_pair(item: CuratorItem, nb: CuratorItem, *, mode: str = "local") ->
         opposite = pol_i != 0 and pol_n != 0 and pol_i != pol_n
 
         # temporal staleness: behavior changed in a newer kernel version
-        if (
-            opposite and item.kernel_version is not None and nb.kernel_version is not None
-            and item.kernel_version > nb.kernel_version
-        ):
+        item_kv, nb_kv = _kver(item.kernel_version), _kver(nb.kernel_version)
+        if opposite and item_kv is not None and nb_kv is not None and item_kv > nb_kv:
             return rel("temporal", rationale="newer kernel version changed behavior")
 
         # conditional divergence: both hold, under different applies_when

@@ -74,13 +74,29 @@ def sediment_run(
     raw = extract_candidates(arts, contributor=contributor, llm=llm, no_llm=no_llm)
 
     result = SedimentResult(run_id=arts.run_id, parse_errors=list(arts.parse_errors))
-    hub = hub_root if hub_root is not None else run_dir
-    for cand in raw:
-        errs = validate_candidate(cand, hub)
-        if errs:
-            result.invalid.append((cand, errs))
-        else:
-            result.candidates.append(cand)
+    # Resolve the hub once. If we can't find one (no schemas/ dir), validating
+    # every candidate would just stamp them all "unknown schema" — making a
+    # config error (no hub) indistinguishable from "produced no candidates".
+    # Surface it loudly via parse_errors and skip validation instead of
+    # silently invalidating everything.
+    from ..skillhub.resolver import find_hub_root
+
+    hub_candidate = hub_root if hub_root is not None else run_dir
+    resolved_hub = find_hub_root(hub_candidate) or Path(hub_candidate)
+    schemas_ok = (Path(resolved_hub) / "schemas").is_dir()
+    if not schemas_ok:
+        result.parse_errors.append(
+            f"hub schemas not found under {resolved_hub!s}; candidates emitted WITHOUT "
+            f"schema validation (pass a valid --out/hub_root to validate)"
+        )
+        result.candidates.extend(raw)
+    else:
+        for cand in raw:
+            errs = validate_candidate(cand, resolved_hub)
+            if errs:
+                result.invalid.append((cand, errs))
+            else:
+                result.candidates.append(cand)
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
