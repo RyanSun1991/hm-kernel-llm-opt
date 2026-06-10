@@ -30,7 +30,6 @@ from hmopt.storage.db.engine import init_engine
 from hmopt.storage.db import models
 from hmopt.storage.db.engine import session_scope
 from hmopt.core.config import load_yaml, normalize_raw_config
-from hmopt.models.hiperf_report import HiperfReport, Frame
 
 app = typer.Typer(help="HM-VERIF kernel optimization platform")
 

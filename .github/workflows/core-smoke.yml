@@ -1,0 +1,38 @@
+name: core-smoke
+
+# Smoke gate for the core platform (everything outside the skill-hub corner,
+# which has its own skill-hub-ci workflow). Catches the class of failure that
+# previously shipped silently: the package not importing from a clean checkout
+# (a missing module crashed every `hmopt` entrypoint). Installs only the core
+# extra (no heavyweight indexing stack), then imports the package, runs the CLI,
+# and runs the non-indexing test suite.
+
+on:
+  push:
+    branches: [main, opencode]
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install (core only, no indexing extra)
+        run: |
+          pip install -e .
+          pip install pytest
+      - name: import smoke (package must import from a clean checkout)
+        run: |
+          python -c "import hmopt.cli, hmopt.orchestration.graph, hmopt.agents; print('core imports OK')"
+      - name: CLI smoke
+        run: |
+          python -m hmopt.cli --help
+          python -m hmopt.cli resolve "mm/vmscan.c::shrink_node" --stage research
+          python -m hmopt.cli retrieval-eval
+      - name: core tests
+        run: |
+          python -m pytest tests/ -q -p no:cacheprovider \
+            --deselect tests/test_windows_relay.py::test_exec_timeout
