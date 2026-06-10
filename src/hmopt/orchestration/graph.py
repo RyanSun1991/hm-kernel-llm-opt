@@ -896,6 +896,14 @@ def _build_evidence(services: PipelineServices, state: RunState) -> RunState:
     )
     state["evidence_artifact_id"] = artifact.artifact_id
     state["evidence_report_artifact_id"] = report_artifact.artifact_id
+    # Carry the analyst summary + top hotspots forward so the coder prompt is
+    # actually anchored on the hot path (previously the coder only got a single
+    # hard-coded instruction string with no hotspot/evidence context).
+    top = filtered_hotspots[:5]
+    hot_lines = "; ".join(
+        f"{getattr(h, 'symbol', '?')} (score={getattr(h, 'score', 0)})" for h in top
+    )
+    state["evidence_summary"] = (f"Hotspots: {hot_lines}\n{summary}").strip()
     logger.info(
         "Evidence pack stored: artifact=%s report_artifact=%s",
         artifact.artifact_id,
@@ -990,7 +998,8 @@ def _coder_generate_patch(services: PipelineServices, state: RunState) -> RunSta
     logger.info("Coder generating patch for iteration=%s", state["iteration"])
     instructions = state.get("next_action", "Improve hotspot.")
     patch_text = services.coder.generate_patch(
-        Path(services.config.project.repo_path), instructions, iteration=state["iteration"]
+        Path(services.config.project.repo_path), instructions, iteration=state["iteration"],
+        context=state.get("evidence_summary", ""),
     )
     art = services.ctx.artifact_store.store_text(
         patch_text,

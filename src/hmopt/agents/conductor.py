@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Mapping
-
 import logging
+import re
 
 from hmopt.core.llm import ChatMessage, LLMClient
 
@@ -12,6 +11,36 @@ from .prompting import render_prompt_template
 from .safety import SafetyGuard
 
 logger = logging.getLogger(__name__)
+
+# Negation guard: "do not continue", "don't continue", "discontinue", "stop"
+# must not be read as "continue" by a naive substring check.
+_DECISION_RE = re.compile(r"(?im)^\s*decision\s*:\s*(continue|stop)\b")
+_STOP_RE = re.compile(r"(?i)\b(stop|halt|finalize|do not continue|don'?t continue|discontinue)\b")
+_CONTINUE_RE = re.compile(r"(?i)\b(continue|keep going|iterate again|another iteration)\b")
+_NEXT_RE = re.compile(r"(?im)^\s*(?:next(?: action)?|action)\s*:\s*(.+)$")
+
+
+def _parse_decision(reply: str) -> str:
+    """Continue only on an explicit, un-negated continue signal; else stop.
+
+    Fail safe toward stopping: an ambiguous or unparseable reply ends the loop
+    rather than burning iterations on a fabricated 'continue'.
+    """
+    m = _DECISION_RE.search(reply)
+    if m:
+        return m.group(1).lower()
+    if _STOP_RE.search(reply):
+        return "stop"
+    if _CONTINUE_RE.search(reply):
+        return "continue"
+    return "stop"
+
+
+def _parse_next_action(reply: str, decision: str) -> str:
+    m = _NEXT_RE.search(reply)
+    if m and m.group(1).strip():
+        return m.group(1).strip()[:300]
+    return "report" if decision == "stop" else "refine the identified hotspot"
 
 
 class ConductorDecision(dict):
@@ -51,8 +80,9 @@ class ConductorAgent:
                 "Current evidence:\n"
                 "{evidence_summary}\n\n"
                 "Decide whether to continue optimizing or stop.\n"
-                "If continuing, propose a concise next action for the coder.\n"
-                "Keep the answer short and operational.\n"
+                "Answer on two lines:\n"
+                "Decision: CONTINUE or STOP\n"
+                "Next: <one concise next action for the coder, if continuing>\n"
             ),
             iteration=iteration,
             max_iterations=max_iterations,
@@ -64,8 +94,8 @@ class ConductorAgent:
             ChatMessage(role="user", content=self.safety.redact(prompt)),
         ]
         reply = self.llm.chat(messages)
-        decision = "continue" if "continue" in reply.lower() else "stop"
-        next_action = "refine code paths in hotspot" if decision == "continue" else "finalize report"
+        decision = _parse_decision(reply)
+        next_action = _parse_next_action(reply, decision)
         logger.info("Conductor decision=%s next_action=%s", decision, next_action)
         return ConductorDecision(
             decision=decision,
