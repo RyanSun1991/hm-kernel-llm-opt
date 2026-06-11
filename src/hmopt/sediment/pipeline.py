@@ -108,6 +108,59 @@ def sediment_run(
     return result
 
 
+def sediment_opencode(
+    opencode_root: str | Path,
+    *,
+    out_dir: str | Path,
+    contributor: str = "opencode",
+    hub_root: str | Path | None = None,
+) -> SedimentResult:
+    """Distill a member's `.opencode/memory/` markdown stores into Tier-1 candidates.
+
+    Same downstream as `sediment_run` (validate -> staging jsonl), but the source
+    is the OpenCode harness's local memory (idea ledgers, global lessons, target /
+    subsystem notes) rather than an `hmopt run` artifact dir — because members work
+    through `.opencode/`, not `hmopt run`.
+    """
+    from ..skillhub.resolver import find_hub_root
+    from .opencode_reader import read_opencode_memory
+
+    mem = read_opencode_memory(opencode_root, contributor=contributor)
+    run_id = f"opencode-{Path(opencode_root).resolve().name}"
+    result = SedimentResult(run_id=run_id, parse_errors=list(mem.parse_errors))
+
+    def _resolve(hr: str | Path | None) -> Path | None:
+        if hr is not None:
+            p = Path(hr)
+            return p if (p / "schemas").is_dir() else find_hub_root(p)
+        return find_hub_root(opencode_root) or find_hub_root(Path.cwd())
+
+    resolved_hub = _resolve(hub_root)
+    schemas_ok = resolved_hub is not None and (Path(resolved_hub) / "schemas").is_dir()
+    if not schemas_ok:
+        result.parse_errors.append(
+            "hub schemas not found; candidates emitted WITHOUT schema validation "
+            "(pass --hub to validate)"
+        )
+        result.candidates.extend(mem.candidates)
+    else:
+        for cand in mem.candidates:
+            errs = validate_candidate(cand, resolved_hub)
+            if errs:
+                result.invalid.append((cand, errs))
+            else:
+                result.candidates.append(cand)
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{run_id}.jsonl"
+    with open(out_path, "w", encoding="utf-8") as f:
+        for cand in result.candidates:
+            f.write(json.dumps(cand, ensure_ascii=False) + "\n")
+    result.out_path = str(out_path)
+    return result
+
+
 def _namespace_id(cand: dict[str, Any], seen: dict[str, set[int]]) -> None:
     """Renumber a candidate's provisional id so it is unique within the bundle.
 

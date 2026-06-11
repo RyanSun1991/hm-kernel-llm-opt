@@ -616,5 +616,51 @@ def retrieval_eval(
         typer.echo(f"baseline updated: {write_baseline(r, eval_dir)}")
 
 
+@app.command("sediment-opencode")
+def sediment_opencode_cmd(
+    opencode_dir: str = typer.Option(".opencode", "--opencode-dir", help="Member's .opencode/ (reads memory/)"),
+    out: str = typer.Option(".opencode/local/sediment_staging", "--out", help="Tier-1 staging output dir"),
+    contributor: str = typer.Option("opencode", "--contributor"),
+    hub: Optional[str] = typer.Option(None, "--hub", help="Hub root (default: auto-discover)"),
+    bundle: bool = typer.Option(False, "--bundle", help="Also collate the staging dir into one PR jsonl"),
+) -> None:
+    # Demo: python -m hmopt.cli sediment-opencode --opencode-dir .opencode
+    # Purpose: distill .opencode/memory/ (idea ledgers, lessons, target notes) into
+    # schema-valid Tier-1 candidates — the source members actually accumulate (design §8).
+    from hmopt.sediment.pipeline import bundle_staging, sediment_opencode
+
+    res = sediment_opencode(opencode_dir, out_dir=out, contributor=contributor, hub_root=hub)
+    typer.echo(f"sediment-opencode[{res.run_id}]: {res.n_valid} valid candidate(s) -> {res.out_path}")
+    if res.parse_errors:
+        typer.echo(f"  {len(res.parse_errors)} parse note(s):")
+        for e in res.parse_errors[:5]:
+            typer.echo(f"   - {e}")
+    if res.invalid:
+        typer.echo(f"  {len(res.invalid)} invalid candidate(s) skipped:")
+        for cand, errs in res.invalid[:5]:
+            typer.echo(f"   - {cand.get('schema')}/{cand.get('record', {}).get('id')}: "
+                       f"{errs[0] if errs else 'invalid'}")
+    if bundle:
+        bundle_path, n = bundle_staging(out, Path(out) / "_bundle.jsonl")
+        typer.echo(f"bundle: {n} record(s) -> {bundle_path}")
+
+
+@app.command("promote-skill")
+def promote_skill_cmd(
+    skill_dir: str = typer.Argument(..., help="Member skill dir, e.g. .opencode/skills/optimization-funnel"),
+    kind: str = typer.Option(..., "--kind", help="Hub skill taxonomy: core|domain|technique"),
+    hub: Optional[str] = typer.Option(None, "--hub", help="Hub root (default: auto-discover)"),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing hub skill"),
+) -> None:
+    # Demo: python -m hmopt.cli promote-skill .opencode/skills/optimization-funnel --kind core
+    # Purpose: scaffold a member .opencode/skill into the hub skills/ taxonomy (design §6.2).
+    from hmopt.sediment.skill_promote import promote_opencode_skill
+
+    res = promote_opencode_skill(skill_dir, kind=kind, hub_root=hub, force=force)
+    typer.echo(f"promoted '{res['name']}' -> {res['skill_md']}")
+    for step in res["next_steps"]:
+        typer.echo(f"  next: {step}")
+
+
 if __name__ == "__main__":
     app()
