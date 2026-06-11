@@ -211,3 +211,99 @@ stateDiagram-v2
 2. **markdown 是唯一真相源** Markdown is the source of truth — 索引只是派生缓存，可随时重建；一切可 git 评审。
 3. **成员习惯零改动** Zero habit change — 正源就是大家已经在写的 `.opencode/memory/`；新增的只是收口一条蒸馏命令。
 4. **一切门禁皆 fail-loud** Gates fail loud — 冲突即 CI 红；晋升永远只建议、人来合。
+
+---
+
+## 图 6 · 知识落位路由 / Knowledge Placement Routing（候选 → `knowledge/` 哪个目录）
+
+**规则（设计 §6.1 "路径即 scope"）**：每条记录一个文件；**文件路径编码 scope**，与 frontmatter 的 `scope` 字段冗余且必须一致——`tools/path_scope.py` 推导期望值，`tools/lint.py` 在 CI 强校验，不一致即拒。
+Rule (design §6.1 "path encodes scope"): one record per file; the file path **encodes** the scope and must agree with the frontmatter — derived by `tools/path_scope.py`, CI-enforced by `tools/lint.py`.
+
+```mermaid
+flowchart LR
+    classDef dir fill:#fff7e6,stroke:#d48806,color:#613400
+    classDef hub fill:#e6f4ff,stroke:#1677ff,color:#002c8c
+
+    C["📦 staging/⟨member⟩/⟨date⟩.jsonl 候选<br/>candidate = schema + frontmatter scope<br/>(策展人按此定稿落位 curator places by this)"]:::hub --> D{"按 schema + scope 路由<br/>route by schema + scope<br/>tools/path_scope.py 推导 · lint.py CI 强校验"}
+
+    D -->|"global_lesson · kind=heuristic"| K1[("knowledge/global/heuristics/H###.md<br/>例 H001-hoist-before-inline")]:::dir
+    D -->|"global_lesson · kind=anti_pattern"| K2[("knowledge/global/anti_patterns/A###.md<br/>例 A001-over-optimizing-cold-paths")]:::dir
+    D -->|"global_lesson · kind=validation_pitfall"| K3[("knowledge/global/validation_pitfalls/V###.md<br/>例 V001-single-image-test")]:::dir
+    D -->|"bad_plan · applies_to.subsystems=星号全局"| K4[("knowledge/global/bad_plans/B###.md<br/>例 B001-blanket-inline-kworker")]:::dir
+    D -->|"bad_plan · applies_to=[⟨subsystem⟩]"| K5[("knowledge/subsystems/⟨sub⟩/bad_plans/B###.md")]:::dir
+    D -->|"memory_item · scope.level=subsystem"| K6[("knowledge/subsystems/⟨sub⟩/⟨id⟩.md")]:::dir
+    D -->|"memory_item · level=function/call-site/data-flow<br/>+ scope.target_slug"| K7[("knowledge/targets/⟨slug⟩/facts/F###.md<br/>例 F001 → targets/mm-vmscan-c-shrink-node/facts/")]:::dir
+    D -->|"idea · target_slug"| K8[("knowledge/targets/⟨slug⟩/idea_ledger/L###.md<br/>例 L001 → targets/mm-vmscan-c-shrink-node/idea_ledger/")]:::dir
+```
+
+### 表 3 · 落位速查 / Placement Cheat-sheet（与 `path_scope.py` 逐行对应 line-for-line with code）
+
+| 候选 Candidate（schema + 判别字段 discriminator） | 落位目录 Destination | id 前缀 | 仓内真实例子 Real example |
+|---|---|---|---|
+| `global_lesson` · `kind: heuristic` | `knowledge/global/heuristics/` | `H###` | `H001-hoist-before-inline.md` |
+| `global_lesson` · `kind: anti_pattern` | `knowledge/global/anti_patterns/` | `A###` | `A001-over-optimizing-cold-paths.md` |
+| `global_lesson` · `kind: validation_pitfall` | `knowledge/global/validation_pitfalls/` | `V###` | `V001-single-image-test.md` |
+| `bad_plan` · `applies_to.subsystems: ["*"]` | `knowledge/global/bad_plans/` | `B###` | `B001-blanket-inline-kworker.md` |
+| `bad_plan` · `applies_to.subsystems: [⟨sub⟩]` | `knowledge/subsystems/⟨sub⟩/bad_plans/` | `B###` | （布局已支持，暂无实例） |
+| `memory_item` · `scope.level: subsystem` | `knowledge/subsystems/⟨sub⟩/` | `F/G/R###` | （布局已支持，暂无实例） |
+| `memory_item` · `scope.level: function`/`call-site`/`data-flow` + `target_slug` | `knowledge/targets/⟨slug⟩/facts/`（或 `decisions/`） | `F###` | `targets/mm-vmscan-c-shrink-node/facts/F001-hoist-sc-priority.md` |
+| `idea` · `target_slug` | `knowledge/targets/⟨slug⟩/idea_ledger/` | `L###` | `targets/mm-vmscan-c-shrink-node/idea_ledger/L001-hoist-sc-priority.md` |
+
+**谁执行落位 Who places**：策展人 curator——dedup 判 `new` 时建**新文件**（分配下一个稳定 id）；判 `merge` 时**不建新文件**，把出处并进已有文件（`confirmations++`）；判 `conflict` 时先消解（旧文件标 `superseded`，新文件落位）。落错目录或 scope 写错 → `lint.py` CI 直接红。
+The curator places files: `new` → new file with the next stable id; `merge` → no new file, provenance merged into the existing one; `conflict` → resolve first. A wrong directory or scope fails CI.
+
+---
+
+## 图 7 · 技能落位 / Skills Placement（§6.2 三层 + "比子系统细的都不是技能"）
+
+**唯一原则 The one rule**：skill 树只按「种类/稳定性」分层；**dir/file/function 维度不是 skill，是 knowledge**，运行时由 selector 挂载——从根上消灭拓扑组合爆炸，rebase 只改一张 selector 表。
+Skills are layered by kind/stability only; anything finer than a subsystem is **knowledge**, mounted at runtime by selectors — topology explosion eliminated, a kernel rebase touches one selector table.
+
+```mermaid
+flowchart LR
+    classDef sk fill:#fff7e6,stroke:#d48806,color:#613400
+    classDef kn fill:#f6ffed,stroke:#389e0d,color:#135200
+    classDef sel fill:#e6f4ff,stroke:#1677ff,color:#002c8c
+
+    D1["维度①流程/跨切面 process<br/>例: 先研究后实现、指令数优先"]
+    D2["维度②优化招式 mechanism<br/>例: hoist-loop-invariant<br/>(按招式命名 · 不按 target)"]
+    D3["维度③子系统 subsystem<br/>例: mm-reclaim"]
+    D4["维度④目录 dir glob<br/>例: mm/star-reclaim-star"]
+    D5["维度⑤文件 file<br/>例: mm/vmscan.c"]
+    D6["维度⑥函数 function/symbol<br/>例: shrink_node"]
+
+    D1 --> S1[("skills/core/⟨name⟩/SKILL.md<br/>例 core/instruction-count-first/")]:::sk
+    D2 --> S2[("skills/technique/⟨mechanism⟩/SKILL.md<br/>例 technique/hoist-loop-invariant/")]:::sk
+    D3 --> S3[("skills/domain/⟨subsystem⟩/SKILL.md<br/>例 domain/mm-reclaim/<br/>(skills 里唯一触及拓扑的层)")]:::sk
+    D4 --> S4["不建目录 no folder!<br/>= domain skill 的 applies_to.path_globs<br/>+ _registry/subsystem_selectors.yaml 单点绑定"]:::sel
+    D5 --> S5[("不是技能 not a skill!<br/>→ knowledge/targets/⟨slug⟩/facts/")]:::kn
+    D6 --> S6[("不是技能 not a skill!<br/>→ knowledge/targets/⟨slug⟩/idea_ledger/<br/>+ selector 表的 symbol_selectors")]:::kn
+
+    S2 -.->|"由晋升产生 born from promotion:<br/>同机制 ≥2 实例 landed → promotion_detector 建议<br/>知识实例留作证据 instances stay as evidence"| S5
+```
+
+**每个技能文件夹的解剖 Anatomy of a skill folder**（Anthropic SKILL.md 标准）：
+`SKILL.md`（何时用+怎么用，选中即加载）· `best_skill.md`（引擎B SkillOpt 制品）· `evals/`（留出测试集）· `candidates/`（Pareto 前沿候选）· `scorecards/`（版本化评分卡）· `references/`（重材料按需加载）。
+
+**两条进入 skills/ 的路 Two ways in**：
+1. **知识毕业 Knowledge graduates**：`promotion_detector` 发现同 mechanism ≥2 独立实例 → 建议开 `skills/technique/⟨mechanism⟩/` PR（实例 fact 留在 `knowledge/` 作证据，不搬家）；
+2. **成员技能提升 Member skill promoted**：`hmopt promote-skill .opencode/skills/⟨name⟩ --kind core|domain|technique` → 生成 L0 脚手架，补 eval+scorecard 后过门毕业。
+
+### 一条记录的完整旅程（拿本仓真实 id 串起来）/ One record's full journey with real ids
+
+```text
+① .opencode/memory/idea_ledger/mm-vmscan-c-shrink-node.md   ← 成员正源（### L001 landed -0.8%）
+② hmopt sediment-opencode --bundle
+   → .opencode/local/sediment_staging/_bundle.jsonl          ← 候选 {"schema":"idea","id":"L901",related_ids:["L001"]}
+③ cp → hm-skill-hub/staging/alice/2026-06-11.jsonl + PR      ← Tier-1 收件箱（还没进 knowledge/!）
+④ CI: lint+redact+dedup --check                              ← dedup 判 new
+⑤ 策展定稿（人）按 schema+scope 落位:
+   idea     → knowledge/targets/mm-vmscan-c-shrink-node/idea_ledger/L001-hoist-sc-priority.md
+   fact     → knowledge/targets/mm-vmscan-c-shrink-node/facts/F001-hoist-sc-priority.md
+   教训     → knowledge/global/heuristics/H001-hoist-before-inline.md
+   坑       → knowledge/global/bad_plans/B001-blanket-inline-kworker.md
+   （路径↔frontmatter scope 一致性由 lint CI 把关）
+⑥ 同机制第 2 个实例 landed → promotion_detector 建议
+   → skills/technique/hoist-loop-invariant/SKILL.md          ← 知识毕业成技能（F001 留作证据 subsumed_by H001）
+⑦ hmopt resolve "mm/vmscan.c::shrink_node"                   ← 下一个人同时拿到 F001+H001+B001 和 technique 技能
+```
