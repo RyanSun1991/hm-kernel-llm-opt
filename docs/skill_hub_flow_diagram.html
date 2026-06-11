@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Team Skill Hub — 全景机制图解 / Full Mechanism Atlas (CN·EN)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  :root { --ink:#1f2329; --soft:#5f6b7a; --line:#e5e8ec; --accent:#1677ff; }
+  * { box-sizing: border-box; }
+  body { font-family: "PingFang SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif;
+         color: var(--ink); margin: 0; background:#f7f8fa; }
+  header { background: linear-gradient(135deg,#0b2447,#19376d); color:#fff; padding:28px 40px; }
+  header h1 { margin:0 0 6px; font-size:24px; }
+  header p { margin:0; opacity:.85; font-size:14px; }
+  main { max-width: 1280px; margin: 0 auto; padding: 24px 32px 64px; }
+  section { background:#fff; border:1px solid var(--line); border-radius:12px;
+            padding:24px 28px; margin:22px 0; box-shadow:0 1px 3px rgba(0,0,0,.04); }
+  h2 { font-size:19px; margin:0 0 4px; color:#0b2447; }
+  .sub { color:var(--soft); font-size:13px; margin:0 0 16px; }
+  pre.mermaid { background:transparent; display:flex; justify-content:center; overflow-x:auto; }
+  table { border-collapse: collapse; width:100%; font-size:13.5px; }
+  th, td { border:1px solid var(--line); padding:8px 10px; text-align:left; vertical-align:top; }
+  th { background:#f0f5ff; color:#0b2447; }
+  tr:nth-child(even) td { background:#fafbfc; }
+  code { background:#f2f4f7; padding:1px 5px; border-radius:4px; font-size:12.5px; }
+  .tenets li { margin:6px 0; }
+  footer { text-align:center; color:var(--soft); font-size:12px; padding:18px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Team Skill Hub — 全景机制图解 / Full Mechanism Atlas</h1>
+  <p>角色 Roles · 动作 Actions · 目录 Directories · 代码 Code · 门禁 Gates · 闭环 Closed Loop　|　中英双语 CN·EN</p>
+</header>
+<main>
+
+<section>
+<h2>图 1 · 全景闭环 / The Big Picture Closed Loop</h2>
+<p class="sub">成员照常工作 → 一条命令蒸馏 → git PR 投稿 → 中央仓质检/策展/发版 → 下一个人自动受益。<br>
+Members work as usual → one distill command → contribute via git PR → hub gates/curation/release → the next member benefits automatically.</p>
+<pre class="mermaid">
+flowchart TB
+    classDef dir fill:#fff7e6,stroke:#d48806,color:#613400
+    classDef code fill:#e6f4ff,stroke:#1677ff,color:#002c8c
+    classDef gate fill:#fff1f0,stroke:#cf1322,color:#5c0011
+    classDef human fill:#f9f0ff,stroke:#722ed1,color:#22075e
+    classDef out fill:#f6ffed,stroke:#389e0d,color:#135200
+
+    subgraph M["① 成员侧 Member side · 每位工程师电脑 each engineer's machine"]
+        direction TB
+        M1["👤 成员 Member<br/>照常用 .opencode/ manager / research 入口干活<br/>work as usual via the .opencode multi-agent harness"]:::human
+        M2[("📁 正源 Source of truth · .opencode/memory/<br/>idea_ledger/⟨target⟩.md — L00x 机制裁决台账 verdict ledger<br/>global_lessons.md — 通用教训 reusable lessons<br/>targets/ · subsystems/ — 目标/子系统记忆 notes")]:::dir
+        M3["⚙️ 新增的桥 The new bridge<br/>hmopt sediment-opencode --bundle<br/>代码 code: src/hmopt/sediment/opencode_reader.py + pipeline.py<br/>markdown 解析 parse → JSON-Schema 校验 validate"]:::code
+        M4[("📦 本地暂存 local staging (gitignored)<br/>.opencode/local/sediment_staging/_bundle.jsonl<br/>schema 合规候选 schema-valid candidates")]:::dir
+        M1 -->|"沉淀 accumulate · 习惯零改动 zero habit change"| M2
+        M2 --> M3
+        M3 --> M4
+    end
+
+    M4 ==>|"② 投稿 Contribute<br/>cp → hm-skill-hub/staging/⟨member⟩/⟨date⟩.jsonl + git PR"| H0
+
+    subgraph H["③ 中央仓 Central hub · hm-skill-hub/ · git PR 驱动 PR-driven"]
+        direction TB
+        H0[("📁 staging/⟨member⟩/*.jsonl<br/>候选收件箱 candidate inbox")]:::dir
+        H1["🚦 CI 门禁 PR gates · .github/workflows/skill-hub-ci.yml<br/>tools/lint.py schema+路径一致性 path-scope check<br/>tools/redact.py 脱敏 secret scan<br/>tools/dedup.py --check 查重/冲突 (冲突即红 fail on conflict)<br/>tools/eval_gate.py 技能回归 skill regression"]:::gate
+        H2["🧠 策展 Curation · 人 human + 引擎A engine A<br/>tools/central_curate.py --report report.md<br/>按报告人工定稿 manual finalize → 分配稳定 id assign stable ids"]:::human
+        H3[("📁 knowledge/ 定稿知识 curated knowledge<br/>global/ heuristics · bad_plans · anti_patterns · validation_pitfalls<br/>targets/⟨slug⟩/ facts · idea_ledger")]:::dir
+        H4["🌙 夜间闭环 Nightly loop · tools/nightly.py [--apply]<br/>收集 collect → 规范 normalize → 聚类 cluster(引擎A)<br/>→ 优化 optimize(引擎B skill_optimizer.py) → eval门 gate<br/>→ 发版 release.py semver → 广播 broadcast.py"]:::code
+        H5["🎓 晋升检测 Promotion · tools/promotion_detector.py<br/>同机制 ≥2 独立实例 same mechanism, ≥2 distinct instances<br/>→ 只开建议 PR suggest-only · 永不自动合 never auto-merge"]:::gate
+        H6[("📁 skills/ 技能库 · core · domain · technique<br/>⟨name⟩/SKILL.md + scorecards/ 评分卡 + eval/ 测试集 suites")]:::dir
+        H0 --> H1
+        H1 --> H2
+        H2 --> H3
+        H3 --> H4
+        H3 --> H5
+        H5 --> H6
+        H4 --> H6
+    end
+
+    H4 ==>|"④ 发版广播 Release broadcast<br/>registry.yaml + .opencode/skill-memory.lock 钉版本 pin version"| C1
+
+    subgraph C["⑤ 消费/回流 Consume and feed back · 任何成员 any member"]
+        direction TB
+        C1["🔎 读路径 Read path<br/>hmopt resolve ⟨path::symbol⟩ --stage research<br/>代码 code: src/hmopt/skillhub/resolver.py + retrieval.py<br/>selector匹配子系统 → 技能闭包 requires → 混合检索 hybrid retrieval"]:::code
+        C2["🧩 挂载的上下文 Mounted context<br/>该函数的事实 facts + 坑 bad plans + 教训 lessons<br/>按阶段 token 预算裁剪 trimmed to stage budget<br/>审计 audit: retrieval.jsonl"]:::out
+        C1 --> C2
+    end
+
+    C2 ==>|"喂给下一次优化 session feeds the next run · 经验越用越准"| M1
+</pre>
+</section>
+
+<section>
+<h2>图 2 · 写路径映射 / Write-path Mapping</h2>
+<p class="sub"><code>.opencode/memory/</code> → hub 四大记录族 four record families。模板 HTML 注释中的示例自动忽略 / examples inside comments are ignored.</p>
+<pre class="mermaid">
+flowchart LR
+    classDef src fill:#fff7e6,stroke:#d48806,color:#613400
+    classDef rec fill:#f6ffed,stroke:#389e0d,color:#135200
+
+    S1["📄 idea_ledger/⟨target⟩.md<br/>每行 row: ### L001 ⟨机制一句话 mechanism⟩<br/>+ status / delta_pct / compare_level / rationale"]:::src
+    S2["📄 global_lessons.md<br/>每条 entry: ### ⟨教训标题 lesson title⟩<br/>+ kind / applies_when / do_or_dont / tags"]:::src
+    S3["📄 targets/⟨slug⟩.md<br/>## Known Bad Plans 小节 section"]:::src
+    S4["📄 targets/⟨slug⟩.md<br/>## Stable Structural Facts<br/>## Good Optimization Directions"]:::src
+    S5["📄 subsystems/⟨name⟩.md<br/>同上小节 same sections"]:::src
+
+    R1["🧾 idea · L9xx<br/>裁决 verdict: approved/landed/reverted/rejected/deferred<br/>related_ids 保留原 L00x 溯源 provenance"]:::rec
+    R2["🧾 global_lesson · H9xx/A9xx/V9xx<br/>id 前缀按 kind 匹配 schema<br/>H=heuristic A=anti_pattern V=validation_pitfall"]:::rec
+    R3["🧾 bad_plan · B9xx<br/>别人不再踩的坑 the trap others skip"]:::rec
+    R4["🧾 memory_item fact · F9xx<br/>function 级 + target_slug"]:::rec
+    R5["🧾 memory_item fact · F9xx<br/>subsystem 级 scope"]:::rec
+
+    S1 --> R1
+    S2 --> R2
+    S3 --> R3
+    S4 --> R4
+    S5 --> R5
+</pre>
+</section>
+
+<section>
+<h2>图 3 · 双引擎治理 / Two Governance Engines</h2>
+<p class="sub">引擎 A：知识合并（追加式，绝不删历史）/ Engine A: append-only knowledge merge</p>
+<pre class="mermaid">
+flowchart TB
+    classDef gate fill:#fff1f0,stroke:#cf1322,color:#5c0011
+    classDef ok fill:#f6ffed,stroke:#389e0d,color:#135200
+
+    IN["📥 incoming 候选 candidate"] --> REL{"相关吗 related?<br/>同 scope + 词面重叠 lexical overlap<br/>或机制别名命中 alias hit"}
+    REL -->|"否 no"| NEW["✅ new 新增 add<br/>(新实例/新条件 additive)"]:::ok
+    REL -->|"是 yes"| POL{"结论相反 opposite verdict?<br/>且同条件 same applies_when?"}
+    POL -->|"是 yes"| CONF["⛔ conflict 冲突 → CI 红 fail<br/>conflict_resolve.py 双时态消解<br/>旧记 superseded 墓碑 · 绝不物理删除 never delete"]:::gate
+    POL -->|"否 no"| SIM{"相似度 ≥ 0.82<br/>且同 scope?"}
+    SIM -->|"是 yes"| MER["🔗 merge 合并出处<br/>confirmations++ · 不新增 id<br/>(喂 ≥2 确认晋升规则)"]:::ok
+    SIM -->|"否 no"| NEW
+</pre>
+<p class="sub">引擎 B：技能优化（eval 门，反喂安全）/ Engine B: skill optimization under a monotone eval gate</p>
+<pre class="mermaid">
+flowchart LR
+    classDef gate fill:#fff1f0,stroke:#cf1322,color:#5c0011
+    classDef ok fill:#f6ffed,stroke:#389e0d,color:#135200
+
+    E1["📜 技能文本 skill text<br/>= 冻结模型的外部参数<br/>external params of a frozen model"] --> E2["tools/skill_optimizer.py<br/>竞争式候选编辑 competing edits"]
+    E2 --> E3{"留出 eval 集 holdout:<br/>严格变好 strictly better<br/>且零回归 zero regression?"}
+    E3 -->|"是 yes"| E4["✅ 接受 accept<br/>scorecard 新版本 · dashboard ▲"]:::ok
+    E3 -->|"否 no"| E5["⛔ 拒绝 reject → bad_edits 缓冲<br/>下次跳过 skipped (反喂安全 anti-poisoning)"]:::gate
+</pre>
+</section>
+
+<section>
+<h2>图 4 · 读路径内部 / Inside the Read Path（hmopt resolve）</h2>
+<pre class="mermaid">
+flowchart TB
+    classDef code fill:#e6f4ff,stroke:#1677ff,color:#002c8c
+    classDef out fill:#f6ffed,stroke:#389e0d,color:#135200
+
+    Q["🔎 hmopt resolve mm/vmscan.c::shrink_node --stage research"] --> P1["1️⃣ split_target<br/>path = mm/vmscan.c · symbol = shrink_node"]:::code
+    P1 --> P2["2️⃣ selector 匹配 match<br/>_registry/subsystem_selectors.yaml<br/>path_globs + symbol_selectors → mm-reclaim<br/>(内核 rebase 只改这张表)"]:::code
+    P2 --> P3["3️⃣ 技能闭包 skill closure<br/>domain/mm-reclaim → requires →<br/>technique/hoist-loop-invariant + core/*"]:::code
+    P3 --> P4["4️⃣ 混合检索 hybrid retrieval<br/>BM25(符号名强) + 哈希向量(模糊词面) · RRF 融合<br/>scope 预过滤 + hub 知识 maturity ≥ L2 门"]:::code
+    P4 --> P5["5️⃣ 阶段预算裁剪 trim to budget<br/>research 8条/3000tok · plan 5/2000 · implement 3/1500<br/>(防上下文污染 anti context-pollution)"]:::code
+    P5 --> OUT["🧩 输出 output: skills + knowledge<br/>+ retrieval.jsonl 逐次审计 per-call audit"]:::out
+</pre>
+</section>
+
+<section>
+<h2>图 5 · 一条经验的生命周期 / Lifecycle of One Piece of Knowledge</h2>
+<pre class="mermaid">
+stateDiagram-v2
+    direction LR
+    s0: L0 本地草稿 local draft
+    s1: L1 候选 candidate
+    s2: L2 稳定 stable
+    s3: L3 确认 confirmed
+    sup: superseded 被取代·墓碑保留
+    sk: 🎓 technique 技能 skill
+
+    [*] --> s0: .opencode/memory/ 沉淀
+    s0 --> s1: hmopt sediment-opencode 蒸馏
+    s1 --> s2: PR 门禁 + 策展定稿 → knowledge/
+    s2 --> s3: 跨成员确认 confirmations
+    s2 --> sup: 冲突且新证据更强 (不删 never deleted)
+    s2 --> sk: 同机制 ≥2 实例 promotion (建议制)
+    s3 --> sk
+</pre>
+</section>
+
+<section>
+<h2>表 1 · 角色 × 动作 × 入口 / Role × Action × Entry Point</h2>
+<table>
+<tr><th>角色 Role</th><th>时机 When</th><th>动作/入口 Action / Entry</th><th>看什么结果 Observe</th></tr>
+<tr><td>👤 成员 Member</td><td>研究新函数前 before research</td><td><code>hmopt resolve "⟨path::symbol⟩" --stage research --run-dir .opencode/state</code></td><td>挂载的 skills+knowledge；<code>retrieval.jsonl</code> 审计</td></tr>
+<tr><td>👤 成员 Member</td><td>收口 at close-out</td><td><code>hmopt sediment-opencode --opencode-dir .opencode --hub hm-skill-hub --contributor ⟨你⟩ --bundle</code></td><td>CLI 打印 N valid / M invalid；<code>_bundle.jsonl</code></td></tr>
+<tr><td>👤 成员 Member</td><td>投稿 contribute</td><td><code>cp _bundle.jsonl hm-skill-hub/staging/⟨你⟩/⟨日期⟩.jsonl</code> + git PR</td><td>CI 四道门 绿/红</td></tr>
+<tr><td>👤 成员 Member</td><td>共享技能 share skill</td><td><code>hmopt promote-skill .opencode/skills/⟨name⟩ --kind core|domain|technique</code></td><td>L0 脚手架 + 待补清单 next steps</td></tr>
+<tr><td>🧠 维护者 Maintainer</td><td>收到投稿 PR</td><td><code>python tools/central_curate.py staging/⟨m⟩/⟨d⟩.jsonl --report report.md</code></td><td>逐条 add/merge/conflict 报告</td></tr>
+<tr><td>🧠 维护者 Maintainer</td><td>定稿 finalize</td><td>手工写 <code>knowledge/...md</code>（分配稳定 id）→ <code>python tools/lint.py</code></td><td><code>OK — N record file(s) validated</code></td></tr>
+<tr><td>🧠 维护者 Maintainer</td><td>每晚/每周 nightly</td><td><code>python tools/nightly.py</code> → 复核后 <code>--apply</code></td><td>7 步报告；registry 版本；lock</td></tr>
+<tr><td>🧠 维护者 Maintainer</td><td>晋升 promotions</td><td><code>python tools/promotion_detector.py --pr-body</code></td><td>promote-candidate PR 文案</td></tr>
+<tr><td>🤖 CI 自动 auto</td><td>任何 PR any PR</td><td><code>skill-hub-ci.yml</code> · <code>core-smoke.yml</code></td><td>GitHub Checks 绿/红</td></tr>
+<tr><td>📊 所有人 Everyone</td><td>健康度 health</td><td><code>python tools/dashboard.py</code></td><td><code>eval/scorecards/_dashboard.md</code> 趋势 ▲</td></tr>
+</table>
+</section>
+
+<section>
+<h2>表 2 · 目录与代码地图 / Directory &amp; Code Map</h2>
+<table>
+<tr><th>路径 Path</th><th>是什么 What</th><th>谁写 Written by</th><th>谁读 Read by</th></tr>
+<tr><td><code>.opencode/memory/idea_ledger/</code></td><td>机制裁决台账（正源）verdict ledgers</td><td>成员/harness</td><td>sediment-opencode</td></tr>
+<tr><td><code>.opencode/memory/global_lessons.md</code></td><td>通用教训 lessons</td><td>成员/harness</td><td>sediment-opencode</td></tr>
+<tr><td><code>.opencode/memory/targets|subsystems/</code></td><td>目标/子系统记忆 notes</td><td>成员/harness</td><td>sediment-opencode</td></tr>
+<tr><td><code>.opencode/local/sediment_staging/</code></td><td>本地暂存（gitignored）</td><td>sediment-opencode / 钩子</td><td>成员（投稿 cp）</td></tr>
+<tr><td><code>.opencode/skill-memory.lock</code></td><td>hub 版本钉 pin</td><td>tools/broadcast.py</td><td>消费侧</td></tr>
+<tr><td><code>src/hmopt/sediment/opencode_reader.py</code></td><td><b>桥</b>：memory markdown → 候选</td><td>—</td><td>sediment_opencode()</td></tr>
+<tr><td><code>src/hmopt/sediment/pipeline.py</code></td><td>蒸馏编排 + bundle 重编 id</td><td>—</td><td>CLI / 钩子</td></tr>
+<tr><td><code>src/hmopt/sediment/skill_promote.py</code></td><td>成员技能 → hub L0 脚手架</td><td>—</td><td>hmopt promote-skill</td></tr>
+<tr><td><code>src/hmopt/skillhub/resolver.py</code></td><td>读路径编排 read path</td><td>—</td><td>hmopt resolve</td></tr>
+<tr><td><code>src/hmopt/skillhub/retrieval.py</code></td><td>BM25+向量混合检索</td><td>—</td><td>resolver / eval</td></tr>
+<tr><td><code>hm-skill-hub/staging/</code></td><td>候选收件箱 inbox</td><td>成员 PR</td><td>CI / curate / nightly</td></tr>
+<tr><td><code>hm-skill-hub/knowledge/</code></td><td>定稿知识（唯一真相源）curated knowledge</td><td>维护者</td><td>resolver / dedup / promotion</td></tr>
+<tr><td><code>hm-skill-hub/skills/</code></td><td>技能库 core·domain·technique</td><td>维护者 / promote-skill</td><td>resolver / optimizer / eval_gate</td></tr>
+<tr><td><code>hm-skill-hub/schemas/</code></td><td>记录族 + 技能 JSON-Schema</td><td>维护者</td><td>lint / sediment validate</td></tr>
+<tr><td><code>hm-skill-hub/_registry/subsystem_selectors.yaml</code></td><td>target→子系统映射（rebase 只改这）</td><td>维护者</td><td>resolver</td></tr>
+<tr><td><code>hm-skill-hub/tools/</code></td><td>中央工具链 lint/redact/dedup/curate/nightly…</td><td>—</td><td>CI / 维护者</td></tr>
+<tr><td><code>hm-skill-hub/eval/</code></td><td>留出测试集 + scorecards + 看板</td><td>run_evals / dashboard</td><td>eval_gate / 所有人</td></tr>
+</table>
+</section>
+
+<section>
+<h2>设计要点速记 / Design Tenets</h2>
+<ul class="tenets">
+<li><b>两类资产两台引擎</b> Two assets, two engines — 知识=追加+查重+冲突消解（绝不删历史）；技能=就地编辑+eval 严格变好（反喂安全）。</li>
+<li><b>markdown 是唯一真相源</b> Markdown is the source of truth — 索引是派生缓存，可重建；一切可 git 评审。</li>
+<li><b>成员习惯零改动</b> Zero habit change — 正源就是大家已在写的 <code>.opencode/memory/</code>；新增的只是收口一条蒸馏命令。</li>
+<li><b>门禁 fail-loud、晋升建议制</b> Gates fail loud; promotion is suggest-only — 冲突即 CI 红；毕业永远由人合并。</li>
+</ul>
+</section>
+
+</main>
+<footer>hm-kernel-llm-opt · Team Skill Hub Flow Atlas · 渲染需联网加载 mermaid CDN / requires internet for the mermaid CDN</footer>
+<script>mermaid.initialize({ startOnLoad: true, theme: "default", flowchart: { htmlLabels: true, curve: "basis" } });</script>
+</body>
+</html>
