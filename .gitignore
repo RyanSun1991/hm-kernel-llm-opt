@@ -22,3 +22,8 @@ __pycache__/
 
 # Docker local env
 .env.docker
+
+# Per-member local skill-hub state (sediment staging, in-flight memory) —
+# design §8/promotion_policy: local-only, never committed; shared knowledge
+# reaches the hub via staging/ PRs instead.
+/.opencode/local/
