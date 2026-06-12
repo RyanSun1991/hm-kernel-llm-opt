@@ -550,6 +550,11 @@ def sediment(
     from hmopt.sediment.pipeline import bundle_staging, sediment_run
     from hmopt.skillhub.resolver import find_hub_root
 
+    if not Path(run_dir).is_dir():
+        raise typer.BadParameter(
+            f"--run-dir {run_dir!r} does not exist (cwd: {Path.cwd()})"
+        )
+
     hub_root = find_hub_root(Path.cwd())
     llm = None if no_llm_extract else _maybe_llm(config)
     res = sediment_run(
@@ -630,6 +635,16 @@ def sediment_opencode_cmd(
     # Purpose: distill .opencode/ (memory ledgers/lessons/notes + reviews/bench/state
     # run artifacts) into schema-valid Tier-1 candidates (design §8).
     from hmopt.sediment.pipeline import bundle_staging, sediment_opencode
+
+    # A mistyped/relative path from the wrong cwd must fail loudly — silently
+    # emitting "0 valid candidate(s)" made a typo indistinguishable from an
+    # empty run. (Members typically run this from the kernel repo root.)
+    if not Path(opencode_dir).is_dir():
+        raise typer.BadParameter(
+            f"--opencode-dir {opencode_dir!r} does not exist (cwd: {Path.cwd()}). "
+            f"Point it at the repo's .opencode/ directory, e.g. "
+            f"--opencode-dir /path/to/hm-verif-kernel/.opencode"
+        )
 
     llm = _maybe_llm(config) if llm_extract else None
     if llm_extract and llm is None:
