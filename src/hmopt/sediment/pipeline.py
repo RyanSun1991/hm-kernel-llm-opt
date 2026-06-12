@@ -27,6 +27,8 @@ class SedimentResult:
     invalid: list[tuple[dict[str, Any], list[str]]] = field(default_factory=list)
     parse_errors: list[str] = field(default_factory=list)
     out_path: str | None = None
+    # files examined per source (opencode path); explains a 0-candidate result
+    scanned: dict[str, int] = field(default_factory=dict)
 
     @property
     def n_valid(self) -> int:
@@ -134,7 +136,10 @@ def sediment_opencode(
     from .salience import llm_salience_pass
 
     mem = read_opencode_memory(opencode_root, contributor=contributor)
-    run_id = f"opencode-{Path(opencode_root).resolve().name}"
+    # Name the batch after the repo, not the literal ".opencode" basename
+    # (which produced the unhelpful "opencode-.opencode").
+    p = Path(opencode_root).resolve()
+    run_id = f"opencode-{p.parent.name if p.name == '.opencode' else p.name}"
     if llm is not None and mem.free_text:
         mem.candidates.extend(
             llm_salience_pass(mem.free_text, llm, run_id=run_id, contributor=contributor)
@@ -145,7 +150,8 @@ def sediment_opencode(
     seen: dict[str, set[int]] = {}
     for cand in mem.candidates:
         _namespace_id(cand, seen)
-    result = SedimentResult(run_id=run_id, parse_errors=list(mem.parse_errors))
+    result = SedimentResult(run_id=run_id, parse_errors=list(mem.parse_errors),
+                            scanned=dict(mem.scanned))
 
     def _resolve(hr: str | Path | None) -> Path | None:
         if hr is not None:

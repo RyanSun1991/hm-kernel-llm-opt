@@ -623,7 +623,9 @@ def retrieval_eval(
 @app.command("sediment-opencode")
 def sediment_opencode_cmd(
     opencode_dir: str = typer.Option(".opencode", "--opencode-dir", help="Member's .opencode/ (reads memory/)"),
-    out: str = typer.Option(".opencode/local/sediment_staging", "--out", help="Tier-1 staging output dir"),
+    out: Optional[str] = typer.Option(
+        None, "--out",
+        help="Tier-1 staging output dir (default: <opencode-dir>/local/sediment_staging)"),
     contributor: str = typer.Option("opencode", "--contributor"),
     hub: Optional[str] = typer.Option(None, "--hub", help="Hub root (default: auto-discover)"),
     bundle: bool = typer.Option(False, "--bundle", help="Also collate the staging dir into one PR jsonl"),
@@ -646,13 +648,28 @@ def sediment_opencode_cmd(
             f"--opencode-dir /path/to/hm-verif-kernel/.opencode"
         )
 
+    # Anchor staging beside the member's .opencode by default. A CWD-relative
+    # default wrote the output into whatever repo you happened to run from.
+    out_dir = Path(out) if out else Path(opencode_dir) / "local" / "sediment_staging"
+
     llm = _maybe_llm(config) if llm_extract else None
     if llm_extract and llm is None:
         typer.echo("warning: --llm-extract requested but no usable LLM (check HMOPT_LLM_API_KEY); "
                    "continuing with deterministic extraction only")
-    res = sediment_opencode(opencode_dir, out_dir=out, contributor=contributor, hub_root=hub,
+    res = sediment_opencode(opencode_dir, out_dir=out_dir, contributor=contributor, hub_root=hub,
                             llm=llm)
     typer.echo(f"sediment-opencode[{res.run_id}]: {res.n_valid} valid candidate(s) -> {res.out_path}")
+    if res.n_valid == 0:
+        if res.scanned:
+            scanned = ", ".join(f"{k}={v}" for k, v in sorted(res.scanned.items()))
+            typer.echo(f"  scanned files: {scanned}")
+            typer.echo("  0 candidates means no extractable entries matched the expected formats "
+                       "(### L00x ledger rows, ### lesson entries with bullets, "
+                       "## Known Bad Plans / ## Stable Structural Facts sections, "
+                       "'## Decision reject' reviews, 'verdict: pass'+delta_pct bench reports).")
+        else:
+            typer.echo("  nothing scanned: memory/ has no ledgers/lessons/notes yet "
+                       f"(looked under {opencode_dir})")
     if res.parse_errors:
         typer.echo(f"  {len(res.parse_errors)} parse note(s):")
         for e in res.parse_errors[:5]:
@@ -663,7 +680,7 @@ def sediment_opencode_cmd(
             typer.echo(f"   - {cand.get('schema')}/{cand.get('record', {}).get('id')}: "
                        f"{errs[0] if errs else 'invalid'}")
     if bundle:
-        bundle_path, n = bundle_staging(out, Path(out) / "_bundle.jsonl")
+        bundle_path, n = bundle_staging(out_dir, out_dir / "_bundle.jsonl")
         typer.echo(f"bundle: {n} record(s) -> {bundle_path}")
 
 

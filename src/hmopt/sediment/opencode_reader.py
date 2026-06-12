@@ -60,6 +60,10 @@ class OpenCodeMemory:
     candidates: list[Candidate] = field(default_factory=list)
     parse_errors: list[str] = field(default_factory=list)
     free_text: list[str] = field(default_factory=list)
+    # files examined per source — lets the CLI explain a 0-candidate result
+    # ("scanned 3 ledgers but no ### L00x rows matched") instead of leaving the
+    # member guessing whether the tool even looked at their data.
+    scanned: dict[str, int] = field(default_factory=dict)
 
 
 def _now() -> str:
@@ -413,7 +417,8 @@ def read_opencode_memory(opencode_root: str | Path, *, contributor: str = "openc
     mem = root / "memory" if (root / "memory").exists() else root
     result = OpenCodeMemory()
 
-    def _safe(fn, p: Path, **kw):
+    def _safe(fn, p: Path, source: str, **kw):
+        result.scanned[source] = result.scanned.get(source, 0) + 1
         try:
             result.candidates.extend(fn(p, contributor=contributor,
                                         errors=result.parse_errors, **kw))
@@ -425,21 +430,21 @@ def read_opencode_memory(opencode_root: str | Path, *, contributor: str = "openc
         for p in sorted(ledger_dir.glob("*.md")):
             if p.name in {"README.md", "template.md"}:
                 continue
-            _safe(parse_idea_ledger, p)
+            _safe(parse_idea_ledger, p, "memory/idea_ledger")
 
     gl = mem / "global_lessons.md"
     if gl.exists():
-        _safe(parse_global_lessons, gl)
+        _safe(parse_global_lessons, gl, "memory/global_lessons")
 
     for p in sorted((mem / "targets").glob("*.md")) if (mem / "targets").exists() else []:
         if p.name in {"README.md", "target_memory_template.md"}:
             continue
-        _safe(parse_target_memory, p)
+        _safe(parse_target_memory, p, "memory/targets")
 
     for p in sorted((mem / "subsystems").glob("*.md")) if (mem / "subsystems").exists() else []:
         if p.name in {"README.md"}:
             continue
-        _safe(parse_target_memory, p, subsystem=_slugify(p.stem))
+        _safe(parse_target_memory, p, "memory/subsystems", subsystem=_slugify(p.stem))
 
     # Tier-0 run artifacts (safety net beside the curated memory/ layer).
     # Skipped entirely when the caller points at a bare memory/ tree.
@@ -449,20 +454,22 @@ def read_opencode_memory(opencode_root: str | Path, *, contributor: str = "openc
             for p in sorted(reviews.glob("*.md")):
                 if "template" in p.name.lower():
                     continue
-                _safe(parse_review, p)
+                _safe(parse_review, p, "reviews")
 
         bench = root / "bench"
         if bench.exists():
             for p in sorted(bench.glob("*_validation.md")):
                 if "template" in p.name.lower():
                     continue
-                _safe(parse_bench_validation, p)
+                _safe(parse_bench_validation, p, "bench")
 
         state = root / "state"
         if state.exists():
             for p in sorted(state.glob("*bad_plans*.md")):
-                _safe(parse_state_bad_plans, p)
+                _safe(parse_state_bad_plans, p, "state/bad_plans")
 
         result.free_text = _collect_free_text(root)
+        if result.free_text:
+            result.scanned["docs+plans free_text"] = len(result.free_text)
 
     return result
