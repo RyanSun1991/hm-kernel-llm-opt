@@ -78,6 +78,7 @@ flowchart LR
         s2["Reusable lessons<br/>global_lessons.md"]:::src
         s3["Target notes<br/>facts / known bad plans"]:::src
         s4["Process skills<br/>.opencode/skills/"]:::src
+        s5["Run artifacts · safety net<br/>reviews/ rejects · bench/ deltas · state/ bad plans"]:::src
     end
 
     subgraph K["hub: knowledge/ (placed by scope)"]
@@ -96,6 +97,8 @@ flowchart LR
     s3 -->|"function-level fact / bad plan"| k2
     s3 -->|"subsystem-level"| k3
     s2 -->|"lessons → H/A/V · global traps → B"| k1
+    s5 -->|"reject→anti-pattern/bad plan · pass+delta→fact"| k1
+    s5 --> k2
     s4 -->|"hmopt promote-skill"| t1
     k2 -.->|"same mechanism verified on ≥2 targets → graduates<br/>(original records stay as evidence)"| t2
 </pre>
@@ -105,6 +108,7 @@ flowchart LR
 <tr><td>Function-level fact / measured A·B result</td><td>memory_item fact</td><td><code>knowledge/targets/⟨slug⟩/facts/F###.md</code></td></tr>
 <tr><td>Reusable lesson (heuristic / anti-pattern / validation pitfall)</td><td>global_lesson</td><td><code>knowledge/global/heuristics|anti_patterns|validation_pitfalls/</code> (H/A/V)</td></tr>
 <tr><td>Rejected approach (global trap)</td><td>bad_plan</td><td><code>knowledge/global/bad_plans/B###.md</code></td></tr>
+<tr><td>Review rejects / passing validations (reviews/ bench/ state/; safety net when an agent skips memory-accumulation)</td><td>anti_pattern·bad_plan / fact</td><td>placed by scope as above; <code>docs/ plans/</code> free text via optional <code>--llm-extract</code></td></tr>
 <tr><td>Process skill SKILL.md</td><td>L0 skill scaffold</td><td><code>skills/core|technique|domain/⟨name⟩/</code> (graduates after eval is added)</td></tr>
 </table>
 </section>

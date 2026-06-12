@@ -29,7 +29,6 @@ from hmopt.storage.artifact_store import ArtifactStore
 from hmopt.storage.db.engine import init_engine
 from hmopt.storage.db import models
 from hmopt.storage.db.engine import session_scope
-from hmopt.core.config import load_yaml, normalize_raw_config
 
 app = typer.Typer(help="HM-VERIF kernel optimization platform")
 
@@ -623,13 +622,21 @@ def sediment_opencode_cmd(
     contributor: str = typer.Option("opencode", "--contributor"),
     hub: Optional[str] = typer.Option(None, "--hub", help="Hub root (default: auto-discover)"),
     bundle: bool = typer.Option(False, "--bundle", help="Also collate the staging dir into one PR jsonl"),
+    llm_extract: bool = typer.Option(False, "--llm-extract",
+                                     help="Also run the LLM salience pass over docs/plans free text"),
+    config: str = typer.Option("configs/app.yaml", "--config"),
 ) -> None:
     # Demo: python -m hmopt.cli sediment-opencode --opencode-dir .opencode
-    # Purpose: distill .opencode/memory/ (idea ledgers, lessons, target notes) into
-    # schema-valid Tier-1 candidates — the source members actually accumulate (design §8).
+    # Purpose: distill .opencode/ (memory ledgers/lessons/notes + reviews/bench/state
+    # run artifacts) into schema-valid Tier-1 candidates (design §8).
     from hmopt.sediment.pipeline import bundle_staging, sediment_opencode
 
-    res = sediment_opencode(opencode_dir, out_dir=out, contributor=contributor, hub_root=hub)
+    llm = _maybe_llm(config) if llm_extract else None
+    if llm_extract and llm is None:
+        typer.echo("warning: --llm-extract requested but no usable LLM (check HMOPT_LLM_API_KEY); "
+                   "continuing with deterministic extraction only")
+    res = sediment_opencode(opencode_dir, out_dir=out, contributor=contributor, hub_root=hub,
+                            llm=llm)
     typer.echo(f"sediment-opencode[{res.run_id}]: {res.n_valid} valid candidate(s) -> {res.out_path}")
     if res.parse_errors:
         typer.echo(f"  {len(res.parse_errors)} parse note(s):")

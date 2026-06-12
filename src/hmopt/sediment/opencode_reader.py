@@ -29,7 +29,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .extractors import Candidate, LedgerChange, _slugify, ledger_to_idea
+from .extractors import (
+    BenchResult,
+    Candidate,
+    LedgerChange,
+    ReviewVerdict,
+    _slugify,
+    bench_to_fact,
+    ledger_to_idea,
+    review_to_anti_pattern,
+    review_to_bad_plan,
+)
 
 _COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 _BULLET_RE = re.compile(r"^\s*[-*]\s+\*\*(?P<key>[^*]+)\*\*\s*:\s*(?P<val>.+?)\s*$", re.MULTILINE)
@@ -43,11 +53,13 @@ _COMPARE_LEVELS = {"total", "process", "thread", "lib", "function"}
 
 @dataclass
 class OpenCodeMemory:
-    """Candidates parsed from a member's `.opencode/memory/` tree, plus the
-    non-fatal problems hit while parsing (design §8: never gate)."""
+    """Candidates parsed from a member's `.opencode/` tree, plus the non-fatal
+    problems hit while parsing (design §8: never gate). `free_text` carries the
+    research design/plan documents for the optional LLM salience pass."""
 
     candidates: list[Candidate] = field(default_factory=list)
     parse_errors: list[str] = field(default_factory=list)
+    free_text: list[str] = field(default_factory=list)
 
 
 def _now() -> str:
@@ -270,6 +282,128 @@ def _fact(text: str, slug: str, subsystem: str | None, level: str, contributor: 
     }}
 
 
+# --- run artifacts: reviews / bench / state bad-plans -----------------------
+#
+# The harness write contract (.opencode/CLAUDE.md):
+#   plan-reviewer  -> reviews/<artifact>_plan_review.md   (## Decision approve|reject)
+#   code-reviewer  -> reviews/<artifact>_code_review.md
+#   tester         -> bench/<artifact>_validation.md      (verdict + aggregate delta)
+#   manager        -> state/*bad_plans*.md                (globally rejected patterns)
+# memory/ is the *curated* layer the agents are told to distill into; these raw
+# Tier-0 artifacts are parsed as a safety net so a verdict still sediments even
+# when an agent forgot the memory-accumulation step. Duplicates across sources
+# (e.g. a landed ledger row AND its bench report) are reconciled by hub dedup
+# (merge => confirmations++, which is exactly the corroboration we want).
+
+_DECISION_SECTION_RE = re.compile(
+    r"^##[ \t]+Decision[ \t]*\n+(?P<body>.*?)(?=^##[ \t]|\Z)", re.MULTILINE | re.DOTALL)
+_VERDICT_RE = re.compile(r"\bverdict\b[^a-zA-Z]{0,10}(pass|fail|inconclusive|skipped)", re.I)
+_DELTA_RE = re.compile(r"delta[_\s-]*pct\b[^-\d]{0,20}(-?\d+(?:\.\d+)?)", re.IGNORECASE)
+_COMPARE_RE = re.compile(r"compare[_\s-]*level\b[^a-z]{0,10}(total|process|thread|lib|function)", re.I)
+
+
+def _artifact_slug(path: Path) -> str:
+    """`<artifact>_plan_review.md` / `<artifact>_validation.md` -> artifact slug."""
+    stem = path.stem
+    for suffix in ("_plan_review", "_code_review", "_validation", "_review"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    return _slugify(stem)
+
+
+def _section(text: str, heading: str) -> str:
+    m = re.search(rf"^##[ \t]+{re.escape(heading)}[ \t]*\n+(.*?)(?=^##[ \t]|\Z)",
+                  text, re.MULTILINE | re.DOTALL)
+    return m.group(1).strip() if m else ""
+
+
+def parse_review(path: Path, *, contributor: str, errors: list[str]) -> list[Candidate]:
+    """A reviews/*_plan_review.md / *_code_review.md REJECT verdict ->
+    anti_pattern + bad_plan (the same mapping the run-dir extractors use).
+    Approvals yield nothing — approval itself is not knowledge; the landed
+    outcome is, and that arrives via the ledger / bench report."""
+    raw = _strip_comments(path.read_text(encoding="utf-8"))
+    m = _DECISION_SECTION_RE.search(raw)
+    if not m:
+        return []
+    decision = m.group("body").strip().splitlines()[0].strip().lower() if m.group("body").strip() else ""
+    if "reject" not in decision:
+        return []
+    slug = _artifact_slug(path)
+    reason = (_section(raw, "Findings") or _section(raw, "Risk Summary")
+              or "rejected in review")[:1500]
+    verdict = ReviewVerdict(
+        decision="reject",
+        mechanism=slug,
+        target_pattern=slug,
+        reason=reason,
+        review_ref=f"opencode:{path.name}",
+    )
+    run_id = f"opencode:{path.name}"
+    return [
+        review_to_anti_pattern(verdict, run_id=run_id, contributor=contributor, seq=1),
+        review_to_bad_plan(verdict, run_id=run_id, seq=1),
+    ]
+
+
+def parse_bench_validation(path: Path, *, contributor: str, errors: list[str]
+                           ) -> list[Candidate]:
+    """A bench/*_validation.md with a PASS verdict and a measured delta ->
+    memory_item fact. Fail/inconclusive/skipped yield nothing (the rejection
+    knowledge comes from the review / ledger, with its reason attached)."""
+    raw = path.read_text(encoding="utf-8")
+    vm = _VERDICT_RE.search(raw)
+    if not vm or vm.group(1).lower() != "pass":
+        return []
+    dm = _DELTA_RE.search(raw)
+    if not dm:
+        errors.append(f"{path.name}: pass verdict but no delta_pct found — skipped")
+        return []
+    cm = _COMPARE_RE.search(raw)
+    slug = _artifact_slug(path)
+    bench = BenchResult(
+        mechanism=slug,
+        target=slug,
+        delta_pct=float(dm.group(1)),
+        compare_level=(cm.group(1).lower() if cm else "total"),  # type: ignore[arg-type]
+        validation_path=f".opencode/bench/{path.name}",
+        verdict="landed",
+    )
+    return [bench_to_fact(bench, run_id=f"opencode:{path.name}",
+                          contributor=contributor, seq=1)]
+
+
+def parse_state_bad_plans(path: Path, *, contributor: str, errors: list[str]
+                          ) -> list[Candidate]:
+    """state/*bad_plans*.md bullet entries -> global bad_plan candidates."""
+    raw = _strip_comments(path.read_text(encoding="utf-8"))
+    out: list[Candidate] = []
+    for seq, text in enumerate(_plain_bullets(raw), start=1):
+        cand = _bad_plan(text, "*", None, contributor, seq, path)
+        cand["record"]["target_pattern"] = "*"  # global pattern, not a slug
+        out.append(cand)
+    return out
+
+
+def _collect_free_text(root: Path) -> list[str]:
+    """research design/plan docs -> raw text for the optional LLM salience pass.
+    Templates are skipped; deterministic extraction is not attempted here."""
+    texts: list[str] = []
+    for sub in ("docs", "plans"):
+        d = root / sub
+        if not d.exists():
+            continue
+        for p in sorted(d.glob("*.md")):
+            if "template" in p.name.lower() or p.name == "README.md":
+                continue
+            try:
+                texts.append(p.read_text(encoding="utf-8"))
+            except OSError:
+                continue
+    return texts
+
+
 # --- orchestrator -----------------------------------------------------------
 
 def read_opencode_memory(opencode_root: str | Path, *, contributor: str = "opencode"
@@ -306,5 +440,29 @@ def read_opencode_memory(opencode_root: str | Path, *, contributor: str = "openc
         if p.name in {"README.md"}:
             continue
         _safe(parse_target_memory, p, subsystem=_slugify(p.stem))
+
+    # Tier-0 run artifacts (safety net beside the curated memory/ layer).
+    # Skipped entirely when the caller points at a bare memory/ tree.
+    if (root / "memory").exists():
+        reviews = root / "reviews"
+        if reviews.exists():
+            for p in sorted(reviews.glob("*.md")):
+                if "template" in p.name.lower():
+                    continue
+                _safe(parse_review, p)
+
+        bench = root / "bench"
+        if bench.exists():
+            for p in sorted(bench.glob("*_validation.md")):
+                if "template" in p.name.lower():
+                    continue
+                _safe(parse_bench_validation, p)
+
+        state = root / "state"
+        if state.exists():
+            for p in sorted(state.glob("*bad_plans*.md")):
+                _safe(parse_state_bad_plans, p)
+
+        result.free_text = _collect_free_text(root)
 
     return result

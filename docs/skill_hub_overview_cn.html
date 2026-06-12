@@ -78,6 +78,7 @@ flowchart LR
         s2["通用教训<br/>global_lessons.md"]:::src
         s3["目标记忆<br/>事实 / 已知坏招"]:::src
         s4["流程技能<br/>.opencode/skills/"]:::src
+        s5["运行产物·兜底源<br/>reviews/ 否决 · bench/ 实测 · state/ 坏招"]:::src
     end
 
     subgraph K["hub: knowledge/ 知识库（按 scope 落位）"]
@@ -96,6 +97,8 @@ flowchart LR
     s3 -->|"函数级事实/坏招"| k2
     s3 -->|"子系统级"| k3
     s2 -->|"教训→H/A/V·全局坏招→B"| k1
+    s5 -->|"reject→反模式/坏招 · pass+delta→事实"| k1
+    s5 --> k2
     s4 -->|"hmopt promote-skill"| t1
     k2 -.->|"同招式≥2实例验证 → 毕业<br/>(原记录留作证据不搬家)"| t2
 </pre>
@@ -105,6 +108,7 @@ flowchart LR
 <tr><td>函数级事实 / A·B 实测结论</td><td>memory_item fact</td><td><code>knowledge/targets/⟨slug⟩/facts/F###.md</code></td></tr>
 <tr><td>通用教训（启发式/反模式/验证坑）</td><td>global_lesson</td><td><code>knowledge/global/heuristics|anti_patterns|validation_pitfalls/</code>（H/A/V）</td></tr>
 <tr><td>被否决的招（全局坏招）</td><td>bad_plan</td><td><code>knowledge/global/bad_plans/B###.md</code></td></tr>
+<tr><td>评审否决 / 验证通过（reviews/ bench/ state/，agent 忘写 memory 时兜底）</td><td>anti_pattern·bad_plan / fact</td><td>同上按 scope 落位；<code>docs/ plans/</code> 自由文本走可选 <code>--llm-extract</code></td></tr>
 <tr><td>流程技能 SKILL.md</td><td>L0 技能脚手架</td><td><code>skills/core|technique|domain/⟨name⟩/</code>（补 eval 后毕业）</td></tr>
 </table>
 </section>

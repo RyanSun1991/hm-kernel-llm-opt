@@ -114,19 +114,37 @@ def sediment_opencode(
     out_dir: str | Path,
     contributor: str = "opencode",
     hub_root: str | Path | None = None,
+    llm: Any | None = None,
 ) -> SedimentResult:
-    """Distill a member's `.opencode/memory/` markdown stores into Tier-1 candidates.
+    """Distill a member's `.opencode/` tree into Tier-1 candidates.
 
     Same downstream as `sediment_run` (validate -> staging jsonl), but the source
-    is the OpenCode harness's local memory (idea ledgers, global lessons, target /
-    subsystem notes) rather than an `hmopt run` artifact dir — because members work
-    through `.opencode/`, not `hmopt run`.
+    is the OpenCode harness's local data — because members work through
+    `.opencode/`, not `hmopt run`:
+
+      memory/                 curated layer (ledgers, lessons, target notes)
+      reviews/ bench/ state/  Tier-0 run artifacts (reject verdicts, pass deltas,
+                              global bad plans) — a safety net for runs where an
+                              agent skipped the memory-accumulation step
+      docs/ plans/            free text, fed to the optional LLM salience pass
+                              when an `llm` is provided (offline-safe: None skips)
     """
     from ..skillhub.resolver import find_hub_root
     from .opencode_reader import read_opencode_memory
+    from .salience import llm_salience_pass
 
     mem = read_opencode_memory(opencode_root, contributor=contributor)
     run_id = f"opencode-{Path(opencode_root).resolve().name}"
+    if llm is not None and mem.free_text:
+        mem.candidates.extend(
+            llm_salience_pass(mem.free_text, llm, run_id=run_id, contributor=contributor)
+        )
+    # Provisional ids restart per source file (every review emits A901/B901,
+    # every bench file F901...), so renumber across the whole batch the same way
+    # bundle_staging does — the output must be unique-id clean on its own.
+    seen: dict[str, set[int]] = {}
+    for cand in mem.candidates:
+        _namespace_id(cand, seen)
     result = SedimentResult(run_id=run_id, parse_errors=list(mem.parse_errors))
 
     def _resolve(hr: str | Path | None) -> Path | None:

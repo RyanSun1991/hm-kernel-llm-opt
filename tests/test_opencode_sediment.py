@@ -129,3 +129,73 @@ def test_promote_skill_scaffolds_valid_hub_skill(tmp_path: Path):
     assert "kind: core" in text and "maturity: L0" in text
     assert "description:" not in text.split("---")[1]  # dropped (schema forbids)
     assert res["next_steps"]
+
+
+def _write_run_artifacts(oc: Path) -> None:
+    """Tier-0 artifacts in the harness's documented formats (.opencode/CLAUDE.md)."""
+    (oc / "reviews").mkdir(parents=True, exist_ok=True)
+    (oc / "bench").mkdir(exist_ok=True)
+    (oc / "state").mkdir(exist_ok=True)
+    (oc / "plans").mkdir(exist_ok=True)
+    (oc / "reviews" / "wq-inline_plan_review.md").write_text(
+        "# Review\n\n## Target Artifact\nwq-inline\n\n## Review Type\nplan\n\n"
+        "## Decision\n\nreject\n\n## Findings\n\n- blanket inline regresses i-cache on A78\n\n"
+        "## Risk Summary\n\nhigh icache pressure\n", encoding="utf-8")
+    (oc / "reviews" / "ok-thing_code_review.md").write_text(
+        "# Review\n\n## Decision\n\napprove\n\n## Findings\n\n- fine\n", encoding="utf-8")
+    (oc / "reviews" / "review_template.md").write_text(
+        "# Review Template\n\n## Decision\n\nreject\n", encoding="utf-8")  # must be skipped
+    (oc / "bench" / "hoist-priority_validation.md").write_text(
+        "# Validation\n\n## Step 5\naggregate delta_pct: -0.8\ncompare_level: function\n\n"
+        "## Step 6 (Decision)\nverdict: pass\n", encoding="utf-8")
+    (oc / "bench" / "failed-idea_validation.md").write_text(
+        "# Validation\n\n## Step 6\nverdict: fail\ndelta_pct: 0.5\n", encoding="utf-8")
+    (oc / "state" / "bad_plans.md").write_text(
+        "# Global Bad Plans\n\n- moving wq lockdep checks out of the loop breaks debug builds\n",
+        encoding="utf-8")
+    (oc / "plans" / "wq_plan.md").write_text("# Plan\nFree-form design text.\n", encoding="utf-8")
+    (oc / "plans" / "optimization_plan_template.md").write_text("# T\n", encoding="utf-8")
+
+
+def test_run_artifacts_sediment_reviews_bench_state(tmp_path: Path):
+    oc = _write_memory(tmp_path)  # memory/ present -> run-artifact scan active
+    _write_run_artifacts(oc)
+    res = sediment_opencode(oc, out_dir=tmp_path / "staging", hub_root=REPO, contributor="alice")
+    assert res.invalid == [], res.invalid
+    by = {}
+    for c in res.candidates:
+        by.setdefault(c["schema"], []).append(c["record"])
+    # review reject -> anti_pattern + bad_plan; template + approve skipped
+    rejects = [r for r in by["global_lesson"] if r.get("kind") == "anti_pattern"]
+    assert any("wq-inline" in r["lesson"] for r in rejects)
+    assert not any("ok-thing" in r["lesson"] for r in rejects)
+    # bench pass -> fact; fail bench yields nothing
+    facts = [r for r in by["memory_item"] if "hoist-priority" in r["title"]]
+    assert len(facts) == 1 and facts[0]["evidence"]["delta_pct"] == -0.8
+    assert not any("failed-idea" in r["title"] for r in by["memory_item"])
+    # state bad_plans bullet -> global bad_plan with target_pattern "*"
+    state_bps = [r for r in by["bad_plan"] if "lockdep" in r["reason"]]
+    assert len(state_bps) == 1 and state_bps[0]["target_pattern"] == "*"
+    # ids are unique across the whole batch (per-file 901s renumbered)
+    ids = [c["record"]["id"] for c in res.candidates]
+    assert len(ids) == len(set(ids)), ids
+
+
+def test_free_text_collected_and_salience_pass_runs(tmp_path: Path):
+    oc = _write_memory(tmp_path)
+    _write_run_artifacts(oc)
+    from hmopt.sediment.opencode_reader import read_opencode_memory
+
+    mem = read_opencode_memory(oc, contributor="alice")
+    assert len(mem.free_text) == 1  # wq_plan.md only; template skipped
+
+    class _LLM:  # offline fake: one reusable heuristic
+        def chat(self, messages):
+            return '[{"lesson":"batch counters outside hot loops",' \
+                   '"applies_when":"per-item shared writes","do_or_dont":"do: batch"}]'
+
+    res = sediment_opencode(oc, out_dir=tmp_path / "s2", hub_root=REPO,
+                            contributor="alice", llm=_LLM())
+    lessons = [c["record"]["lesson"] for c in res.candidates
+               if c["schema"] == "global_lesson"]
+    assert any("batch counters" in les for les in lessons)
