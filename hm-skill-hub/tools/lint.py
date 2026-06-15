@@ -58,6 +58,13 @@ def _id_prefix_schema(record_id: str, ctx_path: str) -> str | None:
         return "bad_plan"
     if p in {"H", "V"}:
         return "global_lesson"
+    if p == "A":
+        # `A` (anti_pattern) is valid in BOTH global_lesson (^[HAV]) and
+        # memory_item (^[FGAR]). Disambiguate by context the way the consumer's
+        # infer_kind does: a global/ lesson if it sits under global, else a
+        # memory_item. Dropping `A` entirely made every misplaced anti-pattern
+        # error as "unrecognized".
+        return "global_lesson" if "global" in ctx_path else "memory_item"
     if p in {"F", "G", "R"}:
         return "memory_item"
     return None

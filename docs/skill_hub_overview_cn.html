@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Team Skill Hub — 一页看懂（中文版）</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body { font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif; color:#1f2329; margin:0; background:#f7f8fa; }
+  header { background:linear-gradient(135deg,#0b2447,#19376d); color:#fff; padding:24px 40px; }
+  header h1 { margin:0 0 4px; font-size:22px; }
+  header p { margin:0; opacity:.85; font-size:13px; }
+  main { max-width:1180px; margin:0 auto; padding:20px 28px 56px; }
+  section { background:#fff; border:1px solid #e5e8ec; border-radius:12px; padding:22px 26px; margin:20px 0; }
+  h2 { font-size:18px; margin:0 0 4px; color:#0b2447; }
+  .sub { color:#5f6b7a; font-size:13px; margin:0 0 14px; }
+  pre.mermaid { background:transparent; display:flex; justify-content:center; overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:13px; margin-top:8px; }
+  th,td { border:1px solid #e5e8ec; padding:7px 10px; text-align:left; }
+  th { background:#f0f5ff; color:#0b2447; }
+  code { background:#f2f4f7; padding:1px 5px; border-radius:4px; font-size:12px; }
+  footer { text-align:center; color:#5f6b7a; font-size:12px; padding:16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Team Skill Hub — 一页看懂</h1>
+  <p>两张图：① 经验怎么转起来　② 数据落到哪个目录　|　详细版见 docs/Skill_Hub_Flow_Atlas_CN_EN.md</p>
+</header>
+<main>
+
+<section>
+<h2>图 ① 主闭环：经验怎么转起来</h2>
+<p class="sub">成员照常干活 → 收口跑一条命令 → git PR 投稿 → 中央仓质检策展 → 下一个人自动受益。</p>
+<pre class="mermaid">
+flowchart LR
+    classDef dir fill:#fff7e6,stroke:#d48806,color:#613400
+    classDef act fill:#e6f4ff,stroke:#1677ff,color:#002c8c
+    classDef out fill:#f6ffed,stroke:#389e0d,color:#135200
+
+    subgraph P1["成员电脑（习惯零改动）"]
+        A["👤 日常优化工作<br/>(.opencode/ 照常)"]:::act --> B[("本地记忆<br/>.opencode/memory/")]:::dir
+        B --> C["① 收口蒸馏<br/>hmopt sediment-opencode"]:::act
+    end
+
+    C ==>|"② git PR 投稿"| D
+
+    subgraph P2["中央仓 hm-skill-hub"]
+        D[("staging/ 收件箱")]:::dir --> E["③ CI 质检 + 人工策展<br/>(查重·冲突·脱敏·schema)"]:::act
+        E --> F[("knowledge/ 知识库<br/>事实·教训·坏招")]:::dir
+        F -->|"同招式 ≥2 次验证 → 毕业"| G[("skills/ 技能库")]:::dir
+    end
+
+    F ==>|"④ 检索消费<br/>hmopt resolve"| H
+    G ==> H["🧩 下一次优化自动带上<br/>全队的事实+坑+招式"]:::out
+    H ==> A
+</pre>
+<table>
+<tr><th>步骤</th><th>谁</th><th>命令 / 动作</th></tr>
+<tr><td>①</td><td>成员</td><td><code>hmopt sediment-opencode --bundle</code>（把本地记忆蒸馏成候选包）</td></tr>
+<tr><td>②</td><td>成员</td><td>把候选包 cp 到 <code>hm-skill-hub/staging/你/日期.jsonl</code>，开 PR</td></tr>
+<tr><td>③</td><td>CI + 维护者</td><td>CI 自动四道门；维护者看 <code>central_curate.py</code> 报告后定稿入库</td></tr>
+<tr><td>④</td><td>任何成员</td><td><code>hmopt resolve "mm/vmscan.c::shrink_node"</code>（研究新函数前跑）</td></tr>
+</table>
+</section>
+
+<section>
+<h2>图 ② 数据落位：什么东西落到哪个目录</h2>
+<p class="sub">一条规则：<b>记录的 scope 决定目录</b>（CI 强校验）；<b>文件/函数级的东西永远是知识不是技能</b>（技能只有 core/technique/domain 三层，杜绝目录爆炸）。</p>
+<pre class="mermaid">
+flowchart LR
+    classDef src fill:#f9f0ff,stroke:#722ed1,color:#22075e
+    classDef kn fill:#fff7e6,stroke:#d48806,color:#613400
+    classDef sk fill:#f6ffed,stroke:#389e0d,color:#135200
+
+    subgraph SRC["你的本地记忆 .opencode/"]
+        s1["台账裁决<br/>idea_ledger: L001 landed -0.8%"]:::src
+        s2["通用教训<br/>global_lessons.md"]:::src
+        s3["目标记忆<br/>事实 / 已知坏招"]:::src
+        s4["流程技能<br/>.opencode/skills/"]:::src
+        s5["运行产物·兜底源<br/>reviews/ 否决 · bench/ 实测 · state/ 坏招"]:::src
+    end
+
+    subgraph K["hub: knowledge/ 知识库（按 scope 落位）"]
+        k1[("global/<br/>通用教训 H · 反模式 A<br/>验证坑 V · 坏招 B")]:::kn
+        k2[("targets/⟨函数slug⟩/<br/>facts F### · idea_ledger L###<br/>例: F001 → targets/mm-vmscan-c-shrink-node/facts/")]:::kn
+        k3[("subsystems/⟨子系统⟩/<br/>子系统级事实与坏招")]:::kn
+    end
+
+    subgraph S["hub: skills/ 技能库（只有 3 层）"]
+        t1[("core/ 流程类<br/>例: instruction-count-first")]:::sk
+        t2[("technique/ 招式类<br/>例: hoist-loop-invariant")]:::sk
+        t3[("domain/ 子系统类<br/>例: mm-reclaim")]:::sk
+    end
+
+    s1 -->|"裁决→idea"| k2
+    s3 -->|"函数级事实/坏招"| k2
+    s3 -->|"子系统级"| k3
+    s2 -->|"教训→H/A/V·全局坏招→B"| k1
+    s5 -->|"reject→反模式/坏招 · pass+delta→事实"| k1
+    s5 --> k2
+    s4 -->|"hmopt promote-skill"| t1
+    k2 -.->|"同招式≥2实例验证 → 毕业<br/>(原记录留作证据不搬家)"| t2
+</pre>
+<table>
+<tr><th>你写的内容</th><th>蒸馏成</th><th>最终落位（策展人放置，CI 校验路径↔scope 一致）</th></tr>
+<tr><td>台账行 <code>### L001 ... landed</code></td><td>idea</td><td><code>knowledge/targets/⟨slug⟩/idea_ledger/L###.md</code></td></tr>
+<tr><td>函数级事实 / A·B 实测结论</td><td>memory_item fact</td><td><code>knowledge/targets/⟨slug⟩/facts/F###.md</code></td></tr>
+<tr><td>通用教训（启发式/反模式/验证坑）</td><td>global_lesson</td><td><code>knowledge/global/heuristics|anti_patterns|validation_pitfalls/</code>（H/A/V）</td></tr>
+<tr><td>被否决的招（全局坏招）</td><td>bad_plan</td><td><code>knowledge/global/bad_plans/B###.md</code></td></tr>
+<tr><td>评审否决 / 验证通过（reviews/ bench/ state/，agent 忘写 memory 时兜底）</td><td>anti_pattern·bad_plan / fact</td><td>同上按 scope 落位；<code>docs/ plans/</code> 自由文本走可选 <code>--llm-extract</code></td></tr>
+<tr><td>流程技能 SKILL.md</td><td>L0 技能脚手架</td><td><code>skills/core|technique|domain/⟨name⟩/</code>（补 eval 后毕业）</td></tr>
+</table>
+</section>
+
+</main>
+<footer>hm-kernel-llm-opt · Skill Hub 一页版（中文）· 渲染需联网加载 mermaid CDN</footer>
+<script>mermaid.initialize({ startOnLoad:true, theme:"default", flowchart:{ htmlLabels:true, curve:"basis" } });</script>
+</body>
+</html>

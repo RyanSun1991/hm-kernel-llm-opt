@@ -2,7 +2,7 @@
   "skill": "instruction-count-first",
   "version": "0.1.0",
   "suite": "core_optimization_suite",
-  "run_at": "2026-06-10T14:52:56+00:00",
+  "run_at": "2026-06-10T19:53:47+00:00",
   "runner": "run_evals",
   "metrics": {
     "pass_rate": 0.6667,

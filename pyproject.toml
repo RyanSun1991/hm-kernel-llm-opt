@@ -5,7 +5,11 @@ description = "Skeleton: LLM-driven code + performance optimization platform for
 requires-python = ">=3.10"
 readme = "README.md"
 
-# NOTE: Dependencies are placeholders; pin versions during implementation.
+# Core runtime: everything the package needs to import and run the agentic
+# pipeline, REST API, MCP servers, and the skill-hub read/write path. The
+# heavyweight code-indexing stack (LlamaIndex + Neo4j) is an optional extra so a
+# clean `pip install -e .` stays light and the package imports without it; index
+# commands fail loudly with an install hint if the extra is missing.
 dependencies = [
   "pydantic>=2",
   "pyyaml>=6",
@@ -13,21 +17,28 @@ dependencies = [
   "typer>=0.12",
   "click>=8",
   "sqlalchemy>=2",
-  "alembic>=1.13",
   "fastapi>=0.110",
   "uvicorn>=0.30",
   "openai>=1.0",
-  "langchain>=0.2",
   "langgraph>=0.2",
+  "jsonschema>=4",
   "mcp[cli]>=1.16.0,<2",
+  "GitPython>=3.1",
+  "protobuf>=4.25",
+]
+
+[project.optional-dependencies]
+indexing = [
   "llama-index-core>=0.14.5,<0.15",
   "llama-index-llms-openai>=0.6.13,<0.7",
   "llama-index-embeddings-openai>=0.5.1,<0.6",
   "llama-index-graph-stores-neo4j>=0.5.1,<0.6",
   "llama-index-vector-stores-neo4jvector>=0.5.2,<0.6",
   "neo4j>=5",
-  "GitPython>=3.1",
-  "protobuf>=4.25",
+]
+dev = [
+  "pytest>=8",
+  "ruff>=0.6",
 ]
 
 [project.scripts]

@@ -22,7 +22,9 @@ try:
 except ImportError:  # pragma: no cover
     raise ImportError("PyYAML required for skillhub.records") from None
 
-_FRONTMATTER_RE = re.compile(r"^---\n(?P<fm>.*?)\n---\n?(?P<body>.*)$", re.DOTALL)
+# Tolerate CRLF: a record edited on Windows would otherwise miss the `\n`-only
+# fences and be silently dropped by load_record.
+_FRONTMATTER_RE = re.compile(r"^---\r?\n(?P<fm>.*?)\r?\n---\r?\n?(?P<body>.*)$", re.DOTALL)
 _SKIP_DIRS = {"index", "__pycache__"}
 _SKIP_NAMES = {"README.md"}
 

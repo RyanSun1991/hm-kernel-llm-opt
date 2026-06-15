@@ -52,7 +52,12 @@ class ReviewerAgent:
         match = re.search(r"(?im)^decision\s*:\s*(approve|reject)\b", reply)
         if match:
             return match.group(1).lower()
-        return "approve" if build_success and test_success else "reject"
+        # Fail closed: an unparseable reply (incl. the offline fake-LLM marker)
+        # must NOT auto-approve a patch into profiling just because build/test
+        # passed — that turned the review gate into a rubber stamp. Reject and
+        # let the rationale carry the raw reply for inspection.
+        logger.warning("Reviewer reply had no explicit decision; defaulting to reject")
+        return "reject"
 
     @staticmethod
     def _extract_risk_summary(reply: str) -> str:

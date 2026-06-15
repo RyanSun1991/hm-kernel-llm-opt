@@ -29,8 +29,6 @@ from hmopt.storage.artifact_store import ArtifactStore
 from hmopt.storage.db.engine import init_engine
 from hmopt.storage.db import models
 from hmopt.storage.db.engine import session_scope
-from hmopt.core.config import load_yaml, normalize_raw_config
-from hmopt.models.hiperf_report import HiperfReport, Frame
 
 app = typer.Typer(help="HM-VERIF kernel optimization platform")
 
@@ -552,6 +550,11 @@ def sediment(
     from hmopt.sediment.pipeline import bundle_staging, sediment_run
     from hmopt.skillhub.resolver import find_hub_root
 
+    if not Path(run_dir).is_dir():
+        raise typer.BadParameter(
+            f"--run-dir {run_dir!r} does not exist (cwd: {Path.cwd()})"
+        )
+
     hub_root = find_hub_root(Path.cwd())
     llm = None if no_llm_extract else _maybe_llm(config)
     res = sediment_run(
@@ -615,6 +618,87 @@ def retrieval_eval(
         raise typer.Exit(code=1)
     if update_baseline:
         typer.echo(f"baseline updated: {write_baseline(r, eval_dir)}")
+
+
+@app.command("sediment-opencode")
+def sediment_opencode_cmd(
+    opencode_dir: str = typer.Option(".opencode", "--opencode-dir", help="Member's .opencode/ (reads memory/)"),
+    out: Optional[str] = typer.Option(
+        None, "--out",
+        help="Tier-1 staging output dir (default: <opencode-dir>/local/sediment_staging)"),
+    contributor: str = typer.Option("opencode", "--contributor"),
+    hub: Optional[str] = typer.Option(None, "--hub", help="Hub root (default: auto-discover)"),
+    bundle: bool = typer.Option(False, "--bundle", help="Also collate the staging dir into one PR jsonl"),
+    llm_extract: bool = typer.Option(False, "--llm-extract",
+                                     help="Also run the LLM salience pass over docs/plans free text"),
+    config: str = typer.Option("configs/app.yaml", "--config"),
+) -> None:
+    # Demo: python -m hmopt.cli sediment-opencode --opencode-dir .opencode
+    # Purpose: distill .opencode/ (memory ledgers/lessons/notes + reviews/bench/state
+    # run artifacts) into schema-valid Tier-1 candidates (design §8).
+    from hmopt.sediment.pipeline import bundle_staging, sediment_opencode
+
+    # A mistyped/relative path from the wrong cwd must fail loudly — silently
+    # emitting "0 valid candidate(s)" made a typo indistinguishable from an
+    # empty run. (Members typically run this from the kernel repo root.)
+    if not Path(opencode_dir).is_dir():
+        raise typer.BadParameter(
+            f"--opencode-dir {opencode_dir!r} does not exist (cwd: {Path.cwd()}). "
+            f"Point it at the repo's .opencode/ directory, e.g. "
+            f"--opencode-dir /path/to/hm-verif-kernel/.opencode"
+        )
+
+    # Anchor staging beside the member's .opencode by default. A CWD-relative
+    # default wrote the output into whatever repo you happened to run from.
+    out_dir = Path(out) if out else Path(opencode_dir) / "local" / "sediment_staging"
+
+    llm = _maybe_llm(config) if llm_extract else None
+    if llm_extract and llm is None:
+        typer.echo("warning: --llm-extract requested but no usable LLM (check HMOPT_LLM_API_KEY); "
+                   "continuing with deterministic extraction only")
+    res = sediment_opencode(opencode_dir, out_dir=out_dir, contributor=contributor, hub_root=hub,
+                            llm=llm)
+    typer.echo(f"sediment-opencode[{res.run_id}]: {res.n_valid} valid candidate(s) -> {res.out_path}")
+    if res.n_valid == 0:
+        if res.scanned:
+            scanned = ", ".join(f"{k}={v}" for k, v in sorted(res.scanned.items()))
+            typer.echo(f"  scanned files: {scanned}")
+            typer.echo("  0 candidates means no extractable entries matched the expected formats "
+                       "(### L00x ledger rows, ### lesson entries with bullets, "
+                       "## Known Bad Plans / ## Stable Structural Facts sections, "
+                       "'## Decision reject' reviews, 'verdict: pass'+delta_pct bench reports).")
+        else:
+            typer.echo("  nothing scanned: memory/ has no ledgers/lessons/notes yet "
+                       f"(looked under {opencode_dir})")
+    if res.parse_errors:
+        typer.echo(f"  {len(res.parse_errors)} parse note(s):")
+        for e in res.parse_errors[:5]:
+            typer.echo(f"   - {e}")
+    if res.invalid:
+        typer.echo(f"  {len(res.invalid)} invalid candidate(s) skipped:")
+        for cand, errs in res.invalid[:5]:
+            typer.echo(f"   - {cand.get('schema')}/{cand.get('record', {}).get('id')}: "
+                       f"{errs[0] if errs else 'invalid'}")
+    if bundle:
+        bundle_path, n = bundle_staging(out_dir, out_dir / "_bundle.jsonl")
+        typer.echo(f"bundle: {n} record(s) -> {bundle_path}")
+
+
+@app.command("promote-skill")
+def promote_skill_cmd(
+    skill_dir: str = typer.Argument(..., help="Member skill dir, e.g. .opencode/skills/optimization-funnel"),
+    kind: str = typer.Option(..., "--kind", help="Hub skill taxonomy: core|domain|technique"),
+    hub: Optional[str] = typer.Option(None, "--hub", help="Hub root (default: auto-discover)"),
+    force: bool = typer.Option(False, "--force", help="Overwrite an existing hub skill"),
+) -> None:
+    # Demo: python -m hmopt.cli promote-skill .opencode/skills/optimization-funnel --kind core
+    # Purpose: scaffold a member .opencode/skill into the hub skills/ taxonomy (design §6.2).
+    from hmopt.sediment.skill_promote import promote_opencode_skill
+
+    res = promote_opencode_skill(skill_dir, kind=kind, hub_root=hub, force=force)
+    typer.echo(f"promoted '{res['name']}' -> {res['skill_md']}")
+    for step in res["next_steps"]:
+        typer.echo(f"  next: {step}")
 
 
 if __name__ == "__main__":

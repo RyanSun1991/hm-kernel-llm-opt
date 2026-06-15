@@ -347,7 +347,6 @@ def parse_flamegraph(path: Path, expected_frame_ms: float = 16.67) -> list[Flame
         return [parsed] if parsed else []
 
     if path.suffix.lower() == ".json":
-        _, json_output_path = preprocess_flamegraph_file(path, path.parent, ["sysmgr"])
         data = json.loads(path.read_text(encoding="utf-8"))
         return [_parse_flamegraph_payload(data, path, expected_frame_ms)]
 

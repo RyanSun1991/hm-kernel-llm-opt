@@ -738,11 +738,14 @@ def _hotspot_from_dict(data: dict) -> HotspotCandidate:
 def make_services(config: AppConfig) -> PipelineServices:
     ctx = build_context(config)
     safety = SafetyGuard(config.llm.allow_external_proxy_models)
+    # Offline (fake) LLM answers are only acceptable for dummy/demo runs. A real
+    # run with no key should fail loudly rather than fabricate "successful" work.
     llm = LLMClient(
         api_base=config.llm.base_url,
         api_key=config.llm.api_key,
         default_model=config.llm.model,
         allow_external_proxy_models=config.llm.allow_external_proxy_models,
+        allow_offline=config.adapters.dummy,
     )
 
     if config.adapters.dummy:
@@ -751,7 +754,8 @@ def make_services(config: AppConfig) -> PipelineServices:
         profiler_adapter = DummyProfilerAdapter()
     else:
         build_cmd = config.adapters.build_command or "make -j"
-        test_cmd = config.adapters.test_command or "ctest || true"
+        # No "|| true": a failing test must surface as a failure, not be masked.
+        test_cmd = config.adapters.test_command or "ctest"
         profile_cmd = config.adapters.profile_command or config.adapters.workload_command or "true"
         build_adapter = ShellBuildAdapter(build_cmd)
         test_adapter = ShellTestAdapter(test_cmd)
@@ -892,6 +896,14 @@ def _build_evidence(services: PipelineServices, state: RunState) -> RunState:
     )
     state["evidence_artifact_id"] = artifact.artifact_id
     state["evidence_report_artifact_id"] = report_artifact.artifact_id
+    # Carry the analyst summary + top hotspots forward so the coder prompt is
+    # actually anchored on the hot path (previously the coder only got a single
+    # hard-coded instruction string with no hotspot/evidence context).
+    top = filtered_hotspots[:5]
+    hot_lines = "; ".join(
+        f"{getattr(h, 'symbol', '?')} (score={getattr(h, 'score', 0)})" for h in top
+    )
+    state["evidence_summary"] = (f"Hotspots: {hot_lines}\n{summary}").strip()
     logger.info(
         "Evidence pack stored: artifact=%s report_artifact=%s",
         artifact.artifact_id,
@@ -986,7 +998,8 @@ def _coder_generate_patch(services: PipelineServices, state: RunState) -> RunSta
     logger.info("Coder generating patch for iteration=%s", state["iteration"])
     instructions = state.get("next_action", "Improve hotspot.")
     patch_text = services.coder.generate_patch(
-        Path(services.config.project.repo_path), instructions, iteration=state["iteration"]
+        Path(services.config.project.repo_path), instructions, iteration=state["iteration"],
+        context=state.get("evidence_summary", ""),
     )
     art = services.ctx.artifact_store.store_text(
         patch_text,
@@ -1138,6 +1151,7 @@ def _review_candidate(services: PipelineServices, state: RunState) -> RunState:
     services.ctx.session.commit()
     state["review_artifact_id"] = art.artifact_id
     state["reviewer_decision"] = decision["decision"]
+    state["review_risk_summary"] = decision["risk_summary"]
     state.setdefault("logs", []).append(decision["rationale"])
     if decision["decision"] != "approve":
         state["force_stop"] = True
@@ -1209,7 +1223,27 @@ def _report(services: PipelineServices, state: RunState) -> RunState:
     # Non-blocking by contract — the hook never raises, so the report step (and
     # the run's success status, already committed above) is never affected.
     try:
-        from hmopt.sediment.hook import sediment_at_closeout
+        from hmopt.sediment.extractors import _slugify
+        from hmopt.sediment.hook import sediment_at_closeout, write_sediment_input
+
+        # Produce the run manifest the sediment reader consumes. Only the review
+        # verdict maps cleanly from this (fps-oriented) pipeline, so we emit just
+        # that — a rejected patch becomes a real anti-pattern/bad_plan candidate;
+        # a run with no review stays honestly empty.
+        reviews: list[dict[str, Any]] = []
+        decision = state.get("reviewer_decision")
+        if decision in ("approve", "reject"):
+            hs = state.get("hotspots") or []
+            target = (hs[0].get("symbol") if hs and isinstance(hs[0], dict) else None) \
+                or services.config.project.name
+            reviews.append({
+                "decision": decision,
+                "mechanism": _slugify(str(state.get("next_action") or "attempted-change")),
+                "target_pattern": str(target),
+                "reason": str(state.get("review_risk_summary") or state.get("stop_reason") or "n/a"),
+                "review_ref": f"run:{state['run_id']}",
+            })
+        write_sediment_input(services.ctx.run_dir, reviews=reviews)
 
         sediment_at_closeout(services.ctx.run_dir, run_id=state["run_id"])
     except Exception:  # noqa: BLE001 - belt-and-suspenders; hook is already guarded
@@ -1508,10 +1542,19 @@ def run_artifact_analysis(
             state = _evaluate(services, state)
 
     state = _report(services, state)
-    run_row.status = "succeeded"
+    # Do not blanket-overwrite the status: _report already set "succeeded" or
+    # "stopped" based on stop_reason. Clobbering it with "succeeded" here made a
+    # rejected/stopped run report success. Re-read and only confirm success when
+    # there is genuinely no stop reason.
+    run_row = services.ctx.session.query(models.Run).filter(
+        models.Run.run_id == state["run_id"]
+    ).one()
+    run_row.status = "stopped" if state.get("stop_reason") else "succeeded"
     services.ctx.session.commit()
     services.ctx.session.close()
-    logger.info("Artifact analysis finished: run_id=%s", state["run_id"])
+    logger.info(
+        "Artifact analysis finished: run_id=%s status=%s", state["run_id"], run_row.status
+    )
     return state["run_id"]
 
 

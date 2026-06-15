@@ -37,11 +37,13 @@ class CoderAgent:
                 "Iteration: {iteration}\n"
                 "Repository root: {repo_path}\n"
                 "Instruction: {instructions}\n\n"
-                "Optional context:\n"
+                "Hotspot / evidence context:\n"
                 "{context}\n\n"
-                "Produce a minimal unified diff.\n"
+                "Produce a minimal unified diff that targets the hot code path "
+                "named in the context.\n"
                 "Preserve correctness and keep scope tight.\n"
-                "Prefer editing or creating documentation/config files unless a specific code path is given.\n"
+                "Edit the relevant source file(s); do not retarget the change to "
+                "documentation or config files.\n"
                 "Return only the diff.\n"
             ),
             iteration=iteration,

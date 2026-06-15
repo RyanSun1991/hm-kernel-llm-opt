@@ -251,3 +251,44 @@ def test_markdown_bench_fallback(tmp_path: Path):
     )
     arts = read_run(run)
     assert len(arts.bench) == 1 and arts.bench[0].mechanism == "hoist-invariant"
+
+
+def test_write_sediment_input_makes_closeout_produce_candidates(tmp_path: Path):
+    # A2: nothing used to write sediment_input.json, so the close-out always
+    # yielded 0 candidates. write_sediment_input emits a real manifest; a rejected
+    # review distills into a schema-valid anti-pattern + bad_plan.
+    from hmopt.sediment.hook import write_sediment_input
+
+    run = tmp_path / "run-xyz"
+    path = write_sediment_input(run, reviews=[{
+        "decision": "reject", "mechanism": "blanket-inline",
+        "target_pattern": "kworker_thread", "reason": "regresses i-cache",
+        "review_ref": "run:run-xyz"}])
+    assert path is not None and path.name == "sediment_input.json"
+
+    res = sediment_run(run, out_dir=tmp_path / "staging", run_id="run-xyz",
+                       hub_root=REPO, no_llm=True)
+    assert res.n_valid == 2 and not res.invalid
+    schemas = {c["schema"] for c in res.candidates}
+    assert schemas == {"global_lesson", "bad_plan"}
+
+
+def test_write_sediment_input_empty_run_writes_nothing(tmp_path: Path):
+    from hmopt.sediment.hook import write_sediment_input
+
+    assert write_sediment_input(tmp_path / "empty") is None
+    assert not (tmp_path / "empty" / "sediment_input.json").exists()
+
+
+def test_sediment_run_flags_missing_hub_instead_of_silent_invalid(tmp_path: Path):
+    # No hub -> validation can't run; surface it via parse_errors rather than
+    # stamping every candidate "unknown schema" (indistinguishable from empty).
+    from hmopt.sediment.hook import write_sediment_input
+
+    run = tmp_path / "run-nohub"
+    write_sediment_input(run, reviews=[{
+        "decision": "reject", "mechanism": "m", "target_pattern": "t", "reason": "r"}])
+    res = sediment_run(run, out_dir=tmp_path / "staging", run_id="run-nohub",
+                       hub_root=tmp_path / "no-such-hub", no_llm=True)
+    assert res.n_valid >= 1
+    assert any("schemas not found" in e for e in res.parse_errors)

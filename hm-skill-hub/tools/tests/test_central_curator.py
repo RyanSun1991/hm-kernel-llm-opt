@@ -96,6 +96,31 @@ def test_dedup_new_on_unrelated():
     assert dedup.classify_one(inc, [ex]).verdict == "new"
 
 
+def test_dedup_relates_facts_without_a_mechanism_field():
+    # review B1: memory_item / global_lesson schemas have NO mechanism/alias
+    # field, so the old alias-only relation gate made every duplicate/conflict
+    # classify as "new". Schema-valid facts (no mechanism) at the same target
+    # must still merge / conflict on shared scope + lexical overlap.
+    ex = _rec("F100", type="fact",
+              scope={"level": "function", "target_slug": "t"}, status="active",
+              applies_when="hot loop",
+              evidence={"delta_pct": -0.8, "compare_level": "function"},
+              body="hoist the repeated sc->priority read out of the per-page reclaim loop")
+    dup = _rec("F900", type="fact",
+               scope={"level": "function", "target_slug": "t"}, status="active",
+               applies_when="hot loop",
+               body="hoist the repeated sc->priority read out of the per-page reclaim loop",
+               evidence={"delta_pct": -0.8, "compare_level": "function"})
+    con = _rec("F901", type="fact",
+               scope={"level": "function", "target_slug": "t"}, status="active",
+               applies_when="hot loop",
+               body="hoist the repeated sc->priority read out of the per-page reclaim loop",
+               evidence={"delta_pct": 0.8, "compare_level": "function"})
+    assert "mechanism" not in ex.fields  # schema-valid: no mechanism field
+    assert dedup.classify_one(dup, [ex]).verdict == "merge"
+    assert dedup.classify_one(con, [ex]).verdict == "conflict"
+
+
 def test_dedup_different_target_same_mechanism_is_new_not_merge():
     # review #2: near-identical prose but different target_slug => distinct
     # per-target instances, must be `new` (not collapsed to `merge`).

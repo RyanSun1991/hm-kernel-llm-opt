@@ -23,6 +23,34 @@ class ProfilerAdapter:
         raise NotImplementedError
 
 
+# Filename globs -> artifact kind, in priority order. The shell profiler writes
+# its outputs into output_dir; we discover them here so the analysis stage
+# actually receives them (previously profile() always returned artifacts={}, so
+# the real profiling path produced no metrics/hotspots at all).
+_ARTIFACT_GLOBS: list[tuple[str, str]] = [
+    ("flamegraph", "*__sysmgr_hiperfReport.html"),
+    ("flamegraph", "*flamegraph*.json"),
+    ("flamegraph", "*flamegraph*.html"),
+    ("hitrace", "*hitrace*.json"),
+    ("hitrace", "*hitrace*.txt"),
+    ("hitrace", "*.ftrace"),
+    ("hiperf", "*hiperf*.json"),
+    ("perf", "perf.data"),
+    ("perf", "*.perf"),
+]
+
+
+def _discover_artifacts(output_dir: Path) -> Dict[str, Path]:
+    found: Dict[str, Path] = {}
+    for kind, pattern in _ARTIFACT_GLOBS:
+        if kind in found:
+            continue
+        matches = sorted(output_dir.rglob(pattern))
+        if matches:
+            found[kind] = matches[0]
+    return found
+
+
 class ShellProfilerAdapter(ProfilerAdapter):
     def __init__(self, command: str):
         self.command = command
@@ -40,7 +68,26 @@ class ShellProfilerAdapter(ProfilerAdapter):
                 check=False,
             )
             success = proc.returncode == 0
-            return ProfileResult(success=success, artifacts={}, log=proc.stdout + "\n" + proc.stderr)
+            # Allow an explicit override (options['artifacts'] = {kind: relpath});
+            # otherwise auto-discover the files the command wrote into output_dir.
+            artifacts: Dict[str, Path] = {}
+            override = (options or {}).get("artifacts")
+            if isinstance(override, dict):
+                for kind, rel in override.items():
+                    p = output_dir / str(rel)
+                    if p.exists():
+                        artifacts[str(kind)] = p
+            if not artifacts:
+                artifacts = _discover_artifacts(output_dir)
+            if success and not artifacts:
+                logger.warning(
+                    "Shell profiler succeeded but produced no recognized artifacts in %s",
+                    output_dir,
+                )
+            logger.info("Shell profiler discovered artifacts=%s", list(artifacts))
+            return ProfileResult(
+                success=success, artifacts=artifacts, log=proc.stdout + "\n" + proc.stderr
+            )
         except Exception as exc:
             logger.exception("Shell profiler error")
             return ProfileResult(success=False, artifacts={}, log=f"profile failed: {exc}")

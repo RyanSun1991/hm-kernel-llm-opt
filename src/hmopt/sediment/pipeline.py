@@ -12,12 +12,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-_ID_RE = re.compile(r"^([A-Z])([0-9]{3,})$")
-
 from . import extractors as ex
 from .readers import RunArtifacts, read_run
 from .salience import llm_salience_pass
 from .validate import validate_candidate
+
+_ID_RE = re.compile(r"^([A-Z])([0-9]{3,})$")
 
 
 @dataclass
@@ -27,6 +27,8 @@ class SedimentResult:
     invalid: list[tuple[dict[str, Any], list[str]]] = field(default_factory=list)
     parse_errors: list[str] = field(default_factory=list)
     out_path: str | None = None
+    # files examined per source (opencode path); explains a 0-candidate result
+    scanned: dict[str, int] = field(default_factory=dict)
 
     @property
     def n_valid(self) -> int:
@@ -74,17 +76,108 @@ def sediment_run(
     raw = extract_candidates(arts, contributor=contributor, llm=llm, no_llm=no_llm)
 
     result = SedimentResult(run_id=arts.run_id, parse_errors=list(arts.parse_errors))
-    hub = hub_root if hub_root is not None else run_dir
-    for cand in raw:
-        errs = validate_candidate(cand, hub)
-        if errs:
-            result.invalid.append((cand, errs))
-        else:
-            result.candidates.append(cand)
+    # Resolve the hub once. If we can't find one (no schemas/ dir), validating
+    # every candidate would just stamp them all "unknown schema" — making a
+    # config error (no hub) indistinguishable from "produced no candidates".
+    # Surface it loudly via parse_errors and skip validation instead of
+    # silently invalidating everything.
+    from ..skillhub.resolver import find_hub_root
+
+    hub_candidate = hub_root if hub_root is not None else run_dir
+    resolved_hub = find_hub_root(hub_candidate) or Path(hub_candidate)
+    schemas_ok = (Path(resolved_hub) / "schemas").is_dir()
+    if not schemas_ok:
+        result.parse_errors.append(
+            f"hub schemas not found under {resolved_hub!s}; candidates emitted WITHOUT "
+            f"schema validation (pass a valid --out/hub_root to validate)"
+        )
+        result.candidates.extend(raw)
+    else:
+        for cand in raw:
+            errs = validate_candidate(cand, resolved_hub)
+            if errs:
+                result.invalid.append((cand, errs))
+            else:
+                result.candidates.append(cand)
 
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{arts.run_id}.jsonl"
+    with open(out_path, "w", encoding="utf-8") as f:
+        for cand in result.candidates:
+            f.write(json.dumps(cand, ensure_ascii=False) + "\n")
+    result.out_path = str(out_path)
+    return result
+
+
+def sediment_opencode(
+    opencode_root: str | Path,
+    *,
+    out_dir: str | Path,
+    contributor: str = "opencode",
+    hub_root: str | Path | None = None,
+    llm: Any | None = None,
+) -> SedimentResult:
+    """Distill a member's `.opencode/` tree into Tier-1 candidates.
+
+    Same downstream as `sediment_run` (validate -> staging jsonl), but the source
+    is the OpenCode harness's local data — because members work through
+    `.opencode/`, not `hmopt run`:
+
+      memory/                 curated layer (ledgers, lessons, target notes)
+      reviews/ bench/ state/  Tier-0 run artifacts (reject verdicts, pass deltas,
+                              global bad plans) — a safety net for runs where an
+                              agent skipped the memory-accumulation step
+      docs/ plans/            free text, fed to the optional LLM salience pass
+                              when an `llm` is provided (offline-safe: None skips)
+    """
+    from ..skillhub.resolver import find_hub_root
+    from .opencode_reader import read_opencode_memory
+    from .salience import llm_salience_pass
+
+    mem = read_opencode_memory(opencode_root, contributor=contributor)
+    # Name the batch after the repo, not the literal ".opencode" basename
+    # (which produced the unhelpful "opencode-.opencode").
+    p = Path(opencode_root).resolve()
+    run_id = f"opencode-{p.parent.name if p.name == '.opencode' else p.name}"
+    if llm is not None and mem.free_text:
+        mem.candidates.extend(
+            llm_salience_pass(mem.free_text, llm, run_id=run_id, contributor=contributor)
+        )
+    # Provisional ids restart per source file (every review emits A901/B901,
+    # every bench file F901...), so renumber across the whole batch the same way
+    # bundle_staging does — the output must be unique-id clean on its own.
+    seen: dict[str, set[int]] = {}
+    for cand in mem.candidates:
+        _namespace_id(cand, seen)
+    result = SedimentResult(run_id=run_id, parse_errors=list(mem.parse_errors),
+                            scanned=dict(mem.scanned))
+
+    def _resolve(hr: str | Path | None) -> Path | None:
+        if hr is not None:
+            p = Path(hr)
+            return p if (p / "schemas").is_dir() else find_hub_root(p)
+        return find_hub_root(opencode_root) or find_hub_root(Path.cwd())
+
+    resolved_hub = _resolve(hub_root)
+    schemas_ok = resolved_hub is not None and (Path(resolved_hub) / "schemas").is_dir()
+    if not schemas_ok:
+        result.parse_errors.append(
+            "hub schemas not found; candidates emitted WITHOUT schema validation "
+            "(pass --hub to validate)"
+        )
+        result.candidates.extend(mem.candidates)
+    else:
+        for cand in mem.candidates:
+            errs = validate_candidate(cand, resolved_hub)
+            if errs:
+                result.invalid.append((cand, errs))
+            else:
+                result.candidates.append(cand)
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{run_id}.jsonl"
     with open(out_path, "w", encoding="utf-8") as f:
         for cand in result.candidates:
             f.write(json.dumps(cand, ensure_ascii=False) + "\n")

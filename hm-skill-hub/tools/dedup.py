@@ -50,8 +50,15 @@ def _same_scope(a: HubRecord, b: HubRecord) -> bool:
 
 
 def _related(a: HubRecord, b: HubRecord) -> bool:
-    mech = alias_hit(a.aliases, b.aliases)
-    return (_same_scope(a, b) and mech) or (mech and text_similarity(a.text(), b.text()) >= 0.3)
+    text_overlap = text_similarity(a.text(), b.text()) >= 0.3
+    if alias_hit(a.aliases, b.aliases):
+        # Mechanism/alias overlap (e.g. bad_plan): relate on shared scope OR text.
+        return _same_scope(a, b) or text_overlap
+    # memory_item facts and global_lesson lessons carry NO mechanism/alias field
+    # (schemas are additionalProperties:false), so an alias-only gate left them
+    # forever unrelated -> every duplicate/contradiction classified "new". Fall
+    # back to shared scope + lexical overlap so same-target knowledge is compared.
+    return _same_scope(a, b) and text_overlap
 
 
 def classify_one(inc: HubRecord, existing: list[HubRecord], threshold: float = DEFAULT_THRESHOLD

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Team Skill Hub — One-Page Overview (English)</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body { font-family:"Segoe UI",system-ui,sans-serif; color:#1f2329; margin:0; background:#f7f8fa; }
+  header { background:linear-gradient(135deg,#0b2447,#19376d); color:#fff; padding:24px 40px; }
+  header h1 { margin:0 0 4px; font-size:22px; }
+  header p { margin:0; opacity:.85; font-size:13px; }
+  main { max-width:1180px; margin:0 auto; padding:20px 28px 56px; }
+  section { background:#fff; border:1px solid #e5e8ec; border-radius:12px; padding:22px 26px; margin:20px 0; }
+  h2 { font-size:18px; margin:0 0 4px; color:#0b2447; }
+  .sub { color:#5f6b7a; font-size:13px; margin:0 0 14px; }
+  pre.mermaid { background:transparent; display:flex; justify-content:center; overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:13px; margin-top:8px; }
+  th,td { border:1px solid #e5e8ec; padding:7px 10px; text-align:left; }
+  th { background:#f0f5ff; color:#0b2447; }
+  code { background:#f2f4f7; padding:1px 5px; border-radius:4px; font-size:12px; }
+  footer { text-align:center; color:#5f6b7a; font-size:12px; padding:16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Team Skill Hub — One-Page Overview</h1>
+  <p>Two diagrams: ① how experience circulates　② where data lands　|　Full detail: docs/Skill_Hub_Flow_Atlas_CN_EN.md</p>
+</header>
+<main>
+
+<section>
+<h2>Diagram ① The Loop: how experience circulates</h2>
+<p class="sub">Members work as usual → one command at close-out → contribute via git PR → hub gates and curation → the next member benefits automatically.</p>
+<pre class="mermaid">
+flowchart LR
+    classDef dir fill:#fff7e6,stroke:#d48806,color:#613400
+    classDef act fill:#e6f4ff,stroke:#1677ff,color:#002c8c
+    classDef out fill:#f6ffed,stroke:#389e0d,color:#135200
+
+    subgraph P1["Member machine (zero habit change)"]
+        A["👤 Daily optimization work<br/>(.opencode/ as usual)"]:::act --> B[("Local memory<br/>.opencode/memory/")]:::dir
+        B --> C["① Distill at close-out<br/>hmopt sediment-opencode"]:::act
+    end
+
+    C ==>|"② Contribute via git PR"| D
+
+    subgraph P2["Central hub hm-skill-hub"]
+        D[("staging/ inbox")]:::dir --> E["③ CI gates + human curation<br/>(dedup · conflict · secrets · schema)"]:::act
+        E --> F[("knowledge/ base<br/>facts · lessons · bad plans")]:::dir
+        F -->|"same mechanism verified ≥2x → graduates"| G[("skills/ library")]:::dir
+    end
+
+    F ==>|"④ Retrieve and consume<br/>hmopt resolve"| H
+    G ==> H["🧩 The next run automatically carries<br/>the whole team's facts, traps, techniques"]:::out
+    H ==> A
+</pre>
+<table>
+<tr><th>Step</th><th>Who</th><th>Command / Action</th></tr>
+<tr><td>①</td><td>Member</td><td><code>hmopt sediment-opencode --bundle</code> (distill local memory into a candidate bundle)</td></tr>
+<tr><td>②</td><td>Member</td><td>cp the bundle to <code>hm-skill-hub/staging/you/date.jsonl</code>, open a PR</td></tr>
+<tr><td>③</td><td>CI + Maintainer</td><td>CI runs four gates; maintainer finalizes per the <code>central_curate.py</code> report</td></tr>
+<tr><td>④</td><td>Any member</td><td><code>hmopt resolve "mm/vmscan.c::shrink_node"</code> (run before researching a target)</td></tr>
+</table>
+</section>
+
+<section>
+<h2>Diagram ② Placement: what lands in which directory</h2>
+<p class="sub">One rule: <b>a record's scope decides its directory</b> (CI-enforced); <b>anything file/function-level is knowledge, never a skill</b> (skills have only three layers — core/technique/domain — so the tree can't explode).</p>
+<pre class="mermaid">
+flowchart LR
+    classDef src fill:#f9f0ff,stroke:#722ed1,color:#22075e
+    classDef kn fill:#fff7e6,stroke:#d48806,color:#613400
+    classDef sk fill:#f6ffed,stroke:#389e0d,color:#135200
+
+    subgraph SRC["Your local memory .opencode/"]
+        s1["Ledger verdicts<br/>idea_ledger: L001 landed -0.8%"]:::src
+        s2["Reusable lessons<br/>global_lessons.md"]:::src
+        s3["Target notes<br/>facts / known bad plans"]:::src
+        s4["Process skills<br/>.opencode/skills/"]:::src
+        s5["Run artifacts · safety net<br/>reviews/ rejects · bench/ deltas · state/ bad plans"]:::src
+    end
+
+    subgraph K["hub: knowledge/ (placed by scope)"]
+        k1[("global/<br/>heuristics H · anti-patterns A<br/>validation pitfalls V · bad plans B")]:::kn
+        k2[("targets/⟨function-slug⟩/<br/>facts F### · idea_ledger L###<br/>e.g. F001 → targets/mm-vmscan-c-shrink-node/facts/")]:::kn
+        k3[("subsystems/⟨subsystem⟩/<br/>subsystem-level facts and bad plans")]:::kn
+    end
+
+    subgraph S["hub: skills/ (three layers only)"]
+        t1[("core/ process<br/>e.g. instruction-count-first")]:::sk
+        t2[("technique/ mechanism<br/>e.g. hoist-loop-invariant")]:::sk
+        t3[("domain/ subsystem<br/>e.g. mm-reclaim")]:::sk
+    end
+
+    s1 -->|"verdict → idea"| k2
+    s3 -->|"function-level fact / bad plan"| k2
+    s3 -->|"subsystem-level"| k3
+    s2 -->|"lessons → H/A/V · global traps → B"| k1
+    s5 -->|"reject→anti-pattern/bad plan · pass+delta→fact"| k1
+    s5 --> k2
+    s4 -->|"hmopt promote-skill"| t1
+    k2 -.->|"same mechanism verified on ≥2 targets → graduates<br/>(original records stay as evidence)"| t2
+</pre>
+<table>
+<tr><th>What you wrote</th><th>Distilled into</th><th>Final destination (curator places; CI checks path↔scope)</th></tr>
+<tr><td>Ledger row <code>### L001 ... landed</code></td><td>idea</td><td><code>knowledge/targets/⟨slug⟩/idea_ledger/L###.md</code></td></tr>
+<tr><td>Function-level fact / measured A·B result</td><td>memory_item fact</td><td><code>knowledge/targets/⟨slug⟩/facts/F###.md</code></td></tr>
+<tr><td>Reusable lesson (heuristic / anti-pattern / validation pitfall)</td><td>global_lesson</td><td><code>knowledge/global/heuristics|anti_patterns|validation_pitfalls/</code> (H/A/V)</td></tr>
+<tr><td>Rejected approach (global trap)</td><td>bad_plan</td><td><code>knowledge/global/bad_plans/B###.md</code></td></tr>
+<tr><td>Review rejects / passing validations (reviews/ bench/ state/; safety net when an agent skips memory-accumulation)</td><td>anti_pattern·bad_plan / fact</td><td>placed by scope as above; <code>docs/ plans/</code> free text via optional <code>--llm-extract</code></td></tr>
+<tr><td>Process skill SKILL.md</td><td>L0 skill scaffold</td><td><code>skills/core|technique|domain/⟨name⟩/</code> (graduates after eval is added)</td></tr>
+</table>
+</section>
+
+</main>
+<footer>hm-kernel-llm-opt · Skill Hub one-pager (English) · rendering requires internet for the mermaid CDN</footer>
+<script>mermaid.initialize({ startOnLoad:true, theme:"default", flowchart:{ htmlLabels:true, curve:"basis" } });</script>
+</body>
+</html>

@@ -7,9 +7,9 @@ CONFIG_PATH="${HMOPT_DOCKER_CONFIG:-configs/app.yaml}"
 ENV_FILE=".env.docker"
 HMOPT_CONTAINER="hmopt-app"
 HMOPT_IMAGE="${HMOPT_IMAGE:-hmopt:local}"
-HMOPT_BASE_IMAGE="${HMOPT_BASE_IMAGE:-kernel.dockerhub.rnd.huawei.com/hmci-docker-image:v3-7.0}"
+HMOPT_BASE_IMAGE="${HMOPT_BASE_IMAGE:-YOUR_REGISTRY/hmci-docker-image:v3-7.0}"
 HMOPT_BASE_IMAGE_CANDIDATES="${HMOPT_BASE_IMAGE_CANDIDATES:-}"
-PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.tools.huawei.com/pypi/simple}"
+PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.org/simple}"
 PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:-mirrors.tools.huawei.com}"
 REGISTRY_HOST="${REGISTRY_HOST:-kernel.dockerhub.rnd.huawei.com}"
 IMAGE_BUNDLE_TAR="${IMAGE_BUNDLE_TAR:-hmopt_bundle.tar.gz}"
@@ -271,7 +271,7 @@ run_hmopt_container() {
     -e HMOPT_AUTO_TEST_MCP_PORT='7336' \
     -e HMOPT_START_NEO4J="${HMOPT_START_NEO4J:-1}" \
     -e NEO4J_USER="${NEO4J_USER:-neo4j}" \
-    -e NEO4J_PASSWORD="${NEO4J_PASSWORD:-@huawei2026}" \
+    -e NEO4J_PASSWORD="${NEO4J_PASSWORD:-changeme}" \
     -w /app \
     "${RUNTIME_IDENTITY_ARGS[@]}" \
     "${volume_args[@]}" \

@@ -46,7 +46,7 @@ candidate L1 ──▶ gate 1 Schema/Lint/Redact ──▶ gate 2 Evidence ─�
 | Level | Criteria | Action |
 |---|---|---|
 | **L0 draft** | local only, unstructured | in `.opencode/local/` |
-| **L1 candidate** | schema-complete + initial evidence | land in `staging/<member>/<date>/*.json`, open a PR |
+| **L1 candidate** | schema-complete + initial evidence | land in `staging/<member>/<date>/*.jsonl` (one candidate per line; this is what `collect`/`dedup`/`nightly` read), open a PR |
 | **L2 stable** | passes the three gates + dual review | merge into `knowledge/` or `skills/domain/` or `skills/technique/` |
 | **L3 core** | reused successfully across ≥ 2 sub-teams + owner-team sign-off | promote into `skills/core/` (stricter review + a higher eval bar) |
 

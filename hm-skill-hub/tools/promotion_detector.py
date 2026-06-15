@@ -25,7 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from hub_records import HubRecord, load_hub_knowledge  # type: ignore
-from subsumption import detect_in_set, distinct_instances  # type: ignore
+from subsumption import detect_in_set, distinct_instances, instance_key  # type: ignore
 
 MIN_CONFIRMATIONS = 3
 MIN_CONTRIBUTORS = 2
@@ -76,7 +76,12 @@ def _subsumption_candidates(records: list[HubRecord]) -> list[PromotionCandidate
     seen: set[str] = set()
     for r in records:
         subsumed = [s for s in r.subsumes if s in by_id]
-        instances = {(by_id[s].target_slug or by_id[s].contributor or s) for s in subsumed}
+        # Same distinctness rule as subsumption.distinct_instances: anonymous
+        # instances (no target_slug, no contributor) collapse to one key and
+        # cannot fabricate a promotion. Previously this path keyed by the record
+        # id, so two anonymous records counted as 2 distinct instances here while
+        # the freshly-detected path counted them as 1 — same hub, different verdict.
+        instances = {instance_key(by_id[s]) for s in subsumed}
         if len(instances) >= MIN_SUBSUMED:
             seen.add(r.id)
             out.append(_mk_subsumption(r, subsumed))
