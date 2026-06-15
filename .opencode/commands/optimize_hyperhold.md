@@ -13,6 +13,7 @@ Skill packs:
 - @.opencode/skills/implementation-guardrails/SKILL.md
 - @.opencode/skills/validation-flight-check/SKILL.md
 - @.opencode/skills/memory-accumulation/SKILL.md
+- @.opencode/skills/hub-bridge/SKILL.md
 - @.opencode/skills/iterative-optimization/SKILL.md
 - @.opencode/skills/language-config/SKILL.md
 - @.opencode/skills/stage-gate-enforcement/SKILL.md

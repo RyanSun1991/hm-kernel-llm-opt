@@ -10,6 +10,7 @@ Skill packs:
 - @.opencode/skills/optimization-funnel/SKILL.md
 - @.opencode/skills/handoff-contract/SKILL.md
 - @.opencode/skills/memory-accumulation/SKILL.md
+- @.opencode/skills/hub-bridge/SKILL.md
 - @.opencode/skills/language-config/SKILL.md
 
 Memory packs:

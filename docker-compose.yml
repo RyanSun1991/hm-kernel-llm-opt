@@ -96,3 +96,28 @@ services:
       - ${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:rw
     working_dir: /app
     command: ["bash", "-lc", "bash scripts/run_build_mcp_server.sh"]
+
+  hmopt-skillhub-mcp:
+    image: ${HMOPT_IMAGE:-hmopt:local}
+    container_name: hmopt-skillhub-mcp
+    restart: unless-stopped
+    environment:
+      HMOPT_SKILLHUB_MCP_HOST: 0.0.0.0
+      HMOPT_SKILLHUB_MCP_PORT: 7338
+      HMOPT_SKILLHUB_MCP_MOUNT_PATH: ${HMOPT_SKILLHUB_MCP_MOUNT_PATH:-/mcp}
+      # The member's .opencode/ inside the mounted kernel repo (read for resolve's
+      # --local-memory, written for retrieval.jsonl + the sediment bundle). Defaults
+      # to the canonical /workspace/kernel mount so it works without KERNEL_REPO_PATH.
+      HMOPT_SKILLHUB_OPENCODE_DIR: ${HMOPT_SKILLHUB_OPENCODE_DIR:-/workspace/kernel/.opencode}
+      # Optional explicit hub root; otherwise auto-discovered (kernel .opencode/hub
+      # or hm-skill-hub, falling back to the platform's /app/hm-skill-hub).
+      HMOPT_SKILLHUB_HUB_ROOT: ${HMOPT_SKILLHUB_HUB_ROOT:-}
+    ports:
+      - "7338:7338"
+    volumes:
+      - ./:/app
+      - ${KERNEL_REPO_PATH:-./data/sample-kernel}:/workspace/kernel:rw
+      - ${KERNEL_REPO_PATH}:${KERNEL_REPO_PATH}:rw
+      - ${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:rw
+    working_dir: /app
+    command: ["bash", "-lc", "bash scripts/run_skillhub_mcp_server.sh"]

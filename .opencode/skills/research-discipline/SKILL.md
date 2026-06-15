@@ -17,8 +17,9 @@ description: Non-negotiable research order — Sequential Thinking, Kernel Index
    c. **Data round-trip / coalescing** — does data cross a subsystem boundary more than once per request? Are repeated lookups, repeated lock acquisitions, repeated allocations, or repeated serialize/deserialize cycles coalescable into one?
    d. **Dead / vestigial policy** — any knob, sysctl, config branch, or compatibility shim present only for a use case retired, deprecated, or not configured in the current product? Confirm via grep for callers/setters and product config files.
    e. **State / lock granularity** — any state distinction with no observable behavioral consequence in current callers? Any lock that protects fields touched by disjoint call paths and could be split into per-field or per-path locks?
-6. instruction-count hypothesis update — informed by BOTH the structural audit and hot-path micro analysis
-7. optimization only after the model is stable
+6. **Hub consult — before the hypothesis.** Consult the team Skill Hub for prior work on this target (the `## Hub context` block the manager injected into your handoff, or your own `skillhub_resolve` MCP call per `.opencode/skills/hub-bridge/SKILL.md`). Record which prior facts/heuristics you are building on and which `bad_plan` ids you must avoid. If the hub is unavailable, note it and proceed.
+7. instruction-count hypothesis update — informed by the structural audit, the hub context, and hot-path micro analysis
+8. optimization only after the model is stable
 
 ## Minimum Questions
 

@@ -62,7 +62,8 @@ Run this sequence **on every turn**, not just the first — context is rebuilt f
    1. `kernel_call_chain(symbols=[...], direction="callees|callers|both", depth=<N up to 6>, edge_kinds=["calls"])` to retrieve the graph shape with `call_site_path:call_site_line` per edge — no code bodies, so depth ≥ 4 actually returns full results instead of being silently truncated.
    2. `kernel_get_snippets(symbols=[...], per_symbol_max_chars=...)` to batch-fetch bodies for the specific nodes you need to read.
    The bundled `kernel_index_code` / `kernel_symbol_graph` / `kernel_hotspot_context` tools remain useful for one-shot "answer this question" lookups, but their `graph_depth` is clamped at 4 and they truncate snippets when the budget is exceeded; use them only when the question is fully answerable from a single response.  When `kernel_call_chain.stats.hops_truncated_at` is non-empty, narrow the `symbols` list to the truncated layer's parents and re-issue with raised `per_hop_limit` rather than abandoning depth.
-8. Only after steps 1–7 settle: do the research work for this turn.
+8. **Hub consult (read-only)** — per `.opencode/skills/hub-bridge/SKILL.md`, call the `skillhub_resolve(target="<target>", stage="research")` MCP tool and fold the returned team facts / heuristics / bad-plans into the design doc's `## Hub Known (team hub)` section (observational — cite hub ids, do NOT propose fixes; that stays `@kernel-plan` territory). Degrade silently if the tool returns `hub: unavailable`.
+9. Only after steps 1–8 settle: do the research work for this turn.
 
 ## Research Deliverables (Per Turn)
 
@@ -86,6 +87,7 @@ Kernel version / commit: <SHA if known>
 ## Concurrency Model
 ## Lifecycle Constraints
 ## Known Pain Points / Instruction-Count Waste Hotspots  (observational; do NOT propose fixes)
+## Hub Known (team hub)  (observational; from `hmopt resolve`, cite hub ids, do NOT propose fixes)
 ## Open Questions
 
 ## Research Iteration 1 — Initial Pass — <UTC>

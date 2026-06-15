@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>OpenCode × Team Skill Hub — Closed-Loop Workflow</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { background:#0f1420; }
+  .slide {
+    width:1280px; height:720px; position:relative;
+    background:linear-gradient(135deg,#0f1420 0%,#141b2e 100%);
+    color:#e8edf6; font-family:-apple-system,"Segoe UI",Roboto,"PingFang SC",sans-serif;
+    padding:26px 34px; overflow:hidden;
+  }
+  h1 { font-size:25px; font-weight:700; letter-spacing:.2px; }
+  h1 .x { color:#7aa2ff; }
+  .sub { font-size:13px; color:#9aa6bd; margin-top:3px; }
+  .band { border-radius:12px; padding:12px 16px; margin-top:12px; position:relative; }
+  .band-k { background:rgba(122,162,255,.07); border:1px solid rgba(122,162,255,.28); }
+  .band-m { background:rgba(126,231,179,.07); border:1px solid rgba(126,231,179,.30); }
+  .band-h { background:rgba(255,196,112,.07); border:1px solid rgba(255,196,112,.30); }
+  .band-title { font-size:12px; font-weight:700; letter-spacing:1.4px; text-transform:uppercase; margin-bottom:9px; }
+  .band-k .band-title { color:#7aa2ff; } .band-m .band-title { color:#7ee7b3; } .band-h .band-title { color:#ffc470; }
+  .row { display:flex; align-items:stretch; gap:8px; }
+  .node {
+    flex:1; background:#1b2235; border:1px solid #2c3650; border-radius:9px;
+    padding:9px 8px 8px; text-align:center; position:relative; min-height:54px;
+    display:flex; flex-direction:column; justify-content:center;
+  }
+  .node .t { font-size:12.5px; font-weight:650; }
+  .node .d { font-size:10px; color:#8e9bb5; margin-top:2px; line-height:1.25; }
+  .gate { border-color:#ff6b8b !important; box-shadow:inset 0 0 0 1px rgba(255,107,139,.35); }
+  .gate .tag { color:#ff8da3; font-size:9px; font-weight:700; letter-spacing:.5px; }
+  .arrow { align-self:center; color:#6b7794; font-size:16px; flex:0 0 14px; text-align:center; }
+  .star { position:absolute; top:-9px; right:-7px; background:#7ee7b3; color:#0f1420;
+    font-size:10px; font-weight:800; border-radius:50%; width:19px; height:19px;
+    display:flex; align-items:center; justify-content:center; box-shadow:0 1px 5px rgba(0,0,0,.4); }
+  .star.b { background:#ffc470; } .star.k { background:#7aa2ff; }
+  .tools { display:flex; gap:10px; margin-top:2px; }
+  .tool { flex:1; background:#16241d; border:1px solid #2f7a59; border-radius:9px; padding:8px 10px; }
+  .tool .nm { font-family:ui-monospace,Menlo,monospace; font-size:12px; color:#9cf0c6; font-weight:700; }
+  .tool .ds { font-size:10px; color:#8fb6a3; margin-top:3px; line-height:1.3; }
+  .mcphdr { font-size:11px; color:#7ee7b3; margin-bottom:7px; }
+  .mcphdr code { font-family:ui-monospace,Menlo,monospace; color:#cfe9dc; background:rgba(126,231,179,.1); padding:1px 5px; border-radius:4px; }
+  .legend { position:absolute; bottom:14px; left:34px; right:34px; display:flex; gap:14px;
+    font-size:10.5px; color:#aab5cc; border-top:1px solid #232c44; padding-top:8px; flex-wrap:wrap; }
+  .legend b { color:#7ee7b3; }
+  .pill { background:#222c44; border:1px solid #38436a; border-radius:20px; padding:2px 9px; font-size:10px; color:#c2cce0; }
+  .hub-flow { display:flex; align-items:center; gap:6px; font-size:11px; color:#d8c39a; flex-wrap:wrap; }
+  .hub-step { background:#241f15; border:1px solid #5c4a26; border-radius:7px; padding:6px 9px; font-size:10.5px; }
+  .hub-step b { color:#ffc470; }
+  .loop { position:absolute; right:18px; top:300px; color:#ffc470; font-size:10.5px; text-align:center; }
+  .gate-strip { display:flex; align-items:center; gap:8px; justify-content:center; margin-top:9px;
+    font-size:10.5px; color:#cdb38a; }
+  .human { background:rgba(255,107,139,.12); border:1px dashed #ff6b8b; color:#ff9cb0;
+    border-radius:7px; padding:5px 10px; font-size:10.5px; font-weight:600; }
+  .note { font-size:9.5px; color:#7f8aa3; }
+</style>
+</head>
+<body>
+<div class="slide">
+  <h1>OpenCode <span class="x">×</span> Team Skill Hub — 闭环工作流（接入后）</h1>
+  <div class="sub">kernel repo 的 <code>.opencode</code> 流水线通过 <b>MCP 工具</b>读/写中央仓 hm-skill-hub · ★ = 6 个 hub 接入点 · 🚪 = 硬门 · 任何 hub 调用失败都静默降级，不阻塞</div>
+
+  <!-- BAND 1: kernel repo pipeline -->
+  <div class="band band-k">
+    <div class="band-title">① Kernel Repo · .opencode/ 流水线（hm-opt-manager 编排 / kernel-research 入口）</div>
+    <div class="row">
+      <div class="node"><span class="star k">1</span><div class="t">Intake</div><div class="d">读 state + lock<br>hub 版本</div></div>
+      <div class="arrow">▸</div>
+      <div class="node"><span class="star">2</span><div class="t">Research</div><div class="d">结构审计→假设<br>5-idea 漏斗</div></div>
+      <div class="arrow">▸</div>
+      <div class="node gate"><span class="star">4</span><div class="tag">🚪 GATE</div><div class="t">Plan Review</div><div class="d">去重(含 hub 坏招)</div></div>
+      <div class="arrow">▸</div>
+      <div class="node"><div class="t">Implement</div><div class="d">patch</div></div>
+      <div class="arrow">▸</div>
+      <div class="node gate"><div class="tag">🚪 GATE</div><div class="t">Code Review</div><div class="d">+ tester 判定</div></div>
+      <div class="arrow">▸</div>
+      <div class="node"><div class="t">Tester A/B</div><div class="d">flash stock+feat<br>对比</div></div>
+      <div class="arrow">▸</div>
+      <div class="node"><span class="star">5</span><div class="t">Decision</div><div class="d">写本地 memory<br>+ 沉淀</div></div>
+    </div>
+    <div class="note" style="margin-top:7px;font-size:9.5px;color:#7f8aa3">★3 研究内部：hub 作为漏斗去重源 #8（research-discipline / optimization-funnel）· 失败走 back-edge（预算内）</div>
+  </div>
+
+  <!-- BAND 2: MCP bridge -->
+  <div class="band band-m">
+    <div class="band-title">② MCP 桥（skill-hub MCP server）</div>
+    <div class="mcphdr">Docker 服务 <code>hmopt-skillhub-mcp</code> · 端口 <code>:7338</code> · 挂载 kernel 仓的 <code>.opencode/</code>，由<b>服务端</b>做文件 I/O —— 故任何 mcp 能力的 agent（含 sub-agent）都可调用</div>
+    <div class="tools">
+      <div class="tool"><div class="nm">skillhub_resolve()</div><div class="ds">READ — 返回 <b>## Hub context</b> 块（技能+知识+坏招）→ 喂 ★2 research / ★4 plan-review</div></div>
+      <div class="tool"><div class="nm">skillhub_sediment()</div><div class="ds">WRITE — 把 .opencode/memory 蒸馏成 <b>_bundle.jsonl</b> ← ★5 decision</div></div>
+      <div class="tool"><div class="nm">skillhub_status()</div><div class="ds">报告钉版本 / 可达性 → ★1 intake</div></div>
+    </div>
+    <div class="gate-strip"><span class="human">░ 人工 PR 门：成员决定共享 → cp _bundle.jsonl → hub/staging/&lt;member&gt;/&lt;date&gt;.jsonl + 开 PR ░</span></div>
+  </div>
+
+  <!-- BAND 3: hub -->
+  <div class="band band-h">
+    <div class="band-title">③ Team Repo · hm-skill-hub（版本化中央仓）</div>
+    <div class="hub-flow">
+      <div class="hub-step"><b>staging/</b><br>投稿</div><span>▸</span>
+      <div class="hub-step"><b>CI 门</b><br>lint·redact·dedup</div><span>▸</span>
+      <div class="hub-step"><b>策展</b><br>七路分类·只增不删<br>+ 晋升信号</div><span>▸</span>
+      <div class="hub-step"><b>eval 门 + SkillOpt</b><br>严格变好·零回归</div><span>▸</span>
+      <div class="hub-step"><span class="star b" style="position:static;display:inline-flex;vertical-align:middle">6</span> <b>release + broadcast</b><br>升 semver · 更新<br>.opencode/hub + lock</div>
+    </div>
+  </div>
+
+  <div class="loop">↺ ★6 回流<br>发版 → bump<br>.opencode/hub<br>+ skill-memory.lock<br>→ 回到 ★1/★2</div>
+
+  <div class="legend">
+    <span class="pill">★1 intake 读 lock 版本</span>
+    <span class="pill">★2 research 前 resolve</span>
+    <span class="pill">★3 漏斗去重源 #8</span>
+    <span class="pill">★4 plan-review 前 resolve</span>
+    <span class="pill">★5 decision 沉淀</span>
+    <span class="pill">★6 发版回流</span>
+    <span style="margin-left:auto">读=hub→上下文 · 写=memory→hub(人工PR) · 回流=发版→下一个人的读 · <b>降级</b>: hub 不可达→hub:unavailable，不阻塞</span>
+  </div>
+</div>
+</body>
+</html>

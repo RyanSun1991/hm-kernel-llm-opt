@@ -32,13 +32,13 @@ OpenCode does not signal compaction to you. By the time your in-context conversa
 
 | current_stage | What to do this turn |
 |---|---|
-| `intake` | Run the **Mandatory Session Startup** below (only on the very first turn this also covers Auto-Iterate parsing). Then route per "Routing Rules" and set `current_stage = research`. |
-| `research` | If `pending_action.expected_artifact` exists on disk → advance: set `current_stage = plan_review`, set `pending_action.next_agent = kernel-plan-reviewer`, write back, then delegate. If not on disk → re-delegate to the same researcher with the same packet. |
+| `intake` | Run the **Mandatory Session Startup** below (only on the very first turn this also covers Auto-Iterate parsing). Then route per "Routing Rules", run **HUB_READ** (`--stage research`) per the Hub Bridge section and inject `## Hub context` into the research handoff, and set `current_stage = research`. |
+| `research` | If `pending_action.expected_artifact` exists on disk → advance: set `current_stage = plan_review`, set `pending_action.next_agent = kernel-plan-reviewer`, run **HUB_READ** (`--stage plan-review`) and inject `## Hub context` into the plan-review handoff, write back, then delegate. If not on disk → re-delegate to the same researcher with the same packet. |
 | `plan_review` | If `.opencode/reviews/<artifact_slug>_plan_review.md` exists → read its decision; on `approve` advance to `implementation` and append `plan_review:iter<N>` to `gates_passed`. On `needs revision` / `reject` route per Feedback Routing Table. |
 | `implementation` | Refuse to advance unless `gates_passed` contains `plan_review:iter<N>`. Then delegate to `kernel-code-agent`. |
 | `code_review` | Like `plan_review` but for `<artifact_slug>_code_review.md`; append `code_review:iter<N>` to `gates_passed` on approve. |
 | `tester` | Delegate to `kernel-tester-agent` only if the code review explicitly set tester to required/recommended. |
-| `decision` | Run the **End-of-Iteration Anchor** protocol below, update `auto_iterate.iteration_history`, then evaluate **Post-Decision Auto-Iterate**. |
+| `decision` | Run the **End-of-Iteration Anchor** protocol below, update `auto_iterate.iteration_history`, then — after `memory-accumulation` has written local memory, and only on a clean pass — run **HUB_WRITE** (`hmopt sediment-opencode … --bundle`) per the Hub Bridge section and surface the human PR command. Then evaluate **Post-Decision Auto-Iterate**. |
 | `iteration_boundary` | Compute next slug, update `current_iteration`, set `current_stage = intake` for the next iteration, write back, then delegate to the research specialist for iteration N+1. |
 
 **Before EVERY delegate call:** write back `current_task.json` with the updated `current_stage`, `pending_action.next_agent`, `pending_action.expected_artifact`, and (if a gate just passed) the new `gates_passed` entry. The state file is your only insurance against compaction.
@@ -313,6 +313,19 @@ If you do not know whether the file exists, run `ls .opencode/memory/targets/` (
 If relevant memory exists, require the specialist to read it before new exploration.
 
 At the end of a non-trivial run, require the active specialist or reviewer to promote stable findings into long-term memory.
+
+## Hub Bridge — Team Skill Hub read/write
+
+This pipeline is wired to the team Skill Hub through **MCP tools** (`skillhub_resolve` / `skillhub_sediment` / `skillhub_status`, served by the platform's skill-hub MCP server — agents in a kernel repo do NOT run `hmopt`). Follow `.opencode/skills/hub-bridge/SKILL.md` (inlined). You orchestrate *when* the hub is touched and record the audit:
+
+- **At session start:** call `skillhub_status` (or read `.opencode/skill-memory.lock`) to learn the pinned hub version and record it in `current_task.json` → `hub.version`. If the hub is unreachable, set `hub: "unavailable"` and continue — never block.
+- **Before delegating `research` and before delegating `kernel-plan-reviewer`:** call the
+  `skillhub_resolve(target="<raw target>", stage="<research|plan-review>")` MCP tool
+  using the RAW `target` from `current_task.json` (NOT the `_`-slug — the tool slugifies internally). Inject the returned `## Hub context` block **inside the handoff packet** so the sub-agent dedups against and cites those ids and never re-proposes a `bad_plan` id. (A sub-agent with MCP access may also call `skillhub_resolve` itself — either path is fine.) Record `hub.read.<stage>` = the returned ids.
+- **At the `decision` stage (clean pass only), after `memory-accumulation` writes local memory:** call
+  `skillhub_sediment(contributor="<member>", bundle=true)`,
+  record `hub.bundle_path`, and surface to the user the copy-to-`staging/` + open-PR instruction the tool returns. The human decides what to share — do NOT auto-push to the hub.
+- **Degradation:** an unreachable skill-hub MCP / missing hub / tool error returns a `hub: unavailable` string → log one line, set `hub: "unavailable"`, and continue. The hub never gates a run.
 
 ## End-of-Iteration Anchor — Compaction Recency Shield
 

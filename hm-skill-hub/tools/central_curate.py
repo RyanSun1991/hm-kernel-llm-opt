@@ -20,9 +20,12 @@ CLI:
 from __future__ import annotations
 
 import json
+import re
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from conflict_resolve import resolve  # type: ignore
@@ -121,6 +124,105 @@ def render_report(report: CurationReport) -> str:
     return "\n".join(lines)
 
 
+# --------------------------------------------------------------------------- #
+# --apply: materialize the safe `add` decisions into knowledge/**/*.md
+# (auto-assign stable ids + scope-derived paths). merge/conflict/subsumption are
+# left for a human — they mutate existing records. Mirrors tools/path_scope.py.
+# --------------------------------------------------------------------------- #
+_GLOBAL_LESSON_DIR = {
+    "heuristic": "heuristics",
+    "anti_pattern": "anti_patterns",
+    "validation_pitfall": "validation_pitfalls",
+}
+
+
+def _fname_slug(rec: dict) -> str:
+    text = str(rec.get("title") or rec.get("lesson") or rec.get("mechanism") or rec.get("id", ""))
+    s = re.sub(r"[^a-zA-Z0-9]+", "-", text.lower()).strip("-")
+    return s[:40].rstrip("-") or "record"
+
+
+def _dest_path(schema: str, rec: dict, new_id: str) -> PurePosixPath | None:
+    """Reverse of path_scope.derive_path_scope: scope -> knowledge-relative path."""
+    fn = f"{new_id}-{_fname_slug(rec)}.md"
+    if schema == "memory_item":
+        scope = rec.get("scope") or {}
+        if scope.get("level") == "subsystem" and scope.get("subsystem"):
+            return PurePosixPath("subsystems") / scope["subsystem"] / fn
+        if scope.get("target_slug"):
+            return PurePosixPath("targets") / scope["target_slug"] / "facts" / fn
+        return None
+    if schema == "global_lesson":
+        cat = _GLOBAL_LESSON_DIR.get(rec.get("kind"))
+        return PurePosixPath("global") / cat / fn if cat else None
+    if schema == "bad_plan":
+        subs = (rec.get("applies_to") or {}).get("subsystems")
+        if not subs or subs == ["*"]:
+            return PurePosixPath("global") / "bad_plans" / fn
+        return PurePosixPath("subsystems") / subs[0] / "bad_plans" / fn
+    if schema == "idea":
+        slug = rec.get("target_slug")
+        return PurePosixPath("targets") / slug / "idea_ledger" / fn if slug else None
+    return None
+
+
+def _next_id(prefix: str, used: set[str]) -> str:
+    nums = [int(i[1:]) for i in used if i[:1] == prefix and i[1:].isdigit()]
+    return f"{prefix}{(max(nums) + 1) if nums else 1:03d}"
+
+
+def _to_markdown(rec: dict) -> str:
+    rec = dict(rec)
+    body = (rec.pop("body", "") or "").strip()
+    if not body:
+        headline = rec.get("title") or rec.get("lesson") or rec.get("mechanism") or rec["id"]
+        body = f"# {rec['id']} — {headline}"
+    fm = yaml.safe_dump(rec, sort_keys=False, allow_unicode=True).strip()
+    return f"---\n{fm}\n---\n\n{body}\n"
+
+
+def apply_additions(report: CurationReport, candidates: list[dict], hub: list,
+                    knowledge_dir: Path, *, write: bool) -> list[tuple]:
+    """Materialize (or plan) the `add` decisions. Returns (old_id, new_id, rel_path, status)."""
+    cand_by_id = {c["record"]["id"]: c for c in candidates}
+    used = {r.id for r in hub}
+    out: list[tuple] = []
+    for d in report.decisions:
+        if d.kind != "add":
+            out.append((d.incoming_id, None, None, f"SKIP ({d.kind} — needs human)"))
+            continue
+        c = cand_by_id.get(d.incoming_id)
+        if c is None:
+            out.append((d.incoming_id, None, None, "SKIP (candidate not found)"))
+            continue
+        rec = dict(c["record"])
+        new_id = _next_id(rec["id"][:1], used)
+        rel = _dest_path(c["schema"], rec, new_id)
+        if rel is None:
+            out.append((d.incoming_id, None, None, "SKIP (cannot derive path — fix scope)"))
+            continue
+        used.add(new_id)
+        rec["id"] = new_id
+        if write:
+            dest = knowledge_dir / Path(str(rel))
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(_to_markdown(rec), encoding="utf-8")
+        out.append((d.incoming_id, new_id, str(rel), "WROTE" if write else "PLAN"))
+    return out
+
+
+def render_apply(actions: list[tuple], *, write: bool) -> str:
+    head = "## Materialized into knowledge/" if write else "## Apply plan (dry-run — pass --apply to write)"
+    lines = ["", head, ""]
+    for old, new, rel, status in actions:
+        lines.append(f"- `{old}` → `{new or '-'}`  {rel or ''}  [{status}]")
+    lines.append("")
+    lines.append("> Stable ids auto-assigned (next-free per prefix). Review `git diff`, "
+                 "run `python tools/lint.py`, then commit. Content quality (titles, real "
+                 "mechanism/target) is NOT auto-fixed — edit the candidate first.")
+    return "\n".join(lines)
+
+
 def _read_candidates(path: Path) -> list[dict]:
     out: list[dict] = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -134,6 +236,9 @@ def main(argv: list[str]) -> int:
     # Accept both --report=out.md and --report out.md (the agent prompt and the
     # usage string both show the space form, which was previously dropped).
     report_path: str | None = None
+    knowledge_dir = "knowledge"
+    apply = False
+    plan = False
     positional: list[str] = []
     i = 0
     while i < len(argv):
@@ -144,18 +249,30 @@ def main(argv: list[str]) -> int:
             report_path = argv[i + 1]
             i += 2
             continue
+        elif a.startswith("--knowledge-dir="):
+            knowledge_dir = a.split("=", 1)[1]
+        elif a == "--apply":
+            apply = True
+        elif a == "--plan":
+            plan = True
         elif not a.startswith("--"):
             positional.append(a)
         i += 1
     if not positional:
-        sys.stderr.write("usage: central_curate.py <incoming.jsonl> [--report out.md]\n")
+        sys.stderr.write(
+            "usage: central_curate.py <incoming.jsonl> [--report out.md] "
+            "[--plan | --apply] [--knowledge-dir DIR]\n")
         return 2
     candidates = _read_candidates(Path(positional[0]))
-    report = curate_batch(candidates, load_hub_knowledge())
+    hub = load_hub_knowledge()
+    report = curate_batch(candidates, hub)
     md = render_report(report)
     print(md)
     if report_path:
         Path(report_path).write_text(md, encoding="utf-8")
+    if apply or plan:
+        actions = apply_additions(report, candidates, hub, Path(knowledge_dir), write=apply)
+        print(render_apply(actions, write=apply))
     return 0
 
 

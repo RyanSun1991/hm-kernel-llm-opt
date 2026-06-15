@@ -27,3 +27,7 @@ __pycache__/
 # design §8/promotion_policy: local-only, never committed; shared knowledge
 # reaches the hub via staging/ PRs instead.
 /.opencode/local/
+
+# Hub-bridge read-path audit log — per-run record of what `hmopt resolve`
+# mounted into agent context (.opencode/skills/hub-bridge). Runtime-only.
+/.opencode/state/retrieval.jsonl

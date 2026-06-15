@@ -7,6 +7,7 @@ Objective: Focused instruction-count-aware review for lock scope, waiter orderin
 Skill packs:
 - @.opencode/skills/instruction-count-first/SKILL.md
 - @.opencode/skills/research-discipline/SKILL.md
+- @.opencode/skills/hub-bridge/SKILL.md
 - @.opencode/skills/handoff-contract/SKILL.md
 - @.opencode/skills/validation-flight-check/SKILL.md
 - @.opencode/skills/language-config/SKILL.md

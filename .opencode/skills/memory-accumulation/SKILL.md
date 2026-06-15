@@ -29,6 +29,27 @@ Every non-trivial pipeline run should improve future runs.
 - optional subsystem memory note under `.opencode/memory/subsystems/`
 - update `.opencode/memory/global_lessons.md` if the result generalizes
 
+## Sediment Harvest — Promote Local Memory to the Team Hub (hub write)
+
+Local memory only helps *this* repo. Right after the writes above (at the decision
+stage, clean pass only), the manager distills them into team-hub candidates per
+`.opencode/skills/hub-bridge/SKILL.md` → WRITE path:
+
+```
+hmopt sediment-opencode --opencode-dir .opencode --contributor <member> --bundle
+```
+
+It produces `.opencode/local/sediment_staging/_bundle.jsonl`; a human then copies it
+to `<hub>/staging/<member>/<date>.jsonl` and opens a PR (the member decides what to
+share — never auto-push). For the harvest to find anything, the writes above MUST use
+the formats sediment reads:
+
+- idea-ledger rows: `### L00x <mechanism>` + `- **status**: landed` + `- **delta_pct**: <n>`
+- target memory: a `## Known Bad Plans` and/or `## Stable Structural Facts` section
+- review verdicts: `## Decision reject`; bench reports: `verdict: pass` + `delta_pct`
+
+The harvest is non-blocking: 0 candidates is fine and never gates the run.
+
 ## Interaction with Iterative Close-Loop Mode
 
 When `.opencode/skills/iterative-optimization/SKILL.md` is loaded and `auto_iterate.enabled` is true, memory updates happen at the **end of each pass** (before the manager auto-starts the next pass).  The target memory file accumulates the mechanism list across iterations — it is the single most important input for the next pass's researcher dedup.
