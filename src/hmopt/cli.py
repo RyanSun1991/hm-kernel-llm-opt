@@ -519,5 +519,103 @@ def mcp_stdio() -> None:
     run_mcp_stdio()
 
 
+def _maybe_llm(config: str):
+    """Build an LLMClient from config; return None on any failure (offline-safe)."""
+    try:
+        from hmopt.core.llm import LLMClient
+
+        cfg = _load_config(config)
+        if not cfg.llm.api_key:
+            return None
+        return LLMClient(
+            api_base=cfg.llm.base_url,
+            api_key=cfg.llm.api_key,
+            default_model=cfg.llm.model,
+            allow_external_proxy_models=cfg.llm.allow_external_proxy_models,
+        )
+    except Exception:  # noqa: BLE001 - sediment must never fail on LLM setup
+        return None
+
+
+@app.command()
+def sediment(
+    run_dir: str = typer.Option(..., "--run-dir", help="Run artifacts dir (sediment_input.json or bench/reviews/)"),
+    out: str = typer.Option(".opencode/local/sediment_staging", "--out", help="Tier-1 staging output dir"),
+    run_id: Optional[str] = typer.Option(None, "--run-id", help="Defaults to run_dir name"),
+    contributor: str = typer.Option("pipeline", "--contributor"),
+    no_llm_extract: bool = typer.Option(False, "--no-llm-extract", help="Disable the LLM salience pass (§8 stage 2)"),
+    bundle: bool = typer.Option(False, "--bundle", help="Also collate the staging dir into one PR jsonl"),
+    config: str = typer.Option("configs/app.yaml", "--config"),
+) -> None:
+    # Demo: python -m hmopt.cli sediment --run-dir .opencode/local/runs/<run_id>
+    # Purpose: distill Tier 0 run artifacts into schema-valid Tier-1 candidates (design §8).
+    from hmopt.sediment.pipeline import bundle_staging, sediment_run
+    from hmopt.skillhub.resolver import find_hub_root
+
+    hub_root = find_hub_root(Path.cwd())
+    llm = None if no_llm_extract else _maybe_llm(config)
+    res = sediment_run(
+        run_dir, out_dir=out, run_id=run_id, contributor=contributor,
+        hub_root=hub_root, llm=llm, no_llm=no_llm_extract,
+    )
+    typer.echo(f"sediment[{res.run_id}]: {res.n_valid} valid candidate(s) -> {res.out_path}")
+    if res.invalid:
+        typer.echo(f"  {len(res.invalid)} invalid candidate(s) skipped:")
+        for cand, errs in res.invalid[:5]:
+            typer.echo(f"   - {cand.get('schema')}: {errs[0] if errs else 'invalid'}")
+    if bundle:
+        bundle_path, n = bundle_staging(out, Path(out) / "_bundle.jsonl")
+        typer.echo(f"bundle: {n} record(s) -> {bundle_path}")
+
+
+@app.command()
+def resolve(
+    target: str = typer.Argument(..., help="Target, e.g. mm/vmscan.c::shrink_node"),
+    stage: str = typer.Option("research", "--stage", help="research|plan|plan-review|implement|code-review|test|decision"),
+    mechanism: Optional[str] = typer.Option(None, "--mechanism", help="Mechanism-anchored query"),
+    run_dir: Optional[str] = typer.Option(None, "--run-dir", help="Write retrieval.jsonl here (§12.4)"),
+    local_memory: Optional[str] = typer.Option(None, "--local-memory", help="Local in-flight memory root"),
+) -> None:
+    # Demo: python -m hmopt.cli resolve "mm/vmscan.c::shrink_node" --stage research
+    # Purpose: resolve skills + knowledge for a target/stage via the read path (design §12.2).
+    from hmopt.skillhub.resolver import Resolver
+
+    r = Resolver(Path.cwd(), local_memory_root=local_memory)
+    ctx = r.resolve(target, stage=stage, mechanism=mechanism, run_dir=run_dir)
+    typer.echo(f"target={ctx.target}  stage={ctx.stage}  slug={ctx.target_slug}")
+    typer.echo(f"subsystems: {ctx.subsystems}")
+    typer.echo(f"skills:     {[s.ref for s in ctx.skills]}")
+    typer.echo(f"knowledge   (budget {ctx.token_used}/{ctx.token_budget} tok, {ctx.latency_ms:.1f} ms):")
+    for h in ctx.knowledge:
+        typer.echo(f"  [{h.record.id}] {h.record.title}  (score={h.score:.3f}, {h.record.maturity}, {h.record.origin})")
+    if not ctx.knowledge:
+        typer.echo("  (none)")
+
+
+@app.command("retrieval-eval")
+def retrieval_eval(
+    eval_dir: str = typer.Option("hm-skill-hub/eval/retrieval", "--eval-dir"),
+    k: int = typer.Option(5, "--k"),
+    update_baseline: bool = typer.Option(False, "--update-baseline", help="Rewrite baseline.json"),
+) -> None:
+    # Demo: python -m hmopt.cli retrieval-eval
+    # Purpose: run the retrieval hard gate (recall@k + symbol-name ablation, P1-10).
+    from hmopt.skillhub.retrieval_eval import load_baseline, run_eval, write_baseline
+
+    r = run_eval(eval_dir, k=k)
+    typer.echo(f"queries={r.n_queries}  must_recall@{k}={r.must_recall:.3f}  "
+               f"lenient@{k}={r.lenient_recall:.3f}")
+    typer.echo(f"per-type: {r.per_type}")
+    typer.echo(f"symbol ablation (k=1) bm25/vector/hybrid: "
+               f"{r.ablation.get('bm25'):.3f} / {r.ablation.get('vector'):.3f} / "
+               f"{r.ablation.get('hybrid'):.3f}")
+    base = load_baseline(eval_dir)
+    if base and r.must_recall < base["must_recall"] - 1e-9:
+        typer.echo(f"REGRESSION: must_recall {r.must_recall:.3f} < baseline {base['must_recall']:.3f}")
+        raise typer.Exit(code=1)
+    if update_baseline:
+        typer.echo(f"baseline updated: {write_baseline(r, eval_dir)}")
+
+
 if __name__ == "__main__":
     app()

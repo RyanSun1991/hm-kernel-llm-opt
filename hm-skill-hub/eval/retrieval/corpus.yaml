@@ -1,0 +1,117 @@
+# Retrieval-eval fixture corpus (plan P1-10). NOT production knowledge — lives
+# under eval/ so lint.py (which scans knowledge/ + skills/) ignores it. Each
+# entry mirrors the relevant schema fields so the hybrid retriever sees a
+# realistic record. `kind` selects the record family.
+
+records:
+  # --- mm-reclaim target facts ---
+  - id: MF1
+    kind: memory_item
+    type: pattern
+    title: "Hoist sc->priority read out of the shrink_node reclaim loop"
+    mechanism: hoist-invariant
+    scope: {level: function, subsystem: mm-reclaim, target_slug: mm-vmscan-c-shrink-node}
+    body: "In mm/vmscan.c shrink_node, sc->priority is loop-invariant; hoist the read above the per-page loop to drop a redundant load per iteration."
+    maturity: L2
+  - id: MF2
+    kind: memory_item
+    type: pattern
+    title: "Batch page isolation in shrink_node to coalesce list operations"
+    mechanism: batch-coalesce
+    scope: {level: function, subsystem: mm-reclaim, target_slug: mm-vmscan-c-shrink-node}
+    body: "Coalesce per-page isolation in shrink_node into one batched list splice to cut repeated lock round-trips."
+    maturity: L2
+
+  # --- workqueue target fact + bad plan ---
+  - id: WF1
+    kind: memory_item
+    type: anti_pattern
+    title: "Do not blanket-inline process_one_work on cache-constrained devices"
+    mechanism: inline-callee
+    scope: {level: function, subsystem: workqueue-threadpool, target_slug: kernel-workqueue-c-process-one-work}
+    body: "Blanket inlining the kworker process_one_work hot entry blows up i-cache; only inline a single proven-hot callee."
+    maturity: L2
+  - id: WB1
+    kind: bad_plan
+    title: "blanket inline of kworker hot entries"
+    mechanism: inline-callee
+    target_pattern: "kworker entry functions on cache-constrained devices"
+    scope: function
+    applies_to: {subsystems: ["*"], platforms: [phone-X]}
+    reason: "Blanket inline of kworker entry functions blows up i-cache; net function-level regression."
+    body: "Global bad plan: blanket inline-callee on kworker entries regresses i-cache."
+    maturity: L2
+
+  # --- sync-primitives target fact ---
+  - id: SF1
+    kind: memory_item
+    type: pattern
+    title: "Split the coarse mutex in the locking hot path into per-shard locks"
+    mechanism: lock-split
+    scope: {level: function, subsystem: sync-primitives, target_slug: kernel-locking-mutex-c}
+    body: "Reduce mutex contention by sharding the coarse lock per-domain so unrelated critical sections do not serialize."
+    maturity: L2
+
+  # --- sched target fact ---
+  - id: DF1
+    kind: memory_item
+    type: pattern
+    title: "Predicate the hot branch in pick_next_task to remove a misprediction"
+    mechanism: branch-elimination
+    scope: {level: function, subsystem: sched, target_slug: kernel-sched-c-pick-next}
+    body: "Convert the data-dependent branch in pick_next_task into a predicated select to remove a hot-path misprediction."
+    maturity: L2
+
+  # --- hyperhold target fact ---
+  - id: HF1
+    kind: memory_item
+    type: pattern
+    title: "Eliminate the repeated header reload in the hyperhold IO path"
+    mechanism: redundant-load-elimination
+    scope: {level: function, subsystem: hyperhold-io, target_slug: drivers-hyperhold-io-c}
+    body: "Cache the hyperhold IO header once instead of reloading it each descriptor; removes redundant loads on the hot path."
+    maturity: L2
+
+  # --- vector length-dilution distractors (share sub-tokens, not the symbol) ---
+  # Short records sharing 'shrink'/'node'/'pick'/'next' sub-tokens but NOT the
+  # full symbol; pure bag-of-words vectors over-rank these on a bare symbol query
+  # while idf-weighted BM25 keeps the true symbol record on top (design §12.1).
+  - id: DX1
+    kind: memory_item
+    type: fact
+    title: "node shrink helper"
+    scope: {level: subsystem, subsystem: mm-reclaim}
+    body: "shrink node helper"
+    maturity: L2
+  - id: DX2
+    kind: memory_item
+    type: fact
+    title: "next pick helper"
+    scope: {level: subsystem, subsystem: sched}
+    body: "pick next helper"
+    maturity: L2
+
+  # --- global lessons ---
+  - id: GH1
+    kind: global_lesson
+    lesson: "Prefer hoisting loop-invariant work before inlining on hot paths."
+    type_kind: heuristic
+    scope: {level: global}
+    mechanism: hoist-invariant
+    body: "When a hot path has both a loop-invariant computation and an inline candidate, hoist first; inlining first hides the invariant."
+    tags: [hoist, inline, ordering]
+    maturity: L3
+  - id: GA1
+    kind: global_lesson
+    lesson: "Don't spend iterations over-optimizing cold paths below the funnel noise floor."
+    scope: {level: global}
+    body: "Agents chase easy cold-path optimizations that don't move the primary metric; require a hot-path delta thesis."
+    tags: [planning, scope, cold-path]
+    maturity: L3
+  - id: GV1
+    kind: global_lesson
+    lesson: "A single-image test is not an A/B verdict; it lacks the stock baseline."
+    scope: {level: global}
+    body: "Require paired stock+feature flash/test cycles and a delta computation before accepting a landed/rejected verdict."
+    tags: [validation, ab-test, flash]
+    maturity: L3

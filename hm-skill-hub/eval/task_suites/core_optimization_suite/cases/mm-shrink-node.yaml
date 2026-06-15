@@ -1,0 +1,7 @@
+id: mm-shrink-node
+target: "mm/vmscan.c::shrink_node"
+subsystem: mm-reclaim
+expected_mechanism: hoist-invariant
+expected_terms: [hoist, loop-invariant, re-measure]
+avoid_terms: []
+weight: 1.0

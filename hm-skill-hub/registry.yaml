@@ -1,28 +1,52 @@
-# Top-level inventory of hub assets.
-# Maintained by tools/release.py (Phase 4); hand-edited until then.
-
+# Top-level inventory of hub assets. Maintained by tools/release.py.
 hub:
-  version: "0.1.0"
-  status: "phase-0-skeleton"
-
-skills: []
-# Schema (example):
-#   - name: optimization-funnel
-#     kind: core               # core | technique | domain
-#     version: 2.3.1
-#     maturity: L3             # L0 | L1 | L2 | L3
-#     eval_id: eval/task_suites/funnel_suite_v2
-#     owners: [@core-skill-owners]
-#     status: active
-
+  version: 0.2.0
+  status: active
+  knowledge_count: 6
+  schema_hash: a7a1164992d317c8
+skills:
+- name: example
+  kind: core
+  version: 0.1.0
+  maturity: L0
+  eval_id: ''
+  owners:
+  - '@maintainers'
+  status: experimental
+- name: instruction-count-first
+  kind: core
+  version: 0.1.0
+  maturity: L1
+  eval_id: eval/task_suites/core_optimization_suite
+  owners:
+  - '@core-skill-owners'
+  status: experimental
+- name: mm-reclaim
+  kind: domain
+  version: 0.1.0
+  maturity: L0
+  eval_id: eval/task_suites/mm_reclaim_suite
+  owners:
+  - '@maintainers'
+  status: experimental
+- name: hoist-loop-invariant
+  kind: technique
+  version: 0.1.0
+  maturity: L0
+  eval_id: ''
+  owners:
+  - '@maintainers'
+  status: experimental
 knowledge_indexes:
-  - path: "knowledge/global/heuristics/"        # H###
-  - path: "knowledge/global/anti_patterns/"     # A###
-  - path: "knowledge/global/validation_pitfalls/" # V###
-  - path: "knowledge/global/bad_plans/"         # B###
-  - path: "knowledge/subsystems/"               # G### / F### per subsystem
-  - path: "knowledge/targets/"                  # F### / L### per target
-
-evals: []
-
-releases: []
+- path: knowledge/global/heuristics/
+- path: knowledge/global/anti_patterns/
+- path: knowledge/global/validation_pitfalls/
+- path: knowledge/global/bad_plans/
+- path: knowledge/subsystems/
+- path: knowledge/targets/
+evals:
+- eval/task_suites/core_optimization_suite
+- eval/task_suites/mm_reclaim_suite
+releases:
+- version: 0.2.0
+  bump: minor

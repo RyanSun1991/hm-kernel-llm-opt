@@ -1,0 +1,72 @@
+name: skill-hub-ci
+
+# Activates the Phase 0.5 "blocking gate" in THIS repo before the hub is
+# subtree-split out (the hub's own hm-skill-hub/.github/ workflow only triggers
+# once it lives at a repo root). Runs the hub lint + secret-scan + toolchain
+# tests, plus the consumer-side (skillhub) read/write-path tests.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - "hm-skill-hub/**"
+      - "src/hmopt/skillhub/**"
+      - "src/hmopt/sediment/**"
+      - "src/hmopt/memory/**"
+      - "tests/test_skillhub_*.py"
+      - "tests/test_sediment*.py"
+      - "tests/test_local_curator.py"
+      - "tests/test_retrieval_eval.py"
+      - "tests/test_dual_tree_parity.py"
+      - ".github/workflows/skill-hub-ci.yml"
+
+jobs:
+  hub-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install hub deps
+        run: |
+          pip install -r hm-skill-hub/tools/requirements.txt
+          pip install -r hm-skill-hub/tools/requirements-dev.txt
+      - name: hub schema lint + path<->scope consistency
+        run: python hm-skill-hub/tools/lint.py
+      - name: hub secret scan
+        run: python hm-skill-hub/tools/redact.py --check
+      - name: hub dedup gate (engine A) — fail on unresolved conflict
+        run: |
+          cd hm-skill-hub
+          shopt -s nullglob globstar
+          for f in staging/*.jsonl staging/**/*.jsonl; do
+            echo "dedup $f"; python tools/dedup.py "$f" --check
+          done
+          echo "dedup gate ok"
+      - name: hub eval-gate (engine B) — reject skill regressions
+        run: cd hm-skill-hub && python tools/eval_gate.py
+      - name: hub toolchain tests (lint/scope/curator/dedup/subsumption/promotion/skillopt)
+        run: cd hm-skill-hub && python -m pytest tools/tests/ -q
+
+  consumer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install
+        run: |
+          pip install -e .
+          pip install pytest pyyaml jsonschema
+      - name: skillhub read/write-path + curator + eval tests
+        run: |
+          python -m pytest \
+            tests/test_skillhub_retrieval.py \
+            tests/test_skillhub_resolver.py \
+            tests/test_sediment.py \
+            tests/test_local_curator.py \
+            tests/test_retrieval_eval.py \
+            tests/test_dual_tree_parity.py -q

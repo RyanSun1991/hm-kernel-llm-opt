@@ -1,53 +1,80 @@
 # Deprecation Policy
 
-固化设计 §13.3。失效治理：什么时候记录从「在用」走向「已被取代 / 已废弃」，以及怎样**保留可审计**而不污染检索。
+Encodes design §13.3. Invalidation governance: when a record moves from "in use"
+to "superseded / deprecated", and how to **keep it auditable** without polluting
+retrieval.
 
-## 状态机
+## State machine
 
 ```
-   active ──新证据更优──▶ superseded   （旧条目 valid_until=now，新条目 supersedes=[旧id]）
+   active ──stronger new evidence──▶ superseded   (old record valid_until=now, new record supersedes=[old id])
       │
-      │ invalidation 命中
-      │   OR   score 长期衰减
-      │   OR   连续 N 次反例
+      │ invalidation fires
+      │   OR   long-run score decay
+      │   OR   N consecutive counter-examples
       ▼
-   deprecated   （从检索 / inline 排除；不物理删除）
+   deprecated   (excluded from retrieval / inline; not physically deleted)
 ```
 
-**状态字段是 schema 强制的**（`status: active | superseded | deprecated`）。**永不物理删除**——这是可审计与"为什么以前这么做"调查的底线。
+**The status field is schema-enforced** (`status: active | superseded |
+deprecated`). **Never physically delete** — this is the floor for auditability
+and "why did we do it this way before?" investigations.
 
-## 触发条件
+## Triggers
 
-| 触发 | 动作 |
+| Trigger | Action |
 |---|---|
-| 同 (target, mechanism) 出现更强证据 | Curator 自动把旧条目设 `superseded`、`valid_until=now()`、新条目 `supersedes=[old.id]` |
-| `invalidation` 字段命中（例：`"rebase 后须重校 offset"`）| 标 `deprecated`；附 deprecation_reason |
-| 连续 ≥ 3 次反例 evidence | 标 `deprecated`；写一条 anti_pattern A### 解释为什么之前以为它对 |
-| 提到的 mechanism 从 `_registry/mechanisms.yaml` 移除 | 该记录 `status=deprecated`，留 reference 给 successor mechanism |
-| skill 的 eval pass_rate 连续 ≥ 2 个周期下降 | skill `status=deprecated`；保留 `best_skill.md` 历史快照；切到 Pareto 前沿里的另一个候选 |
+| Stronger evidence for the same (target, mechanism) | Curator auto-sets the old record `superseded`, `valid_until=now()`, and the new record `supersedes=[old.id]` |
+| `invalidation` field fires (e.g. `"recheck offset after rebase"`) | mark `deprecated`; attach a deprecation_reason |
+| ≥ 3 consecutive counter-example evidence items | mark `deprecated`; write an anti_pattern A### explaining why it was believed correct before |
+| The referenced mechanism is removed from `_registry/mechanisms.yaml` | set the record `status=deprecated`, leaving a reference to the successor mechanism |
+| A skill's eval pass_rate drops for ≥ 2 consecutive cycles | set the skill `status=deprecated`; keep the `best_skill.md` historical snapshot; switch to another candidate on the Pareto frontier |
 
-## 定期清理（Phase 4 nightly 作业）
+## Periodic cleanup (the Phase 4 nightly job)
 
 ```
 nightly:
-  scan all records with status ∈ {superseded, deprecated}
-  → keep in repo (audit trail)
-  → exclude from RAG index rebuild
+  scan all records with status in {superseded, deprecated}
+  → keep in the repo (audit trail)
+  → exclude from the RAG index rebuild
   → exclude from @-inline context assembly
-  → tag with deprecation_reason if missing
+  → tag with a deprecation_reason if missing
 ```
 
-## 重激活（revisit）
+## Reactivation (revisit)
 
-`deprecated` 不是终点。若新证据显示之前的判断错了：
-1. 不改旧条目 status（保留历史）。
-2. 写一条**新**记录（新 ID），在 `related_ids` 引用旧条目。
-3. 注释 `"revisits B017: new evidence in bench/<...>"`。
+`deprecated` is not the end. If new evidence shows the earlier judgment was wrong:
+1. Do not change the old record's status (preserve history).
+2. Write a **new** record (new ID), referencing the old one in `related_ids`.
+3. Annotate `"revisits B017: new evidence in bench/<...>"`.
 
-idea_ledger 的 `deferred + reopen_trigger` 机制是同一思路的另一形态——deferred 不是 deprecated，是「条件成熟可重提」。
+The idea_ledger's `deferred + reopen_trigger` mechanism is another form of the
+same idea — `deferred` is not `deprecated`; it is "re-openable once conditions are
+met".
 
-## 不做的事
+## What not to do
 
-- ❌ 物理删除任何记录（除非违法/泄密；用 `git filter-repo` 必须经 owners 团队批准 + 留 ADR）。
-- ❌ 改 stable ID。
-- ❌ 直接 reset `confirmations / score`；应当通过新增 counter-evidence 让 score 自然衰减。
+- ❌ Physically delete any record (unless illegal / a leak; using `git
+  filter-repo` requires owner-team approval + a recorded ADR).
+- ❌ Change a stable ID.
+- ❌ Directly reset `confirmations / score`; let the score decay naturally by
+  adding counter-evidence.
+
+## Actual commands (reviewers can run these directly)
+
+```bash
+# Supersede: stronger new evidence -> old record superseded + valid_until + superseded_by (no delete)
+python tools/conflict_resolve.py <winner_path.md> <loser_path.md>
+
+# Mark deprecated (invalidation fired / repeated counter-examples / mechanism retired): hand-edit frontmatter
+#   status: deprecated
+#   (optionally add deprecation_reason, related_ids pointing to the successor)
+python tools/lint.py            # confirm the status change still passes schema (superseded => needs superseded_by)
+
+# Cleanup (Phase 4 nightly): superseded/deprecated stay in the repo but are excluded from index rebuild + @-inline
+#   see the nightly job; for now, verify the status field by hand
+```
+
+New `memory_item` constraint: `status: superseded` must also set
+`superseded_by[]` (schema-enforced), so the double-time chain stays complete and
+auditably traceable.

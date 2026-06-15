@@ -28,7 +28,9 @@
     "added_by":     {"type": "string"},
     "status":       {"enum": ["active", "superseded", "deprecated"]},
     "superseded_by":{"type": "string", "pattern": "^[HAV][0-9]{3,}$"},
-    "related_ids":  {"type": "array", "items": {"type": "string"}}
+    "related_ids":  {"type": "array", "items": {"type": "string"}},
+    "subsumes":     {"type": "array", "items": {"type": "string"}, "description": "More-specific records (any schema) this lesson generalizes (design §10.1.b / §11.5). Kept as evidence, never absorbed."},
+    "subsumed_by":  {"type": "array", "items": {"type": "string"}, "description": "More-general record(s) that generalize this one."}
   },
   "allOf": [
     {

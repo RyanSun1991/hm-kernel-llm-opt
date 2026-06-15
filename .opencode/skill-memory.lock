@@ -14,5 +14,5 @@
 
 mode: in-repo
 path: ../hm-skill-hub
-pin: HEAD                      # Phase 0 placeholder; bumped when hub gains real releases.
-hub_version: 0.1.0             # See hm-skill-hub/registry.yaml#hub.version
+pin: HEAD                      # Phase 0 placeholder; real SHA once the hub is subtree-split.
+hub_version: 0.2.0             # Pinned by tools/broadcast.py; see hm-skill-hub/registry.yaml#hub.version

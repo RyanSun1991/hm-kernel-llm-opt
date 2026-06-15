@@ -14,11 +14,24 @@ jobs:
         with:
           python-version: '3.11'
       - name: install deps
-        run: pip install -r tools/requirements.txt
-      - name: schema lint
+        run: |
+          pip install -r tools/requirements.txt
+          pip install -r tools/requirements-dev.txt
+      - name: toolchain tests
+        run: python -m pytest tools/tests/ -q
+      - name: schema lint + path<->scope consistency
         run: python tools/lint.py
       - name: secret scan
         run: python tools/redact.py --check
+      - name: dedup gate (engine A) — fail on unresolved conflict
+        run: |
+          shopt -s nullglob globstar
+          for f in staging/*.jsonl staging/**/*.jsonl; do
+            echo "dedup $f"; python tools/dedup.py "$f" --check
+          done
+          echo "dedup gate ok (no staged conflicts)"
+      - name: eval-gate (engine B) — reject skill regressions
+        run: python tools/eval_gate.py
 
   # NOTE: Until the hub is git subtree-split into its own repo, this workflow
   # file lives here as a scaffold. GitHub only triggers workflows from .github/

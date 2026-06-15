@@ -1,0 +1,7 @@
+id: hh-flush
+target: "drivers/hyperhold/hp_core.c::hyperhold_flush"
+subsystem: hyperhold-io
+expected_mechanism: batch-coalesce
+expected_terms: [batch-coalesce, round-trip]
+avoid_terms: []
+weight: 1.0

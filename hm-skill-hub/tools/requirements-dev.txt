@@ -1,0 +1,5 @@
+# Dev/test-only deps for the hub toolchain. Runtime needs only requirements.txt.
+# Note: tools/tests/test_tools.py also runs standalone (no pytest):
+#   python tools/tests/test_tools.py
+-r requirements.txt
+pytest>=8.0

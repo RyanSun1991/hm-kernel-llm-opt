@@ -1,0 +1,54 @@
+name: hub-nightly
+
+# Nightly closed-loop optimization (design §11, plan P4-1).
+# Runs Collect → Normalize → Cluster → Optimize → Validate → Promote → Broadcast.
+# DEFAULT IS DRY-RUN (half-automatic, §11 early-safety): it produces the plan and
+# (when wired) opens a promote PR for human merge. `--apply` is reserved for the
+# trusted path gated by tools/auto_merge_gate.py.
+#
+# Scaffold note: lives here until the subtree split relocates .github/ to root.
+
+on:
+  schedule:
+    - cron: "0 3 * * *"      # 03:00 UTC nightly
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "apply edits/registry/lock (trusted path only)"
+        type: boolean
+        default: false
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: install deps
+        run: pip install -r tools/requirements.txt
+      - name: nightly loop (dry-run unless explicitly applied)
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event.inputs.apply }}" = "true" ]; then
+            python tools/nightly.py --apply | tee nightly-report.md
+          else
+            python tools/nightly.py | tee nightly-report.md
+          fi
+          {
+            echo '## Nightly report'
+            echo '```'
+            cat nightly-report.md
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: auto-merge trust status (per skill)
+        run: python tools/auto_merge_gate.py
+      - name: upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-report
+          path: nightly-report.md
+      # NOTE: when applied, a follow-up step opens a promote-candidate PR
+      # (tools/broadcast.py --open-pr + a release PR); merge stays human until the
+      # skill clears auto_merge_gate. No auto-merge before the trust threshold.

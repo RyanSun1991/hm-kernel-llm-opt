@@ -37,15 +37,25 @@
         "confirmations": {"type": "integer", "minimum": 1}
       }
     },
+    "applies_when":  {"type": "string", "description": "Condition under which this record holds. Drives conditional-divergence coexistence (design §10.1: two records both correct under different conditions)."},
     "maturity":      {"enum": ["L0", "L1", "L2", "L3"]},
     "status":        {"enum": ["active", "superseded", "deprecated"]},
     "invalidation":  {"type": "string", "description": "Failure condition, e.g. 'rebase invalidates offset'."},
-    "supersedes":    {"type": "array", "items": {"type": "string"}},
+    "supersedes":    {"type": "array", "items": {"type": "string"}, "description": "Records this one replaces (temporal/contradiction; double-time, never physical delete)."},
+    "superseded_by": {"type": "array", "items": {"type": "string"}, "description": "Records that replaced this one. Set together with status=superseded + valid_until."},
+    "subsumes":      {"type": "array", "items": {"type": "string"}, "description": "More-specific records this one generalizes (design §10.1.b / §11.5 subsumption). Specific records remain as evidence, never absorbed/deleted."},
+    "subsumed_by":   {"type": "array", "items": {"type": "string"}, "description": "More-general record(s) that generalize this one. >=2 distinct subsumed instances feed promotion (§11.5)."},
     "valid_from":    {"type": "string", "format": "date-time"},
     "valid_until":   {"type": "string", "format": "date-time"},
     "score":         {"type": "number"},
     "contributor":   {"type": "string"},
     "created_at":    {"type": "string", "format": "date-time"},
     "updated_at":    {"type": "string", "format": "date-time"}
-  }
+  },
+  "allOf": [
+    {
+      "if":   {"properties": {"status": {"const": "superseded"}}, "required": ["status"]},
+      "then": {"required": ["superseded_by"]}
+    }
+  ]
 }

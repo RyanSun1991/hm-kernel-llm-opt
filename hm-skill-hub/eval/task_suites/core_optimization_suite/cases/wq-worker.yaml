@@ -1,0 +1,7 @@
+id: wq-worker
+target: "kernel/workqueue.c::process_one_work"
+subsystem: workqueue-threadpool
+expected_mechanism: lock-split
+expected_terms: [lock-split, per-shard, contention]
+avoid_terms: [blanket-inline]
+weight: 1.0

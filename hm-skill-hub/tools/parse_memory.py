@@ -1,11 +1,28 @@
-"""Parser for hub Markdown record files (bad_plans, global_lessons, idea_ledger, etc.).
+"""Parser for hub knowledge record files.
 
-Format: heading-delimited records with `- **key**: value` field blocks.
-See policies/promotion_policy.md and the Memory System spec for the grammar.
+v2 (Phase 0.5 convergence, design §6.1 / §7): every knowledge record is **one
+file = one record**. The file is YAML frontmatter (all standard schema fields)
+followed by a markdown body:
+
+    ---
+    id: A001
+    type: anti_pattern
+    title: ...
+    scope: {level: global}
+    source: [{kind: review, ref: ...}]
+    ...
+    ---
+
+    # human-readable title
+
+    free-form markdown body (becomes the `body` field for schemas that have one)
+
+This replaces the legacy heading-delimited (`### A001` + `- **key**: value`)
+multi-record format. `parse()` returns the frontmatter as a standard schema
+object so `lint.py` can validate it directly.
 
 Stdlib + PyYAML only. CLI:
-    python tools/parse_memory.py <path.md>          # print parsed records as JSON
-    python tools/parse_memory.py --section <path>   # restrict to a markdown section
+    python tools/parse_memory.py <path.md>     # print parsed record as JSON
 """
 from __future__ import annotations
 
@@ -23,26 +40,25 @@ except ImportError:  # pragma: no cover
     sys.stderr.write("PyYAML required: pip install pyyaml\n")
     sys.exit(2)
 
-RECORD_HDR = re.compile(r"^###\s+(?P<id>[A-Z][0-9]{3,})(?:\s+[—\-:]\s+(?P<title>.+?))?\s*$")
-SECTION_HDR = re.compile(r"^##\s+(?P<name>.+?)\s*$")
-FIELD_LINE = re.compile(r"^-\s+\*\*(?P<key>[A-Za-z_][\w.]*)\*\*\s*:\s*(?P<val>.*)$")
-INDENT_RE = re.compile(r"^(?P<indent>    +)(?P<rest>.*)$")
-LIST_ITEM = re.compile(r"^\s*-\s+(?P<val>.+)$")
+FRONTMATTER_RE = re.compile(r"^---\n(?P<fm>.*?)\n---\n?(?P<body>.*)$", re.DOTALL)
+
+
+class ParseError(ValueError):
+    """Raised when a record file cannot be parsed into a frontmatter record."""
 
 
 @dataclass
 class Record:
     id: str
-    title: str = ""
-    section: str | None = None
     fields: dict[str, Any] = field(default_factory=dict)
+    body: str = ""
     source_path: str = ""
-    line_start: int = 0
+    line_start: int = 1
 
 
 def _stringify_dates(obj: Any) -> Any:
-    """Walk parsed structure; convert date/datetime back to ISO strings so
-    JSON-Schema's `format: date` (which requires string type) is satisfied."""
+    """Convert date/datetime back to ISO strings so JSON-Schema's `format: date`
+    (which requires a string instance) is satisfied after YAML coercion."""
     if isinstance(obj, _dt.datetime):
         return obj.isoformat()
     if isinstance(obj, _dt.date):
@@ -54,100 +70,32 @@ def _stringify_dates(obj: Any) -> Any:
     return obj
 
 
-def _coerce(raw: str) -> Any:
-    s = raw.strip()
-    if not s:
-        return None
-    # inline YAML list / mapping
-    if (s.startswith("[") and s.endswith("]")) or (s.startswith("{") and s.endswith("}")):
-        return yaml.safe_load(s)
-    # bare scalar — try YAML scalar coercion (numbers, true/false, dates)
+def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
+    """Split a record file into (frontmatter_dict, body_text)."""
+    m = FRONTMATTER_RE.match(text)
+    if not m:
+        raise ParseError("missing YAML frontmatter (file must start with '---' ... '---')")
     try:
-        val = yaml.safe_load(s)
-        if isinstance(val, str) or val is None:
-            return s  # keep original whitespace for plain strings
-        return val
-    except yaml.YAMLError:
-        return s
-
-
-def _read_nested_block(lines: list[str], start: int) -> tuple[Any, int]:
-    """Read an indented block starting at `start`. Returns (parsed_value, next_index)."""
-    block: list[str] = []
-    j = start
-    while j < len(lines):
-        ln = lines[j]
-        if ln.strip() == "":
-            block.append("")
-            j += 1
-            continue
-        m = INDENT_RE.match(ln)
-        if not m:
-            break
-        block.append(m.group("rest"))
-        j += 1
-    # strip trailing empties
-    while block and block[-1] == "":
-        block.pop()
-    if not block:
-        return None, j
-    # bullet list?
-    if all(b.lstrip().startswith("- ") or b == "" for b in block if b):
-        items: list[Any] = []
-        for b in block:
-            if not b:
-                continue
-            m = LIST_ITEM.match(b)
-            if m:
-                items.append(_coerce(m.group("val")))
-        return items, j
-    # YAML mapping fallback
-    return yaml.safe_load("\n".join(block)), j
+        fm = yaml.safe_load(m.group("fm"))
+    except yaml.YAMLError as e:
+        raise ParseError(f"invalid YAML frontmatter: {e}") from e
+    if not isinstance(fm, dict):
+        raise ParseError("YAML frontmatter must be a mapping")
+    return _stringify_dates(fm), m.group("body").strip()
 
 
 def parse(path: Path) -> list[Record]:
-    lines = path.read_text(encoding="utf-8").splitlines()
-    records: list[Record] = []
-    cur: Record | None = None
-    section: str | None = None
-    i = 0
-    while i < len(lines):
-        ln = lines[i]
-        if m := SECTION_HDR.match(ln):
-            section = m.group("name").strip()
-            i += 1
-            continue
-        if m := RECORD_HDR.match(ln):
-            if cur is not None:
-                records.append(cur)
-            cur = Record(
-                id=m.group("id"),
-                title=(m.group("title") or "").strip(),
-                section=section,
-                source_path=str(path),
-                line_start=i + 1,
-            )
-            i += 1
-            continue
-        if cur is None:
-            i += 1
-            continue
-        if m := FIELD_LINE.match(ln):
-            key = m.group("key")
-            val_inline = m.group("val")
-            if val_inline.strip() == "":
-                val, i = _read_nested_block(lines, i + 1)
-                cur.fields[key] = val
-                continue
-            cur.fields[key] = _coerce(val_inline)
-            i += 1
-            continue
-        i += 1
-    if cur is not None:
-        records.append(cur)
-    for r in records:
-        r.fields = _stringify_dates(r.fields)
-    return records
+    """Parse one record file. Returns a single-element list (one file = one record).
+
+    Raises ParseError on malformed files so callers can report precisely.
+    """
+    text = path.read_text(encoding="utf-8")
+    fm, body = parse_frontmatter(text)
+    rid = fm.get("id")
+    if not isinstance(rid, str) or not rid:
+        raise ParseError("frontmatter is missing a string `id`")
+    fields = {k: v for k, v in fm.items() if k != "id"}
+    return [Record(id=rid, fields=fields, body=body, source_path=str(path))]
 
 
 def main(argv: list[str]) -> int:
@@ -158,7 +106,11 @@ def main(argv: list[str]) -> int:
     if not path.exists():
         sys.stderr.write(f"file not found: {path}\n")
         return 2
-    recs = parse(path)
+    try:
+        recs = parse(path)
+    except ParseError as e:
+        sys.stderr.write(f"{path}: {e}\n")
+        return 1
     print(json.dumps([asdict(r) for r in recs], ensure_ascii=False, indent=2, default=str))
     return 0
 

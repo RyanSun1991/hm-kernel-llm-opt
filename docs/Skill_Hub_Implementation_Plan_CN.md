@@ -51,6 +51,10 @@ Phase 4 自动优化 10w+   ┃
 
 **Phase 0.5（独立小会话）—— 含 Phase 1 前置阻塞 gate**：
 
+> **状态：P0.5-2 gate ✅ 已完成（本会话）。** 交付：① 一记录一文件 frontmatter（A001/H001/B001/V001 回填 + target 示例 F001/L001）；② `tools/path_scope.py` 路径编码 scope + `lint.py` 路径/frontmatter 一致性强校验；③ `parse_memory.py` 改 frontmatter→schema object；④ schema 补 `applies_when/subsumes[]/subsumed_by[]/superseded_by[]`（+ `idea.target_slug`）；⑤ `tools/tests/test_tools.py` 22 例（pytest 或 standalone 均可跑）接入 hub CI。**gate AC 全绿**：`python tools/lint.py` exit 0、路径/scope 不一致精准报错、schema 含新字段。P0.5-1（内容迁移 symlink）仍待独立会话。
+
+
+
 - **P0.5-1 内容迁移**——把现有 `.opencode/skills`、`agents`、`commands`、`pipelines`、`docs`（harness 规范部分）切入 `hm-skill-hub/`，在 `.opencode/` 下用 symlink 保持旧路径可用。带回归：跑一次现有 `/optimize_generic` 验证 pipeline 行为不变。
 - **P0.5-2 schema / markdown 落盘格式收敛 ★前置阻塞**（v1.2 升级，评审反馈 ①，对应设计 §6.1 / §7 / §17 议题 7）：lint / dedup / retrieval scalar filter / Curator 七路分类全部依赖 schema 字段稳定，故**必须先于 Phase 1 完成**。交付：① **一记录一文件**（拆掉 `### A001` 多记录堆叠），frontmatter 用标准 schema 全字段，**禁止每类自扩字段**；② **文件路径编码 scope**（`knowledge/targets/<slug>/facts/<ID>.md` 等，§6.1）；③ `parse_memory.py` 升级为「frontmatter → 标准 schema object」转换器；④ `lint.py` 改 schema-driven + **新增路径 scope 与 frontmatter scope 一致性校验**；⑤ schema 补 `subsumes[]/subsumed_by[]/superseded_by[]/applies_when`；⑥ 现有内容一次性回填。**AC（gate）**：`python tools/lint.py` 对全部示例 + 任意新条目 exit 0；路径/frontmatter scope 不一致能精准报错；schema 含新字段；**此 gate 不过，Phase 1 不开工**。
 
@@ -59,6 +63,8 @@ Phase 4 自动优化 10w+   ┃
 ## 2. Phase 1 — 蒸馏 + 读路径 + 本地在线消解（3-5w，v1.1 扩展）
 
 **目标**：pipeline 收口点能产出符合 schema 的 Tier 1 候选包；resolver 读路径上线（混合检索 + 上下文预算）；本地在线消解 PoC 验证完成。
+
+> **状态（本会话）**：P1-1/P1-2/P1-6/P1-7/P1-8/P1-9/P1-10 核心已落地（`src/hmopt/skillhub/` 读路径 + `src/hmopt/sediment/` 写路径 + `src/hmopt/memory/` 本地 curator + `eval/retrieval/` 硬门）。**实测**：retrieval must-recall@5 = 1.0、三类 query 各 ≥8、符号名 ablation **hybrid(1.0) > vector(0.8)** 证明 BM25 救场；本地七路分类器 benchmark 48 例准确率 1.0、temporal+conditional false-delete = 0、本地零 subsumption；sediment 产出 schema-valid 候选。**议题 6（mem0 依赖）已决策**（见设计 §17 议题 6）。**未接入**：P1-3 三处收口钩子的真实 pipeline 调用（需 live run，本沙箱无重依赖）、P1-5 `--open-pr` 真正提 PR（仅 `--bundle` 落地）。检索后端为纯 Python BM25+token-hashing 向量（离线确定性），faiss/真实 embedder 可后续注入。
 
 | ID | 任务 | 交付物 | AC |
 |---|---|---|---|
@@ -85,6 +91,8 @@ Phase 4 自动优化 10w+   ┃
 
 **目标**：知识合并上线（引擎 A），CI 强校验，policies 落地。
 
+> **状态：Phase 2 核心 ✅ 已落地（本会话）。** `hm-skill-hub/tools/` 新增独立 Curator 工具链（stdlib+pyyaml+jsonschema，离线确定性）：`dedup.py`(P2-2 三态) · `conflict_resolve.py`(P2-3 双时态不删) · `subsumption.py`(P2-9 泛化建链 + ≥2 实例 emit) · `promotion_detector.py`(P2-8 聚类+subsumption 两路) · `central_curate.py`+`merge_curator.md`(P2-1 §10.1.b 编排) · `similarity.py`/`hub_records.py`(原语)。P2-4 CI dedup gate（hub ci + 根 ci）· P2-5 PR 模板 · P2-6 policies 实际命令段 · P2-7 CODEOWNERS。**测试**：`tools/tests/test_central_curator.py` 15 例含 §10.1.b mock（subsumption≠dup/contradiction、≥2 实例才晋升、被包含实例留 evidence）+ 真实 hub 仅识别 H001→F001 无误报；hub 工具共 **43 测试**绿。**后续**：真实 LLM 蕴含判定接入、Curator-agent 在 OpenCode 实跑、subsumption 算力预算上限（§17 议题 8）留 Phase 2 收尾/Phase 3。
+
 | ID | 任务 | 交付物 | AC |
 |---|---|---|---|
 | P2-1 | Curator-agent 提示词 | `hm-skill-hub/tools/merge_curator.md` | OpenCode 可加载；输入候选 + 现有 hub knowledge，输出去重 / 冲突 / 消解决策 |
@@ -105,6 +113,8 @@ Phase 4 自动优化 10w+   ┃
 
 **目标**：技能修改安全反喂（引擎 B），SkillOpt 半自动闭环。
 
+> **状态：Phase 3 核心 PoC ✅ 已落地（本会话）。** 被优化技能 `skills/core/instruction-count-first/`（种子 `best_skill.md` 故意不完整，pass_rate 0.67）。P3-1 套件 `eval/task_suites/core_optimization_suite/` 9 case（mm/wq/hyperhold，机制+guidance 词+avoid_term）。`run_evals.py`(P3-2/P3-3，**可插拔 ProxyScorer** 代理真机指令数) · `skill_optimizer.py`(P3-5/P3-7，有界编辑+严格变好门+bad_edits 缓冲跳过) · `pareto.py`(P3-6，互补候选不塌缩) · `eval_gate.py`+CI(P3-4，pass_rate 降即拒)。**DoD 闭环演示**：优化器一条 `hoist-invariant` 有界编辑使 0.67→1.00、零回归、过 gate 接受、出 scorecard；regressing 编辑入 bad_edits。**测试** `tools/tests/test_skillopt.py` 11 例，hub 工具共 **59 测试**绿。**诚实标注**：proxy 为关键词/机制覆盖代理（非真机加速证明），交付的是 SkillOpt 控制流脚手架；真机指令数估计器/真机 A/B（P3-3 后续）为长杆。
+
 | ID | 任务 | 交付物 | AC |
 |---|---|---|---|
 | P3-1 | 评测样本采集 | `eval/task_suites/<suite>/cases/*.yaml` | 每条 case：input target + 期望优化方向 + grading rubric；初始 ≥ 20 case 覆盖 mm/wq/hyperhold |
@@ -124,6 +134,8 @@ Phase 4 自动优化 10w+   ┃
 ## 5. Phase 4 — 自动优化（10w+）
 
 **目标**：闭环自动迭代日常运行；每周小版本 / 每月稳定版。
+
+> **状态：Phase 4 核心 PoC ✅ 已落地（本会话）。** `nightly.py`+`nightly.yml`(P4-1，Collect→Normalize→Cluster→Optimize→Validate→Promote→Broadcast，默认 dry-run 半自动，--apply 按传入 hub_root 参数化) · `release.py`(P4-2，semver 推断 major/minor/patch + registry 重写 + release notes) · `broadcast.py`(P4-3，重生成 `skill-memory.lock` in-repo/submodule + --open-pr stub) · `dashboard.py`(P4-4，`eval/scorecards/_dashboard.md` 每技能趋势) · `auto_merge_gate.py`+`policies/auto_merge_policy.md`(P4-5，信任阈值 ≥N 次提升+0 回滚才自动 merge)。**registry 已 cut 到 0.2.0** 反映 4 个真实 skill，消费端 lock pin 到 0.2.0。**测试** `tools/tests/test_phase4.py` 14 例（含 nightly dry-run 零副作用 + --apply temp-hub 往返），hub 工具共 **78 测试**绿。**policies 全部改为英文**（用户要求）。**长杆/后续**：真机 A/B 指令数（P3-3）、真实 GitHub PR 自动化（broadcast/promotion --open-pr 实接）、eval 语料扩到 ≥20（P3-1）、subsumption 真实 LLM 蕴含判定。
 
 | ID | 任务 | 交付物 | AC |
 |---|---|---|---|
