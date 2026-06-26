@@ -51,7 +51,16 @@ The pipeline command that launched this session uses `@`-inline directives to lo
 
 The six orchestration steps below are **self-contained** — the tool calls shown here are the authoritative how-to.  You do not need any additional source of truth to execute the happy path.  If a step errors in a way the inline guidance does not cover, report the error and the phase to the manager rather than fishing for additional context.
 
-## Orchestration — Six Steps
+## Step 0 — Test Method Dispatch
+
+Read `test_method` from the handoff (default **`lmbench-suite`** if absent), then branch:
+
+- **`lmbench-suite`** (default) — run the lmbench full-suite A/B per `ab-test-comparison-lmbench/SKILL.md`: flash stock → `run_lmbench_test_async()` → poll `lmbench_test_status` until done → flash feature → `run_lmbench_test_async()` → poll until done. The feature run's `result.digest.vs_previous` is the stock→feature patch delta; `result.digest.hm_vs_linux` is competitive context. Verdict uses the **benchmark delta with a ~2% noise floor**, NOT instruction count. **Skip the six instruction-count steps below.**
+- **`instruction-count`** — run the six steps below (modelCase per-function IC A/B).
+
+Both methods return the SAME Tester→Manager contract (verdict + recommended_next_route); only the measurement and verdict threshold differ. Always cite `test_method` in the validation report header. Under iterative mode, keep `test_method` fixed across passes (it lives in `current_task.json`).
+
+## Orchestration — Six Steps (instruction-count method)
 
 Execute these in strict order.  If a step fails, stop and report to the manager with the phase and raw error; do not skip ahead.
 

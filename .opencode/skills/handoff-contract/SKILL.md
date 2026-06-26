@@ -79,7 +79,8 @@ The manager Reads the artifact only when its decision needs the details — not 
 - feature image path (kernel with optimization patch, from Build MCP output)
 - device target for flash (serial or identifier)
 - modelCase test workspace override if not `D:\modelCase_OH_single`
-- **comparison granularity**: `compare_level` in {`total`, `process`, `thread`, `lib`, `function`} plus the target names at and above that level — `compare_process`, `compare_thread`, `compare_lib`, `compare_function`. `total` requires no names; `function` requires all four. If the plan doesn't specify, default to `total` and note it.
+- **comparison granularity**: `compare_level` in {`total`, `process`, `thread`, `lib`, `function`} plus the target names at and above that level — `compare_process`, `compare_thread`, `compare_lib`, `compare_function`. `total` requires no names; `function` requires all four. If the plan doesn't specify, default to `total` and note it. (Applies to `instruction-count` only.)
+- **test_method** (default `lmbench-suite`): which validation the tester runs — `lmbench-suite` (full lmbench A/B; **default**) or `instruction-count` (modelCase per-function IC A/B). For `lmbench-suite` the `compare_level` above is ignored; results are per-benchmark-group + HM-vs-Linux and the verdict uses the benchmark delta with a ~2% noise floor. See `ab-test-comparison-lmbench/SKILL.md`.
 
 ### Tester -> Manager Or User
 

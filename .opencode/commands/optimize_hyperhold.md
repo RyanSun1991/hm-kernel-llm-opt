@@ -20,6 +20,7 @@ Skill packs:
 - @.opencode/skills/build-and-sign/SKILL.md
 - @.opencode/skills/flash-device-operations/SKILL.md
 - @.opencode/skills/ab-test-comparison/SKILL.md
+- @.opencode/skills/ab-test-comparison-lmbench/SKILL.md
 
 Memory packs:
 - @.opencode/memory/global_lessons.md

@@ -53,6 +53,14 @@ DEFAULT_INSTRUCTION_RUN_TIMEOUT_S = 3600 * 2  # 2h, matches pipeline default
 # client doesn't see a silent kill mid-compare.
 DEFAULT_COMPARE_TIMEOUT_S = 600
 
+# lmbench full-suite workflow (runs 2-5h on the device; the relay's 1h per-call
+# ceiling is sidestepped by launching the suite detached and polling --status).
+DEFAULT_LMBENCH_TEST_DIR = r"D:\LmbenchAutoTest"
+DEFAULT_LMBENCH_PIPELINE_SCRIPT = "lmbench_pipeline.py"
+DEFAULT_LMBENCH_POLL_INTERVAL_S = 300        # poll the Windows run every 5 min
+DEFAULT_LMBENCH_OVERALL_TIMEOUT_S = 6 * 3600  # give up after 6h
+DEFAULT_LMBENCH_RELAY_CALL_TIMEOUT_S = 300    # each short start/status relay call
+
 _INSTRUCTION_TASKS: dict[str, dict[str, Any]] = {}
 _INSTRUCTION_TASKS_LOCK = threading.Lock()
 
@@ -826,6 +834,125 @@ def get_async_task_status(task_id: str) -> dict[str, Any]:
 get_instruction_task_status = get_async_task_status
 
 
+# ---------------------------------------------------------------------------
+# lmbench full-suite A/B (long-running; detached on Windows + Linux-side polling)
+# ---------------------------------------------------------------------------
+
+def _default_lmbench_test_dir() -> str:
+    return os.getenv("HMOPT_LMBENCH_TEST_DIR", DEFAULT_LMBENCH_TEST_DIR).strip() or DEFAULT_LMBENCH_TEST_DIR
+
+
+def _default_lmbench_pipeline_script() -> str:
+    return (
+        os.getenv("HMOPT_LMBENCH_PIPELINE_SCRIPT", DEFAULT_LMBENCH_PIPELINE_SCRIPT).strip()
+        or DEFAULT_LMBENCH_PIPELINE_SCRIPT
+    )
+
+
+def _relay_summary(relay: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "returncode": relay.get("returncode"),
+        "duration_s": relay.get("duration_s"),
+        "command": relay.get("command"),
+        "stderr_tail": (relay.get("stderr") or "")[-2000:],
+    }
+
+
+def run_lmbench_test(
+    *,
+    test_dir: str | None = None,
+    run_cmd: list[str] | None = None,
+    pipeline_script: str | None = None,
+    python_exe: str | None = None,
+    use_venv: bool = True,
+    force_utf8: bool = True,
+    top_n: int = 8,
+    poll_interval_s: int = DEFAULT_LMBENCH_POLL_INTERVAL_S,
+    overall_timeout_s: int = DEFAULT_LMBENCH_OVERALL_TIMEOUT_S,
+    relay_call_timeout_s: int = DEFAULT_LMBENCH_RELAY_CALL_TIMEOUT_S,
+) -> dict[str, Any]:
+    """Launch the lmbench full suite on the Windows relay (detached) and poll
+    until it finishes, returning the compact digest.
+
+    The suite takes 2-5h but the relay caps a single /exec at 1h, so the Windows
+    pipeline spawns ``main.py`` as a background process (--start) and we poll a
+    cheap --status from here. Each relay call is seconds; this function blocks
+    for hours and is therefore meant to be driven via :func:`run_lmbench_test_async`.
+    """
+    pipeline = pipeline_script or _default_lmbench_pipeline_script()
+    tdir = test_dir or _default_lmbench_test_dir()
+
+    start_args = [pipeline, "--test-dir", tdir, "--top", str(top_n), "--start"]
+    if python_exe:
+        start_args += ["--python-exe", python_exe]
+    if not use_venv:
+        start_args += ["--no-venv"]
+    if not force_utf8:
+        start_args += ["--no-utf8"]
+    if run_cmd:
+        start_args += ["--run-cmd", *[str(a) for a in run_cmd]]  # REMAINDER: keep last
+
+    start_relay = _relay_exec("python", start_args, timeout_s=relay_call_timeout_s)
+    started, perr = _parse_pipeline_stdout(start_relay.get("stdout", ""))
+    if perr or not started.get("success"):
+        return {
+            "success": False, "phase": "start",
+            "error": perr or started.get("error") or "lmbench --start failed",
+            "relay_result": _relay_summary(start_relay),
+        }
+    token = started["run_token"]
+
+    deadline = time.time() + overall_timeout_s
+    last: dict[str, Any] = {}
+    while time.time() < deadline:
+        status_relay = _relay_exec(
+            "python",
+            [pipeline, "--test-dir", tdir, "--top", str(top_n), "--status", token],
+            timeout_s=relay_call_timeout_s,
+        )
+        st, serr = _parse_pipeline_stdout(status_relay.get("stdout", ""))
+        if not serr and st:
+            last = st
+            if st.get("status") in ("done", "failed"):
+                st["run_token"] = token
+                st["phase"] = "complete" if st.get("status") == "done" else "failed"
+                return st
+        else:
+            last = {"status": "poll_error", "error": serr or "empty status output",
+                    "relay_result": _relay_summary(status_relay)}
+        if poll_interval_s and poll_interval_s > 0:
+            time.sleep(poll_interval_s)
+
+    return {
+        "success": False, "phase": "timeout", "run_token": token,
+        "error": f"lmbench run did not finish within {overall_timeout_s}s",
+        "last_status": last,
+    }
+
+
+def run_lmbench_test_async(**kwargs: Any) -> dict[str, Any]:
+    """Submit :func:`run_lmbench_test` on a background thread and return immediately.
+
+    Poll with :func:`get_async_task_status` (the ``lmbench_test_status`` /
+    ``instruction_test_status`` MCP tool — task ids are shared). The completed
+    record's ``result`` carries the final status + ``digest``.
+    """
+    payload = {k: v for k, v in kwargs.items() if k != "python_exe"}
+    task_id = _register_async_task(payload, kind="run_lmbench_test")
+    thread = threading.Thread(
+        target=_run_async_task,
+        args=(task_id, lambda: run_lmbench_test(**kwargs)),
+        kwargs={"kind": "run_lmbench_test"},
+        daemon=True,
+    )
+    thread.start()
+    return {"task_id": task_id, "status": "pending", "kind": "run_lmbench_test"}
+
+
+# lmbench polls via the same shared task store; expose a friendly alias.
+lmbench_test_status = get_async_task_status
+
+
 @lru_cache(maxsize=1)
 def build_auto_test_fastmcp_server() -> Any | None:
     try:
@@ -1099,6 +1226,49 @@ def build_auto_test_fastmcp_server() -> Any | None:
     )
     def mcp_auto_test_relay_health() -> dict[str, Any]:
         return auto_test_relay_health_check()
+
+    @mcp.tool(
+        name="run_lmbench_test_async",
+        description=(
+            "Launch the lmbench full benchmark suite on the Windows relay as an async "
+            "task and return a task_id immediately. The suite runs 2-5h: the Windows "
+            "side spawns it detached and this MCP polls until done, then the task "
+            "result carries a compact digest (HM-vs-Linux weighted gap + this-run-vs-"
+            "previous-run delta + high-dispersion anomalies). For an A/B, run it once "
+            "on the stock kernel and once on the feature kernel; the second run's "
+            "vs_previous block is the patch delta. Poll with lmbench_test_status "
+            "(or instruction_test_status); kind=\"run_lmbench_test\"."
+        ),
+    )
+    def mcp_run_lmbench_test_async(
+        test_dir: str | None = None,
+        run_cmd: list[str] | None = None,
+        pipeline_script: str | None = None,
+        python_exe: str | None = None,
+        use_venv: bool = True,
+        force_utf8: bool = True,
+        top_n: int = 8,
+        poll_interval_s: int = DEFAULT_LMBENCH_POLL_INTERVAL_S,
+        overall_timeout_s: int = DEFAULT_LMBENCH_OVERALL_TIMEOUT_S,
+        relay_call_timeout_s: int = DEFAULT_LMBENCH_RELAY_CALL_TIMEOUT_S,
+    ) -> dict[str, Any]:
+        return run_lmbench_test_async(
+            test_dir=test_dir, run_cmd=run_cmd, pipeline_script=pipeline_script,
+            python_exe=python_exe, use_venv=use_venv, force_utf8=force_utf8, top_n=top_n,
+            poll_interval_s=poll_interval_s, overall_timeout_s=overall_timeout_s,
+            relay_call_timeout_s=relay_call_timeout_s,
+        )
+
+    @mcp.tool(
+        name="lmbench_test_status",
+        description=(
+            "Poll an lmbench (or any async auto-test) task by id. Returns {status, "
+            "result, error, duration_s}; when the lmbench run is done the result holds "
+            "the final status + digest."
+        ),
+    )
+    def mcp_lmbench_test_status(task_id: str) -> dict[str, Any]:
+        return get_async_task_status(task_id)
 
     return mcp
 

@@ -18,6 +18,8 @@ from hmopt.api.auto_test_mcp_service import (
     get_async_task_status,
     run_instruction_test,
     run_instruction_test_async,
+    run_lmbench_test,
+    run_lmbench_test_async,
     run_phone_test,
 )
 
@@ -89,6 +91,9 @@ _TOOL_DISPATCH: dict[str, Any] = {
     "compare_reports": compare_reports,
     "compare_reports_async": compare_reports_async,
     "auto_test_relay_health": auto_test_relay_health_check,
+    "run_lmbench_test": run_lmbench_test,
+    "run_lmbench_test_async": run_lmbench_test_async,
+    "lmbench_test_status": get_async_task_status,
 }
 
 
