@@ -69,6 +69,33 @@ def test_vs_previous_direction_aware(tmp_path):
     assert lat["delta_pct"] == 10.0 and lat["improvement_pct"] == -10.0
 
 
+def test_average_derived_from_value_columns_when_empty(tmp_path):
+    # Real framework case: 'average' is an Excel formula with no cached value, so
+    # data_only reads it as None. Keys match across runs but every average is empty
+    # -> matched=0. Deriving average from the literal value0..N columns fixes it.
+    hdr = ["system", "tool", "metric", "command", "average", "variance ",
+           "standard_deviation", "Discrete", "value0", "value1", "value2", "units"]
+    cur = tmp_path / "cur.xlsx"
+    prev = tmp_path / "prev.xlsx"
+    # average cell left empty (None); the real numbers live in value0..value2
+    _xlsx(cur, hdr, [
+        ["大核", "lmbench-lat", "lat_sys", "lat_syscall null", None, 0, 0, 0.01, 22, 24, 23, "microseconds"],
+    ])
+    _xlsx(prev, hdr, [
+        ["大核", "lmbench-lat", "lat_sys", "lat_syscall null", None, 0, 0, 0.01, 20, 20, 20, "microseconds"],
+    ])
+    cur_rows = ld.parse_total(cur)
+    assert cur_rows[0]["average"] == 23.0  # mean(22,24,23)
+    d = ld.build_digest(cur, prev_total_path=prev, top_n=8)
+    vp = d["vs_previous"]
+    assert vp["matched"] == 1
+    assert "diagnostic" not in vp
+    # lat went 20 -> 23 (higher = worse for latency)
+    lat = vp["top_regressions"][0]
+    assert lat["prev_avg"] == 20.0 and lat["cur_avg"] == 23.0
+    assert lat["improvement_pct"] == -15.0
+
+
 def test_vs_previous_whitespace_normalized_keys_match(tmp_path):
     # Same metric, but command/system differ only by whitespace between runs.
     # Normalized matching must still pair them (this is a likely matched=0 cause).
@@ -109,21 +136,23 @@ def test_vs_previous_zero_match_emits_diagnostic(tmp_path):
     json.dumps(d, allow_nan=False)  # diagnostic stays strict-JSON-safe
 
 
-def test_vs_previous_missing_average_diagnosed(tmp_path):
-    # If the 'average' column is renamed (header mismatch), every average parses None;
-    # the diagnostic must point at the average column, not at key mismatch.
+def test_vs_previous_no_numbers_diagnosed(tmp_path):
+    # No usable numbers at all: 'average' renamed AND no value columns to fall back
+    # to. average stays None -> matched=0 -> diagnostic points at the average column
+    # and dumps headers + first raw row so the cause is unambiguous.
     cur = tmp_path / "cur.xlsx"
     prev = tmp_path / "prev.xlsx"
-    bad_hdr = ["system", "tool", "metric", "command", "AVG_renamed", "variance ",
-               "standard_deviation", "Discrete", "value0", "units"]
-    _xlsx(cur, bad_hdr, [["大核", "lmbench-mem", "bw_rd", "bw_mem rd", 110.0, 1, 1, 0.01, 110, "MB/s"]])
-    _xlsx(prev, bad_hdr, [["大核", "lmbench-mem", "bw_rd", "bw_mem rd", 100.0, 1, 1, 0.01, 100, "MB/s"]])
+    bad_hdr = ["system", "tool", "metric", "command", "AVG_renamed", "units"]
+    _xlsx(cur, bad_hdr, [["大核", "lmbench-mem", "bw_rd", "bw_mem rd", 110.0, "MB/s"]])
+    _xlsx(prev, bad_hdr, [["大核", "lmbench-mem", "bw_rd", "bw_mem rd", 100.0, "MB/s"]])
     d = ld.build_digest(cur, prev_total_path=prev, top_n=8)
     diag = d["vs_previous"]["diagnostic"]
     assert diag["n_cur_with_avg"] == 0 and diag["n_prev_with_avg"] == 0
     assert "average" in diag["reason"]
     # the header dump shows the offending column name so the fix is unambiguous
     assert "AVG_renamed" in diag["cur_headers"]
+    # the raw-row dump confirms there were no value columns to recover from
+    assert diag["cur_first_row"][0] == "大核"
 
 
 def test_hm_vs_linux_weighted_gap(tmp_path):

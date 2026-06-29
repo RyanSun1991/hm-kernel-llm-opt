@@ -119,20 +119,34 @@ def _rows(path, sheet="result"):
 # parsers
 # --------------------------------------------------------------------------- #
 def parse_total(path):
-    """-> list of {system, tool, metric, command, average, std, discrete, units, direction}."""
+    """-> list of {system, tool, metric, command, average, std, discrete, units, direction}.
+
+    The framework writes ``average`` as an Excel formula. The file is generated
+    programmatically and never opened in Excel, so under ``data_only=True`` that
+    cell has no cached value and reads as None — which silently zeroed every A/B
+    comparison. When ``average`` is empty we derive it from the raw ``value0..N``
+    sample columns (literals), which is exactly what the average represents.
+    """
     rows, idx = _rows(path)
+    value_cols = sorted((h for h in idx if re.fullmatch(r"value\d+", h)),
+                        key=lambda h: int(h[5:]))
     out = []
     for r, _ in rows:
         def g(name):
             return r[idx[name]] if name in idx and idx[name] < len(r) else None
         cmd = str(g("command") or "")
         units = str(g("units") or "")
+        avg = _num(g("average"))
+        if avg is None:  # empty/uncached formula -> mean of the present sample values
+            samples = [s for s in (_num(g(v)) for v in value_cols) if s is not None]
+            if samples:
+                avg = sum(samples) / len(samples)
         out.append({
             "system": str(g("system") or ""),
             "tool": str(g("tool") or ""),
             "metric": str(g("metric") or ""),
             "command": cmd,
-            "average": _num(g("average")),
+            "average": avg,
             "std": _num(g("standard_deviation")),
             "discrete": _num(g("Discrete")),
             "units": units,
@@ -294,6 +308,23 @@ def _header_names(path):
         return [f"<header read failed: {type(exc).__name__}: {exc}>"]
 
 
+def _first_data_row(path):
+    """Raw first non-empty data row (data_only) — shows whether average/value cells
+    are themselves empty (uncached formulas), the only thing left to check if even
+    the value-column fallback yields no numbers."""
+    try:
+        wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
+        ws = wb["result"] if "result" in wb.sheetnames else wb.worksheets[0]
+        it = ws.iter_rows(values_only=True)
+        next(it, None)  # skip header
+        for r in it:
+            if r and not all(c is None for c in r):
+                return [c if isinstance(c, (int, float)) or c is None else str(c) for c in r]
+        return []
+    except Exception as exc:  # never raise from a diagnostic
+        return [f"<row read failed: {type(exc).__name__}: {exc}>"]
+
+
 def _is_lockfile(path) -> bool:
     """Excel writes a hidden ~$<name>.xlsx companion while a workbook is open."""
     name = Path(str(path)).name
@@ -338,8 +369,11 @@ def build_digest(total_path, hm_linux_path=None, prev_total_path=None, top_n=8):
         try:
             d["vs_previous"] = _vs_previous(cur, parse_total(prev_total_path), top_n)
             if d["vs_previous"].get("matched") == 0 and "diagnostic" in d["vs_previous"]:
-                d["vs_previous"]["diagnostic"]["cur_headers"] = _header_names(total_path)
-                d["vs_previous"]["diagnostic"]["prev_headers"] = _header_names(prev_total_path)
+                diag = d["vs_previous"]["diagnostic"]
+                diag["cur_headers"] = _header_names(total_path)
+                diag["prev_headers"] = _header_names(prev_total_path)
+                diag["cur_first_row"] = _first_data_row(total_path)
+                diag["prev_first_row"] = _first_data_row(prev_total_path)
         except Exception as exc:
             d["warnings"].append(f"vs_previous skipped: {type(exc).__name__}: {exc}")
     elif prev_total_path and _is_lockfile(prev_total_path):
