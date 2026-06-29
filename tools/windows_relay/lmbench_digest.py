@@ -409,14 +409,20 @@ def digest_markdown(d):
                 L.append(f"- cur key sample: {k}")
             for k in diag["sample_prev_keys"][:3]:
                 L.append(f"- prev key sample: {k}")
-        L.append("Top regressions (patch made it worse):")
-        for x in vp["top_regressions"][:5]:
-            L.append(f"- {x['system']} `{x['command']}` {x['delta_pct']}% "
-                     f"({x['prev_avg']}→{x['cur_avg']} {x['units']})")
-        L.append("Top improvements:")
-        for x in vp["top_improvements"][:5]:
-            L.append(f"- {x['system']} `{x['command']}` {x['delta_pct']}% "
-                     f"({x['prev_avg']}→{x['cur_avg']} {x['units']})")
+        # direction-aware: improvement_pct > 0 means "better" regardless of metric
+        # direction; only list rows that actually moved the wrong/right way.
+        regs = [x for x in vp["top_regressions"]
+                if x.get("improvement_pct") is not None and x["improvement_pct"] < 0]
+        imps = [x for x in vp["top_improvements"]
+                if x.get("improvement_pct") is not None and x["improvement_pct"] > 0]
+        L.append("Top regressions (worse, direction-aware):" + ("" if regs else " none"))
+        for x in regs[:5]:
+            L.append(f"- {x['system']} `{x['command']}` {x['improvement_pct']}% "
+                     f"({x['prev_avg']}→{x['cur_avg']} {x['units']}, raw delta {x['delta_pct']}%)")
+        L.append("Top improvements (better, direction-aware):" + ("" if imps else " none"))
+        for x in imps[:5]:
+            L.append(f"- {x['system']} `{x['command']}` +{x['improvement_pct']}% "
+                     f"({x['prev_avg']}→{x['cur_avg']} {x['units']}, raw delta {x['delta_pct']}%)")
     if d.get("anomalies"):
         L.append("\n## High-dispersion metrics (treat with caution): "
                  + ", ".join(f"{a['command']}({a['discrete']})" for a in d["anomalies"][:5]))
