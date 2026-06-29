@@ -214,11 +214,18 @@ def _hm_vs_linux(rows, top_n):
     }
 
 
+def _match_key(r):
+    """Normalized (system, tool, metric, command) — strip + collapse inner whitespace
+    so trivial formatting differences between two runs don't defeat metric matching."""
+    return tuple(re.sub(r"\s+", " ", str(r.get(k) or "")).strip()
+                 for k in ("system", "tool", "metric", "command"))
+
+
 def _vs_previous(cur, prev, top_n):
-    pmap = {(r["system"], r["tool"], r["metric"], r["command"]): r for r in prev}
+    pmap = {_match_key(r): r for r in prev}
     items, matched, improved, regressed, unknown = [], 0, 0, 0, 0
     for r in cur:
-        p = pmap.get((r["system"], r["tool"], r["metric"], r["command"]))
+        p = pmap.get(_match_key(r))
         if not p or not p.get("average") or r.get("average") is None:
             continue
         matched += 1
@@ -238,12 +245,53 @@ def _vs_previous(cur, prev, top_n):
             "improvement_pct": None if imp is None else round(imp, 2),
         }))
     items.sort(key=lambda x: x[0])
-    return {
+    out = {
         "matched": matched, "improved": improved, "regressed": regressed,
         "n_unknown_direction": unknown,
         "top_regressions": [x[1] for x in items[:top_n]],
         "top_improvements": [x[1] for x in reversed(items[-top_n:])],
     }
+    if matched == 0:
+        out["diagnostic"] = _match_diagnostic(cur, prev)
+    return out
+
+
+def _match_diagnostic(cur, prev):
+    """When 0 metrics matched, surface WHY so it can be fixed without re-running the
+    2-5h suite: row counts, average-presence, key overlap, and a few sample keys."""
+    cur_keys = [_match_key(r) for r in cur]
+    prev_keys = {_match_key(r) for r in prev}
+    overlap = sum(1 for k in cur_keys if k in prev_keys)
+    n_cur_avg = sum(1 for r in cur if r.get("average") is not None)
+    n_prev_avg = sum(1 for r in prev if r.get("average") is not None)
+    if n_cur_avg == 0 or n_prev_avg == 0:
+        reason = ("the 'average' column was not parsed in one/both files (header name "
+                  "or sheet mismatch) — check *_headers below")
+    elif overlap == 0:
+        reason = ("metric keys (system,tool,metric,command) do not overlap between "
+                  "the two runs — compare sample_*_keys below")
+    else:
+        reason = "keys overlap but averages were missing on the overlapping rows"
+    return {
+        "reason": reason,
+        "n_cur": len(cur), "n_prev": len(prev),
+        "n_cur_with_avg": n_cur_avg, "n_prev_with_avg": n_prev_avg,
+        "n_key_overlap": overlap,
+        "sample_cur_keys": [list(k) for k in cur_keys[:4]],
+        "sample_prev_keys": [list(k) for k in list(prev_keys)[:4]],
+    }
+
+
+def _header_names(path):
+    """Raw first-row header of a total_result sheet — the decisive evidence when the
+    'average' column isn't being read (renamed column, wrong sheet, title row)."""
+    try:
+        wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
+        ws = wb["result"] if "result" in wb.sheetnames else wb.worksheets[0]
+        row = next(ws.iter_rows(values_only=True))
+        return [str(h).strip() if h is not None else "" for h in row]
+    except Exception as exc:  # never raise from a diagnostic
+        return [f"<header read failed: {type(exc).__name__}: {exc}>"]
 
 
 def _is_lockfile(path) -> bool:
@@ -289,6 +337,9 @@ def build_digest(total_path, hm_linux_path=None, prev_total_path=None, top_n=8):
     if prev_total_path and not _is_lockfile(prev_total_path) and Path(prev_total_path).exists():
         try:
             d["vs_previous"] = _vs_previous(cur, parse_total(prev_total_path), top_n)
+            if d["vs_previous"].get("matched") == 0 and "diagnostic" in d["vs_previous"]:
+                d["vs_previous"]["diagnostic"]["cur_headers"] = _header_names(total_path)
+                d["vs_previous"]["diagnostic"]["prev_headers"] = _header_names(prev_total_path)
         except Exception as exc:
             d["warnings"].append(f"vs_previous skipped: {type(exc).__name__}: {exc}")
     elif prev_total_path and _is_lockfile(prev_total_path):
@@ -312,6 +363,18 @@ def digest_markdown(d):
     if vp:
         L.append(f"\n## vs previous run — improved {vp['improved']} / regressed {vp['regressed']} "
                  f"/ unknown-dir {vp['n_unknown_direction']} (matched {vp['matched']})")
+        diag = vp.get("diagnostic")
+        if diag:
+            L.append(f"**0 metrics matched — {diag['reason']}**")
+            L.append(f"- rows: cur={diag['n_cur']} (avg on {diag['n_cur_with_avg']}) "
+                     f"prev={diag['n_prev']} (avg on {diag['n_prev_with_avg']}) key-overlap={diag['n_key_overlap']}")
+            if diag.get("cur_headers") is not None:
+                L.append(f"- cur headers: {diag['cur_headers']}")
+                L.append(f"- prev headers: {diag['prev_headers']}")
+            for k in diag["sample_cur_keys"][:3]:
+                L.append(f"- cur key sample: {k}")
+            for k in diag["sample_prev_keys"][:3]:
+                L.append(f"- prev key sample: {k}")
         L.append("Top regressions (patch made it worse):")
         for x in vp["top_regressions"][:5]:
             L.append(f"- {x['system']} `{x['command']}` {x['delta_pct']}% "

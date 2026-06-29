@@ -69,6 +69,63 @@ def test_vs_previous_direction_aware(tmp_path):
     assert lat["delta_pct"] == 10.0 and lat["improvement_pct"] == -10.0
 
 
+def test_vs_previous_whitespace_normalized_keys_match(tmp_path):
+    # Same metric, but command/system differ only by whitespace between runs.
+    # Normalized matching must still pair them (this is a likely matched=0 cause).
+    cur = tmp_path / "cur.xlsx"
+    prev = tmp_path / "prev.xlsx"
+    _xlsx(cur, _TOTAL_HDR, [
+        ["大核 ", "lmbench-mem", "bw_rd", "bw_mem  rd", 110.0, 1, 1, 0.01, 110, "MB/s"],
+    ])
+    _xlsx(prev, _TOTAL_HDR, [
+        ["大核", "lmbench-mem", "bw_rd", "bw_mem rd", 100.0, 1, 1, 0.01, 100, "MB/s"],
+    ])
+    d = ld.build_digest(cur, prev_total_path=prev, top_n=8)
+    assert d["vs_previous"]["matched"] == 1
+    assert "diagnostic" not in d["vs_previous"]
+
+
+def test_vs_previous_zero_match_emits_diagnostic(tmp_path):
+    # Genuinely disjoint metric names -> 0 matched -> diagnostic must explain why
+    # and include both files' raw headers + sample keys.
+    cur = tmp_path / "cur.xlsx"
+    prev = tmp_path / "prev.xlsx"
+    _xlsx(cur, _TOTAL_HDR, [
+        ["大核", "lmbench-mem", "bw_rd", "bw_mem rd", 110.0, 1, 1, 0.01, 110, "MB/s"],
+    ])
+    _xlsx(prev, _TOTAL_HDR, [
+        ["大核", "lmbench-mem", "bw_wr", "TOTALLY_DIFFERENT_cmd", 100.0, 1, 1, 0.01, 100, "MB/s"],
+    ])
+    d = ld.build_digest(cur, prev_total_path=prev, top_n=8)
+    vp = d["vs_previous"]
+    assert vp["matched"] == 0
+    diag = vp["diagnostic"]
+    assert diag["n_cur"] == 1 and diag["n_prev"] == 1
+    assert diag["n_cur_with_avg"] == 1 and diag["n_prev_with_avg"] == 1
+    assert diag["n_key_overlap"] == 0
+    assert "do not overlap" in diag["reason"]
+    assert diag["cur_headers"][:5] == ["system", "tool", "metric", "command", "average"]
+    assert "prev_headers" in diag
+    json.dumps(d, allow_nan=False)  # diagnostic stays strict-JSON-safe
+
+
+def test_vs_previous_missing_average_diagnosed(tmp_path):
+    # If the 'average' column is renamed (header mismatch), every average parses None;
+    # the diagnostic must point at the average column, not at key mismatch.
+    cur = tmp_path / "cur.xlsx"
+    prev = tmp_path / "prev.xlsx"
+    bad_hdr = ["system", "tool", "metric", "command", "AVG_renamed", "variance ",
+               "standard_deviation", "Discrete", "value0", "units"]
+    _xlsx(cur, bad_hdr, [["大核", "lmbench-mem", "bw_rd", "bw_mem rd", 110.0, 1, 1, 0.01, 110, "MB/s"]])
+    _xlsx(prev, bad_hdr, [["大核", "lmbench-mem", "bw_rd", "bw_mem rd", 100.0, 1, 1, 0.01, 100, "MB/s"]])
+    d = ld.build_digest(cur, prev_total_path=prev, top_n=8)
+    diag = d["vs_previous"]["diagnostic"]
+    assert diag["n_cur_with_avg"] == 0 and diag["n_prev_with_avg"] == 0
+    assert "average" in diag["reason"]
+    # the header dump shows the offending column name so the fix is unambiguous
+    assert "AVG_renamed" in diag["cur_headers"]
+
+
 def test_hm_vs_linux_weighted_gap(tmp_path):
     f = tmp_path / "hmlx.xlsx"
     hdr = ["benchmark_module", "performance_indicator", "tool", "metric", "command",
