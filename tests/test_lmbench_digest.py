@@ -3,6 +3,7 @@
 The parser lives under tools/windows_relay/ (it must run on the bare Windows
 relay), so we add that dir to sys.path. Skips if openpyxl is absent.
 """
+import json
 import sys
 from pathlib import Path
 
@@ -97,7 +98,82 @@ def test_malformed_file_does_not_raise(tmp_path):
     assert d["ok"] is False and "error" in d
 
 
+def test_lockfile_prev_degrades_to_warning(tmp_path):
+    # Excel leaves a ~$<name>.xlsx companion while a workbook is open; if that
+    # ever reaches us as `prev`, the digest must still succeed (just no vs_previous).
+    total = tmp_path / "t.xlsx"
+    _xlsx(total, _TOTAL_HDR, [["大核", "lmbench-mem", "bw_rd", "bw_mem rd", 110, 1, 1, 0.01, 110, "MB/s"]])
+    lock = tmp_path / "~$total_result_Hongmeng_20260626-154706.xlsx"
+    lock.write_bytes(b"\x00\x01garbage")  # not a real xlsx, and name marks it a lock file
+    d = ld.build_digest(total, prev_total_path=lock, top_n=8)
+    assert d["ok"] is True
+    assert "vs_previous" not in d
+    assert any("lock file" in w for w in d["warnings"])
+
+
+def test_locked_prev_does_not_kill_digest(tmp_path):
+    # A real-but-unreadable prev (e.g. open/locked on Windows) is simulated with a
+    # corrupt non-lockfile name: vs_previous is skipped via warning, digest stays ok.
+    total = tmp_path / "t.xlsx"
+    _xlsx(total, _TOTAL_HDR, [["大核", "lmbench-mem", "bw_rd", "bw_mem rd", 110, 1, 1, 0.01, 110, "MB/s"]])
+    corrupt = tmp_path / "total_result_Hongmeng_20260626-154706.xlsx"
+    corrupt.write_text("locked/corrupt", encoding="utf-8")
+    d = ld.build_digest(total, prev_total_path=corrupt, top_n=8)
+    assert d["ok"] is True
+    assert "vs_previous" not in d
+    assert any("vs_previous skipped" in w for w in d["warnings"])
+
+
 def test_percent_and_number_coercion():
     assert ld._num("1.04%") == 1.04
     assert ld._num(2.5) == 2.5
     assert ld._num("") is None and ld._num(None) is None and ld._num("n/a") is None
+
+
+def test_num_rejects_non_finite():
+    # 'nan'/'inf' cells must become None — NaN is invalid JSON and breaks the
+    # strict MCP/JSON-RPC boundary back to the agent.
+    import math
+    assert ld._num("nan") is None
+    assert ld._num("inf") is None and ld._num("-inf") is None
+    assert ld._num(float("nan")) is None
+    assert ld._num(math.inf) is None
+
+
+def test_nan_gap_does_not_leak_nan(tmp_path):
+    # An empty/'nan' 差距 cell used to propagate NaN into weighted_gap_pct and the
+    # whole digest, making it un-serializable by a strict JSON consumer -> the
+    # agent polled status forever. The digest must now be strict-JSON-safe.
+    total = tmp_path / "t.xlsx"
+    _xlsx(total, _TOTAL_HDR, [["大核", "lmbench-mem", "bw_rd", "bw_mem rd", 110, 1, 1, 0.01, 110, "MB/s"]])
+    hmlx = tmp_path / "hmlx.xlsx"
+    hdr = ["benchmark_module", "performance_indicator", "tool", "metric", "command",
+           "HM_大核", "linux_大核", "权重_大核", "差距_大核", "得分_大核"]
+    _xlsx(hmlx, hdr, [
+        ["内存", "bw test", "lmbench-mem", "bw_rd", "bw_mem rd", 110.0, 100.0, 3, "nan", 1.5],
+    ])
+    d = ld.build_digest(total, hm_linux_path=hmlx, top_n=8)
+    assert d["ok"] is True
+    # the nan gap is dropped: the core contributes nothing, so it never enters by_core
+    assert d["hm_vs_linux"]["by_core"] == {}
+    assert d["hm_vs_linux"]["overall_weighted_gap_pct"] is None
+    # the decisive property: serializable by a STRICT encoder (what MCP/JSON-RPC uses)
+    json.dumps(d, allow_nan=False)
+
+
+def test_partial_nan_gap_keeps_valid_cores(tmp_path):
+    # A nan gap on one core must not wipe out a sibling core that has a real gap.
+    total = tmp_path / "t.xlsx"
+    _xlsx(total, _TOTAL_HDR, [["大核", "lmbench-mem", "bw_rd", "bw_mem rd", 110, 1, 1, 0.01, 110, "MB/s"]])
+    hmlx = tmp_path / "hmlx.xlsx"
+    hdr = ["benchmark_module", "performance_indicator", "tool", "metric", "command",
+           "HM_大核", "linux_大核", "权重_大核", "差距_大核", "得分_大核",
+           "HM_中核", "linux_中核", "权重_中核", "差距_中核", "得分_中核"]
+    _xlsx(hmlx, hdr, [
+        ["内存", "bw test", "lmbench-mem", "bw_rd", "bw_mem rd",
+         110.0, 100.0, 3, "nan", 1.5, 90.0, 100.0, 2, "10.00%", 1.0],
+    ])
+    d = ld.build_digest(total, hm_linux_path=hmlx, top_n=8)
+    assert "大核" not in d["hm_vs_linux"]["by_core"]          # nan gap dropped
+    assert d["hm_vs_linux"]["by_core"]["中核"]["weighted_gap_pct"] == 10.0
+    json.dumps(d, allow_nan=False)

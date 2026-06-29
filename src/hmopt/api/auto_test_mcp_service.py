@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import math
 import os
 import shlex
 import subprocess
@@ -422,25 +423,44 @@ def _default_main_script() -> str:
     )
 
 
+def _json_safe(obj: Any) -> Any:
+    """Recursively replace non-finite floats (nan/inf) with None.
+
+    Python's ``json.loads`` accepts the non-standard ``NaN``/``Infinity`` tokens,
+    but the MCP/JSON-RPC layer that returns a tool result to the agent serializes
+    strictly and rejects them — a single ``NaN`` deep inside a digest would make
+    the completed task unreadable, so the agent would poll status forever. We
+    neutralize it the moment relay output enters the platform.
+    """
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(x) for x in obj]
+    return obj
+
+
 def _parse_pipeline_stdout(stdout: str) -> tuple[dict[str, Any], str | None]:
     """Parse the JSON document the pipeline prints to stdout.
 
     Returns ``(result_dict, parse_error_or_none)``.  If the script
     printed extra logging before the JSON, only the final JSON object is
-    considered.
+    considered.  The parsed object is passed through :func:`_json_safe` so no
+    non-finite float can leak across the MCP boundary.
     """
     text = (stdout or "").strip()
     if not text:
         return {}, "empty stdout"
     try:
-        return json.loads(text), None
+        return _json_safe(json.loads(text)), None
     except json.JSONDecodeError:
         # Fallback: find the last "{" that can be balanced to the end.
         last_brace = text.rfind("{")
         if last_brace > 0:
             snippet = text[last_brace:]
             try:
-                return json.loads(snippet), None
+                return _json_safe(json.loads(snippet)), None
             except json.JSONDecodeError as exc:
                 return {}, f"failed to parse trailing JSON: {exc}"
         return {}, "no JSON object in stdout"

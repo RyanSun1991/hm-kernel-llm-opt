@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -45,18 +46,38 @@ _HIGH_DISCRETE = 0.05  # dispersion above this is flagged as noisy
 # helpers
 # --------------------------------------------------------------------------- #
 def _num(v):
-    """Best-effort float from a cell that may be a number or a '1.04%' string."""
+    """Best-effort *finite* float from a cell that may be a number or '1.04%'.
+
+    Returns None for blanks, non-numeric text, AND non-finite values (nan/inf):
+    a 'nan' gap cell must not propagate into the weighted-gap math, and NaN is
+    invalid JSON (RFC 8259) — strict consumers downstream (the MCP/JSON-RPC
+    boundary) reject it, which would silently break the agent's status polling.
+    """
     if v is None:
         return None
     if isinstance(v, (int, float)):
-        return float(v)
+        f = float(v)
+        return f if math.isfinite(f) else None
     s = str(v).strip().replace("%", "").replace(",", "")
     if not s:
         return None
     try:
-        return float(s)
+        f = float(s)
     except ValueError:
         return None
+    return f if math.isfinite(f) else None
+
+
+def _json_safe(obj):
+    """Recursively replace any non-finite float (nan/inf) with None so the digest
+    is always strict-JSON serializable across the relay -> MCP -> agent boundary."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(x) for x in obj]
+    return obj
 
 
 def _direction(command: str, units: str) -> str:
@@ -225,32 +246,55 @@ def _vs_previous(cur, prev, top_n):
     }
 
 
+def _is_lockfile(path) -> bool:
+    """Excel writes a hidden ~$<name>.xlsx companion while a workbook is open."""
+    name = Path(str(path)).name
+    return name.startswith("~$") or name.startswith(".~")
+
+
 def build_digest(total_path, hm_linux_path=None, prev_total_path=None, top_n=8):
     if openpyxl is None:
         return {"ok": False, "error": "openpyxl not installed on this host"}
     try:
-        cur = parse_total(total_path)
-        d = {
-            "ok": True,
-            "files": {
-                "total": str(total_path),
-                "hm_linux": str(hm_linux_path) if hm_linux_path else None,
-                "prev_total": str(prev_total_path) if prev_total_path else None,
-            },
-            "n_metrics": len(cur),
-            "anomalies": sorted(
-                [{"system": r["system"], "metric": r["metric"], "command": r["command"],
-                  "discrete": r["discrete"]}
-                 for r in cur if (r["discrete"] or 0) >= _HIGH_DISCRETE],
-                key=lambda x: -(x["discrete"] or 0))[:top_n],
-        }
-        if hm_linux_path and Path(hm_linux_path).exists():
-            d["hm_vs_linux"] = _hm_vs_linux(parse_hm_linux(hm_linux_path), top_n)
-        if prev_total_path and Path(prev_total_path).exists():
-            d["vs_previous"] = _vs_previous(cur, parse_total(prev_total_path), top_n)
-        return d
+        cur = parse_total(total_path)  # core result — a failure here is fatal
     except Exception as exc:  # never raise on the relay
-        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        return {"ok": False, "error": f"total parse failed: {type(exc).__name__}: {exc}"}
+
+    d = {
+        "ok": True,
+        "files": {
+            "total": str(total_path),
+            "hm_linux": str(hm_linux_path) if hm_linux_path else None,
+            "prev_total": str(prev_total_path) if prev_total_path else None,
+        },
+        "n_metrics": len(cur),
+        "warnings": [],
+        "anomalies": sorted(
+            [{"system": r["system"], "metric": r["metric"], "command": r["command"],
+              "discrete": r["discrete"]}
+             for r in cur if (r["discrete"] or 0) >= _HIGH_DISCRETE],
+            key=lambda x: -(x["discrete"] or 0))[:top_n],
+    }
+
+    # hm_vs_linux and vs_previous are best-effort: a locked / lock-file / corrupt
+    # input degrades that one section to a warning rather than killing the digest.
+    if hm_linux_path and not _is_lockfile(hm_linux_path) and Path(hm_linux_path).exists():
+        try:
+            d["hm_vs_linux"] = _hm_vs_linux(parse_hm_linux(hm_linux_path), top_n)
+        except Exception as exc:
+            d["warnings"].append(f"hm_linux skipped: {type(exc).__name__}: {exc}")
+    elif hm_linux_path and _is_lockfile(hm_linux_path):
+        d["warnings"].append(f"hm_linux skipped: looks like an Excel lock file ({Path(str(hm_linux_path)).name})")
+
+    if prev_total_path and not _is_lockfile(prev_total_path) and Path(prev_total_path).exists():
+        try:
+            d["vs_previous"] = _vs_previous(cur, parse_total(prev_total_path), top_n)
+        except Exception as exc:
+            d["warnings"].append(f"vs_previous skipped: {type(exc).__name__}: {exc}")
+    elif prev_total_path and _is_lockfile(prev_total_path):
+        d["warnings"].append(f"vs_previous skipped: looks like an Excel lock file ({Path(str(prev_total_path)).name})")
+
+    return _json_safe(d)
 
 
 def digest_markdown(d):
@@ -279,6 +323,10 @@ def digest_markdown(d):
     if d.get("anomalies"):
         L.append("\n## High-dispersion metrics (treat with caution): "
                  + ", ".join(f"{a['command']}({a['discrete']})" for a in d["anomalies"][:5]))
+    if d.get("warnings"):
+        L.append("\n## Warnings")
+        for w in d["warnings"]:
+            L.append(f"- {w}")
     return "\n".join(L)
 
 

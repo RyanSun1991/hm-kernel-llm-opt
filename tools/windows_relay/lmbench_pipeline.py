@@ -68,6 +68,7 @@ def _utf8_env() -> dict[str, str]:
     env = os.environ.copy()
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUNBUFFERED"] = "1"   # flush the detached child's log in real time
     return env
 
 
@@ -94,7 +95,8 @@ def _list_xlsx(dir_path: str, tag: str) -> list[str]:
     if not os.path.isdir(dir_path):
         return []
     out = [os.path.join(dir_path, f) for f in os.listdir(dir_path)
-           if f.lower().endswith(".xlsx") and tag.lower() in f.lower()]
+           if f.lower().endswith(".xlsx") and tag.lower() in f.lower()
+           and not f.startswith("~$") and not f.startswith(".~")]  # skip Excel lock/temp files
     return sorted(out, key=lambda p: os.path.getmtime(p))
 
 
@@ -122,7 +124,14 @@ def _spawn_detached(argv: list[str], cwd: str, log_path: str, env: dict[str, str
     kw: dict[str, Any] = dict(cwd=cwd, stdout=log, stderr=subprocess.STDOUT,
                               stdin=subprocess.DEVNULL, env=env)
     if os.name == "nt":
-        kw["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP
+        # CREATE_NEW_CONSOLE (not DETACHED_PROCESS): give the run its OWN console.
+        # The lmbench framework reboots + reconnects the device during setup via
+        # hdc; that tooling misbehaves in a console-less DETACHED process (works
+        # interactively because the console is present). A new console keeps it
+        # background + survives our exit, while behaving like an interactive run.
+        # stdout/stderr are still redirected to the log file (the console window
+        # is just for tools that need a console handle).
+        kw["creationflags"] = 0x00000010 | 0x00000200  # CREATE_NEW_CONSOLE | NEW_PROCESS_GROUP
         kw["close_fds"] = True
     else:
         kw["start_new_session"] = True
