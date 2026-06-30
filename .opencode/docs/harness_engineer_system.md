@@ -8,7 +8,18 @@ The workspace supports configurable session language. Read `.opencode/config.yam
 
 ## Primary Objective
 
-The default optimization objective is to reduce instruction count on the hot path while preserving correctness, locking guarantees, memory safety, lifecycle safety, and logical completeness.
+The optimization objective is to improve the **primary metric chosen by the funnel's
+Stage-0 bottleneck classification** (`perf-bottleneck-playbooks/SKILL.md`) on the hot
+path, while preserving correctness, locking guarantees, memory safety, lifecycle
+safety, and logical completeness.
+
+Instruction count is the **default** primary metric — used for `compute-bound`
+targets and whenever the class is undetermined. For other classes the primary
+metric differs and IC is at most a whole-path secondary signal: `memory-tlb-bound`
+→ TLB/page-walk counters + latency; `ipc-bound` → round-trip count + whole-path
+retired-instructions + latency; `io-bound` → fault/writeback + latency/bandwidth.
+Every stage below that says "instruction count" means "the Stage-0 primary metric,
+IC by default" — judge non-compute targets against their class metric, not IC.
 
 ## Agent Topology
 
@@ -23,7 +34,7 @@ The default optimization objective is to reduce instruction count on the hot pat
 ## Stage Order
 
 1. intake, config loading, and routing (`hm-opt-manager`)
-2. research and instruction-count hypothesis (specialist, returns to manager)
+2. research, bottleneck classification (Stage 0), and primary-metric hypothesis (specialist, returns to manager)
 3. plan review (returns to manager)
 4. implementation (returns to manager)
 5. code review (returns to manager)
@@ -40,7 +51,7 @@ When a command carries `Auto-Iterate: N` (with N ≥ 2) and loads `.opencode/ski
 
 - understand subsystem structure
 - locate hot path
-- explain where instruction count is spent
+- classify the bottleneck (Stage 0, per `perf-bottleneck-playbooks`) and explain where the **primary-metric** cost is spent (instruction count for `compute-bound`; TLB/page-walk for `memory-tlb-bound`; round-trips for `ipc-bound`; faults/IO for `io-bound`)
 - produce optimization plan and design context
 
 ### Plan Reviewer
@@ -104,7 +115,7 @@ The researcher must hand over:
 
 - subsystem boundary
 - hot path
-- instruction-count thesis
+- bottleneck class + primary-metric thesis (IC by default for `compute-bound`)
 - exact files and symbols
 - risk notes
 - proposed validation path

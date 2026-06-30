@@ -5,9 +5,27 @@ description: Default optimization objective — lower instruction count on the h
 
 # Instruction-Count First
 
-## Default Objective
+## Scope: the `compute-bound` default (not universal)
 
-Unless the staged task explicitly says otherwise, optimize for lower instruction count on the hot path first.
+This skill is the **`compute-bound`** playbook in `perf-bottleneck-playbooks` and
+the default when the bottleneck class is undetermined. It is the right primary
+metric when the hot path is straight-line, cache-hot CPU work.
+
+It is NOT the primary metric when the funnel's Stage 0 classifies the target as:
+
+- `memory-tlb-bound` (mprotect/madvise/munmap…) — TLB flush + page-walk dominate,
+  which IC cannot see; use `memory-tlb-optimization`.
+- `ipc-bound` (fcntl `F_GETFL`, getrandom, dup…) — a cross-component round-trip
+  dominates; IC is meaningful only counted **whole-path** (client+transfer+server).
+- `io-bound` (fio…) — faults/writeback/storage dominate; IC is near-irrelevant.
+
+For those classes IC is at most a **secondary, whole-path** signal — never declare
+a win on the in-kernel-leg IC alone. See `perf-bottleneck-playbooks/SKILL.md`.
+
+## Default Objective (compute-bound)
+
+When the class is `compute-bound` or undetermined — and unless the staged task
+explicitly says otherwise — optimize for lower instruction count on the hot path first.
 
 ## What Counts As Instruction-Count Work
 

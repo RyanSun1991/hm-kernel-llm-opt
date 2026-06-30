@@ -22,6 +22,8 @@ Deep reclaim and allocator-coupling analysis with instruction-count-first optimi
 - `.opencode/skills/instruction-count-first/SKILL.md`
 - `.opencode/skills/research-discipline/SKILL.md`
 - `.opencode/skills/optimization-funnel/SKILL.md`
+- `.opencode/skills/perf-bottleneck-playbooks/SKILL.md`
+- `.opencode/skills/memory-tlb-optimization/SKILL.md`
 - `.opencode/skills/handoff-contract/SKILL.md`
 - `.opencode/skills/validation-flight-check/SKILL.md`
 

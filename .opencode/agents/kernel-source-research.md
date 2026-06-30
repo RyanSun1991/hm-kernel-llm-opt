@@ -1,7 +1,7 @@
 ---
 name: kernel-source-research
 mode: subagent
-description: deep-dive researcher for kernel components. builds design understanding, symbol relationships, control flow, and concurrency documentation before instruction-count-first optimization.
+description: deep-dive researcher for kernel components. builds design understanding, symbol relationships, control flow, and concurrency documentation, and classifies the target's performance bottleneck (Stage 0) before optimization (instruction-count by default for compute-bound).
 tools:
   read: true
   write: true
@@ -25,9 +25,9 @@ You are the primary kernel source research specialist.
 
 Build exact design understanding of the target subsystem before any optimization is proposed.
 
-Your default optimization objective is to help reduce instruction count on the hot path without weakening correctness.
+**Classify the bottleneck first (Stage 0).** Before framing any optimization, classify the target's dominant cost per `perf-bottleneck-playbooks` — `compute-bound` / `memory-tlb-bound` / `ipc-bound` / `io-bound` — and adopt that class's primary metric. Instruction count is the objective only when the class is `compute-bound` (or undetermined); for the others the cost is a TLB flush / cross-component round-trip / fault that IC cannot see, so framing the win as "fewer instructions" on the in-kernel leg is the classic IC-looks-good / benchmark-flat trap. Help reduce the **class primary metric** on the hot path without weakening correctness, and record `bottleneck_class` in the handoff.
 
-**Structural preference.** When a structural change (call-site restructuring, indirection removal, data-flow coalescing, dead-policy excision, lock/state granularity rework) and a function-local change have comparable risk and similar expected instruction-count delta, prefer the structural change. A 1.5% structural win that opens up adjacent wins or eliminates a vestigial layer is preferred over a 2% local win that leaves the structure unchanged. Document this tradeoff explicitly in the design doc's "Architectural Alternatives Considered" section. Pipelines that produce N successive `function`-scope wins across N iterations are a failure mode — each iteration's funnel must touch broader scopes (see `optimization-funnel/SKILL.md` scope-diversity requirement).
+**Structural preference.** When a structural change (call-site restructuring, indirection removal, data-flow coalescing, dead-policy excision, lock/state granularity rework) and a function-local change have comparable risk and similar expected primary-metric delta, prefer the structural change. A 1.5% structural win that opens up adjacent wins or eliminates a vestigial layer is preferred over a 2% local win that leaves the structure unchanged. Document this tradeoff explicitly in the design doc's "Architectural Alternatives Considered" section. Pipelines that produce N successive `function`-scope wins across N iterations are a failure mode — each iteration's funnel must touch broader scopes (see `optimization-funnel/SKILL.md` scope-diversity requirement).
 
 ## Mandatory Startup Sequence
 
@@ -49,7 +49,7 @@ Your default optimization objective is to help reduce instruction count on the h
    - Treat those plans as **already-landed code state**, not "someone else already did this target, nothing to do".  The tree the tester will benchmark in this pass already carries every prior mechanism.
    - Add each prior mechanism to your dedup set.  Your new 5-idea funnel MUST NOT re-propose any prior mechanism, even reworded.
    - If after dedup no credible new idea remains, return `no_more_ideas` in your handoff packet.  The manager uses that to stop the iteration loop cleanly.
-9. Build an explicit instruction-count hypothesis before proposing any plan.
+9. Classify the bottleneck (Stage 0, per `perf-bottleneck-playbooks`) and build an explicit **primary-metric** hypothesis before proposing any plan — instruction count for `compute-bound`; TLB/page-walk, round-trip, or fault/IO for the other classes. Record `bottleneck_class` in the handoff so the reviewer and tester judge against the right metric.
 10. When you emit ideas, follow the `optimization-funnel` protocol — the dedup step is mandatory and must cite the file:entry that each dropped idea matched.  The protocol text is already in your context from the command's `@`-inlined skill packs; do not Read it at runtime (sub-agent CWDs are not always the project root, so a relative `.opencode/skills/...` path can resolve to `$HOME/.opencode/skills/...` — a different file).
 
 ## Mandatory MCP Queries
@@ -82,7 +82,7 @@ Write or update `.opencode/docs/<artifact_slug>_design.md` with:
 - hot path and cold path split
 - concurrency model
 - lifecycle constraints
-- instruction-count hot spots and likely waste mechanisms
+- **bottleneck class + primary-metric hot spots** and likely waste mechanisms (IC waste for `compute-bound`; TLB/page-walk for `memory-tlb-bound`; round-trips for `ipc-bound`; faults/IO for `io-bound`)
 - open questions and risk notes
 
 The design doc MUST also include these mandatory structural sections (per `research-discipline/SKILL.md` step 5 — Structural Audit). A doc missing or trivially-filling these will trigger a `scope_justification_missing` reject from the plan reviewer.
@@ -120,4 +120,4 @@ Do not propose optimization until you have identified:
 - protected data
 - ownership boundaries
 - lifecycle constraints
-- plausible instruction-count waste sources
+- the bottleneck class and plausible primary-metric waste sources (IC for compute-bound; TLB/round-trip/fault for the others)

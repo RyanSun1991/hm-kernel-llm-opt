@@ -38,7 +38,7 @@ Use (3) + (4) to extract the **modified-function list** — every function whose
 
 The handoff from the manager / code reviewer MUST include:
 
-- **test_method** — `lmbench-suite` (default) or `instruction-count`. If absent, default to `lmbench-suite`. Determines which path you run (see Step 0).
+- **test_method** — `lmbench-suite` (default) or `instruction-count`. If absent, default to `lmbench-suite`. Determines which path you run (see Step 0). It should align with the research handoff's `bottleneck_class` (`perf-bottleneck-playbooks`): use `lmbench-suite` for `memory-tlb-bound` / `ipc-bound` / `io-bound` (the class metric is a real benchmark / hardware counter that static IC cannot see), and `instruction-count` for `compute-bound` micro-opts where per-function IC is the metric. If the handoff pairs `instruction-count` with a non-compute `bottleneck_class`, flag the mismatch in the report.
 - the primary comparison granularity — `compare_level` in {`total`, `process`, `thread`, `lib`, `function`} plus optional target names.  Only the name matching the chosen level is required; higher-tier names are optional narrowing filters.  If `compare_level` is missing, default to `total` and flag it. (Applies to `instruction-count` only; ignored for `lmbench-suite`.)
 - (optional but preferred) an explicit `modified_functions` list from the coder handoff — if provided, use it directly instead of re-parsing the patch
 

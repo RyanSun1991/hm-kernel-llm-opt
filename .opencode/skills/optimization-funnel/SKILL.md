@@ -5,6 +5,30 @@ description: Ideation protocol for generating exactly five diverse-scope optimiz
 
 # Optimization Funnel
 
+## Stage 0: Bottleneck Classification Gate (run BEFORE ideation)
+
+Before generating ideas, classify the target's dominant bottleneck and adopt the
+matching primary metric — per `perf-bottleneck-playbooks/SKILL.md`. This prevents
+the proxy-target mismatch where you cut instruction count on a path whose real cost
+is an IPC round-trip, a TLB flush, or I/O (IC drops, the benchmark doesn't move).
+
+1. Classify the hot path into one class: `compute-bound` / `ipc-bound` /
+   `memory-tlb-bound` / `io-bound` (dominant), and note any secondary class.
+2. Adopt that class's **primary metric** (the registry says which): instruction
+   count for `compute-bound`; TLB/page-walk counters + measured latency for
+   `memory-tlb-bound`; whole-path retired-instructions + latency for `ipc-bound`;
+   fault/writeback + latency/bandwidth for `io-bound`.
+3. The matched playbook is already `@`-inlined by the command's `Skill packs:`
+   (sub-agents MUST NOT Read skills at runtime — see `.opencode/CLAUDE.md`). Apply
+   its hot-path taxonomy and optimization moves. If it is NOT in context, record
+   `playbook_missing: <class>` in the handoff and fall back to **whole-path** IC.
+4. Carry the chosen class + primary metric in the funnel handoff so the plan
+   reviewer and tester judge against the right metric.
+
+Default: if the target is genuinely `compute-bound` or the class can't be
+determined, the primary metric is **instruction count** (status quo) and
+`instruction-count-first/SKILL.md` applies unchanged.
+
 ## Ideation Protocol
 
 1. generate exactly five ideas
@@ -19,7 +43,7 @@ description: Ideation protocol for generating exactly five diverse-scope optimiz
 
     If after honest structural analysis only `function`-scope wins genuinely exist, the handoff packet MUST contain a `scope_justification:` block listing the call-site / data-flow / subsystem / architectural alternatives considered and why each is non-applicable (e.g. "lock split blocked by ownership semantics in `foo.c:123`", "dead-policy excision blocked by ABI stability"). Without this block the funnel result is rejected by the plan reviewer with reason `scope_justification_missing`.
 2. drop repeated bad plans (see "Mandatory Dedup Sources" below — this step is not vibes, it is a file check)
-3. rank first by likely instruction-count reduction on the hot path, then by risk and implementation cost
+3. rank first by likely improvement in the **Stage 0 primary metric** on the hot path (instruction-count reduction for `compute-bound`; TLB/page-walk + latency for `memory-tlb-bound`; round-trip elimination + whole-path IC for `ipc-bound`; fault/writeback for `io-bound`), then by risk and implementation cost
 4. show only the top idea  *(default — pipeline sub-agents, auto flow)*  —  **when the caller is the `kernel-plan` primary agent** (or any agent that loads `human-interaction-memory/SKILL.md`), show ALL five in `<target>_ideas.md` with full per-idea analysis, since the human triages each idea independently
 5. wait for explicit approval  *(auto flow: model approval on the top idea; primary-agent human flow: per-idea verdicts captured in the decision log + idea ledger)*
 6. write the detailed plan only after approval  *(primary-agent human flow: only the approved ideas become plan candidates)*
@@ -49,6 +73,11 @@ An idea is a "repeated bad plan" and MUST be dropped when any of the following i
 When you drop an idea for this reason, call it out in the handoff — "dropped: <idea>; matches <file>:<entry>; reason: <why it failed before or is already landed>" — so the reviewer can audit the dedup.
 
 ## Ranking Questions
+
+> The instruction-count block below is the `compute-bound` default. For a non-`compute`
+> class (Stage 0), substitute the class's primary metric: for `memory-tlb-bound` ask
+> "does it cut TLB flushes / shootdowns / page-walk misses?"; for `ipc-bound` ask
+> "does it eliminate or batch a round-trip?" — see the matched playbook.
 
 ### Per-idea instruction-count plausibility
 

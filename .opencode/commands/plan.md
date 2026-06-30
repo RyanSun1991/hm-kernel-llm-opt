@@ -13,6 +13,7 @@ Do NOT implement code, do NOT run tests, do NOT delegate. After the plan is appr
 Skill packs:
 - @.opencode/skills/language-config/SKILL.md
 - @.opencode/skills/optimization-funnel/SKILL.md
+- @.opencode/skills/perf-bottleneck-playbooks/SKILL.md
 - @.opencode/skills/instruction-count-first/SKILL.md
 - @.opencode/skills/handoff-contract/SKILL.md
 - @.opencode/skills/memory-accumulation/SKILL.md

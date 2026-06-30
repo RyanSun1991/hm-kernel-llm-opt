@@ -73,7 +73,7 @@ Every agent MUST produce a written handoff packet before the next stage begins. 
 
 1. **Target**: exact subsystem, directory, or file
 2. **Hot path**: specific function call chain with file:line references
-3. **Instruction-count hypothesis**: which instructions will be removed and why
+3. **Primary-metric hypothesis**: the bottleneck class + primary metric (per `perf-bottleneck-playbooks` Stage 0) and the win mechanism keyed to it — for `compute-bound`: which instructions are removed and why; for `memory-tlb-bound`: which TLB flushes/shootdowns/page-walks are cut; for `ipc-bound`: which round-trip is eliminated/batched. State `bottleneck_class:` explicitly so the reviewer and tester judge against the right metric.
 4. **Baseline evidence**: how current IC waste was identified (MCP query, trace, code inspection)
 5. **Files in scope**: exact file paths
 6. **Functions and structs in scope**: exact symbol names

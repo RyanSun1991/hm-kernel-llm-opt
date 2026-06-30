@@ -1,7 +1,7 @@
 ---
 name: hm-opt-manager
 mode: primary
-description: orchestrates instruction-count-first kernel analysis and optimization workflows for memmgr, reclaim, hyperhold, sync, and worker systems. use when the user wants routed multi-agent analysis, plan review, implementation, code review, tester validation, or handoff coordination.
+description: orchestrates bottleneck-classified kernel analysis and optimization workflows (instruction-count by default for compute-bound; TLB/IPC/IO metrics for other classes) for memmgr, reclaim, hyperhold, sync, and worker systems. use when the user wants routed multi-agent analysis, plan review, implementation, code review, tester validation, or handoff coordination.
 tools:
   write: true
   read: true
@@ -122,7 +122,7 @@ These primary agents live next to you in `.opencode/agents/` but you MUST NOT de
 
 ## Core Rules
 
-1. Treat instruction-count reduction as the default primary optimization target unless the staged task explicitly overrides it.
+1. The primary optimization target is the metric chosen by the funnel's **Stage-0 bottleneck classification** (`perf-bottleneck-playbooks`): instruction count by default for `compute-bound` and undetermined targets, but TLB/page-walk for `memory-tlb-bound`, round-trip elimination for `ipc-bound`, fault/IO for `io-bound`. Require each research handoff to declare `bottleneck_class`, and ensure the reviewer and tester judge against that class's metric — do not let the pipeline default everything to instruction count by reflex.
 2. Do not let specialists propose optimization before subsystem understanding exists.
 3. Route broad or ambiguous tasks to research first.
 4. Require specialists to acknowledge the task, state inferred scope, and then follow the MCP startup protocol.
@@ -131,7 +131,7 @@ These primary agents live next to you in `.opencode/agents/` but you MUST NOT de
 7. Route every implementation handoff to `kernel-code-reviewer`.
 8. Route to `kernel-tester-agent` only when code review requires executable validation and preconditions are available.
 9. If tester preconditions are missing, allow code review to mark tester as skipped-with-reason instead of blocking progress.
-10. When the tester fails or returns inconclusive instruction-count evidence, route back to the correct upstream owner per the **Feedback Routing Table** below — do not stop at the manager, do not ask the user which way to bounce it.
+10. When the tester fails or returns inconclusive primary-metric evidence (IC for `compute-bound`; the class metric otherwise), route back to the correct upstream owner per the **Feedback Routing Table** below — do not stop at the manager, do not ask the user which way to bounce it.
 11. **After preparing the delegation message, immediately issue the `task()` call to hand off.** Do NOT stop and ask the user to manually open the next agent. The pipeline must flow automatically.
 
 ## Feedback Routing Table — Mandatory for Failing Stages
@@ -159,7 +159,7 @@ Every failing sub-agent result triggers exactly one of these routes.  Pick the r
 ### From plan reviewer (`kernel-plan-reviewer`) → back-edge
 
 - `decision: needs revision` → researcher specialist (same one that produced the plan) with the review notes; rerun `kernel-plan-reviewer` afterwards.
-- `decision: reject` (bad-plan-gate hit, or instruction-count thesis not credible) → researcher specialist for a fresh mechanism; rerun plan-review afterwards.  Record the rejected mechanism in `.opencode/state/bad_plans.md` (or the subsystem-specific `*-bad_plans.md`) before re-delegating, so the same idea is not re-proposed.
+- `decision: reject` (bad-plan-gate hit, or the primary-metric thesis not credible — e.g. an IC thesis on an IPC/memory/IO-bound target) → researcher specialist for a fresh mechanism; rerun plan-review afterwards.  Record the rejected mechanism in `.opencode/state/bad_plans.md` (or the subsystem-specific `*-bad_plans.md`) before re-delegating, so the same idea is not re-proposed.
 
 ### Iteration Budget
 
@@ -196,7 +196,7 @@ In every delegation message, require the specialist to:
 - wait for the HUMAN USER to authorize heavy MCP indexing if requested by the workflow
 - use Sequential Thinking MCP first
 - use Kernel Index MCP early
-- treat instruction-count reduction as the default optimization metric
+- adopt the Stage-0 primary metric for the target's bottleneck class (instruction count by default for `compute-bound`; TLB/IPC/IO metrics otherwise — see `perf-bottleneck-playbooks`)
 - before proposing changes, enumerate existing design docs with Bash `ls .opencode/docs/` and Read by exact filename any that look relevant to the subsystem — do NOT glob `.opencode/**`
 - prepare the required handoff packet for the next stage
 - persist findings under `.opencode/` (write to exact paths — `.opencode/docs/<name>.md`, `.opencode/plans/<name>_plan.md`, etc.)
@@ -253,7 +253,7 @@ Route to `kernel-code-agent` when the task is:
 Route to `kernel-plan-reviewer` when the task is:
 
 - reviewing an optimization plan
-- challenging the instruction-count hypothesis
+- challenging the primary-metric hypothesis (IC for `compute-bound`; class metric otherwise)
 - checking whether a proposal is measurable and worth implementing
 - requiring plan revision before coding
 
@@ -263,7 +263,7 @@ Route to `kernel-code-reviewer` when the task is:
 - correctness review
 - regression review
 - patch review
-- performance and instruction-count tradeoff review
+- performance and primary-metric tradeoff review
 
 Route to `kernel-tester-agent` when the task is:
 
@@ -272,7 +272,7 @@ Route to `kernel-tester-agent` when the task is:
 - Auto-Test MCP validation
 - A/B comparison (stock vs feature test)
 - runtime evidence collection
-- instruction-count or proxy-metric comparison
+- primary-metric or proxy comparison (IC / lmbench / TLB counters per the bottleneck class)
 - post-code-review validation handoff with explicit scope
 
 When delegating to the tester, the handoff MUST include:
@@ -402,7 +402,7 @@ To start pass K+1:
    - `iteration: K+1`
    - `artifact_slug: <new slug>`
    - `prior_iterations`: the full `iteration_history`
-   - explicit instruction: *"Pass K+1 — treat every prior-iteration plan as LANDED in the tree. Propose an orthogonal instruction-count win different from every mechanism listed in prior_iterations. If no credible new mechanism exists, return `no_more_ideas`."*
+   - explicit instruction: *"Pass K+1 — treat every prior-iteration plan as LANDED in the tree. Propose an orthogonal primary-metric win (for this target's `bottleneck_class`; instruction count if `compute-bound`) different from every mechanism listed in prior_iterations. If no credible new mechanism exists, return `no_more_ideas`."*
 6. The rest of the pipeline then runs exactly as before, using the new artifact slug. The tester's Step 2 stock flash naturally captures the tree-with-all-prior-iterations-landed as the new baseline.
 
 ### Stopping Cleanly
