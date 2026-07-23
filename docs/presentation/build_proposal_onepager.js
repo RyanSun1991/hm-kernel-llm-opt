@@ -1,11 +1,12 @@
-/* Team Skill Hub — one-page proposal slide, restyled to match the shared
- * proposal template: red title, 2x2 white panels with embedded black headers,
- * black body + bold lead-ins + red emphasis, teal/orange engineering diagram. */
+/* Team Skill Hub — one-page proposal slide v3.
+ * Template-matched (red title, 2x2 bordered panels, embedded headers) with
+ * reference-grade density: layered architecture diagram with real component
+ * names, capability comparison table, and two native data charts. */
 const pptxgen = require("pptxgenjs");
 
 const RED = "C00000", BLACK = "1A1A1A", GRAY = "595959", MID = "404040";
-const WHITE = "FFFFFF", LIGHT = "F2F2F2";
-const TEALBG = "D9EEEC", TEALBG2 = "CFEDEA", TEALBD = "2E9E94";
+const WHITE = "FFFFFF", LIGHT = "F2F2F2", SOFT = "808080";
+const TEALBG = "D9EEEC", TEALBG2 = "CFEDEA", TEALBD = "2E9E94", TEALD = "0B7A70";
 const ORGBG = "FBE5D6", ORGBD = "ED7D31";
 const F = "Microsoft YaHei";
 
@@ -15,7 +16,6 @@ pres.layout = "W";
 const s = pres.addSlide();
 s.background = { color: WHITE };
 
-// helpers -------------------------------------------------------------------
 function panel(x, y, w, h, title, titleW) {
   s.addShape(pres.ShapeType.rect, { x, y, w, h, fill: { color: WHITE },
     line: { color: GRAY, width: 1.25 } });
@@ -26,14 +26,21 @@ function panel(x, y, w, h, title, titleW) {
     fontSize: 16, bold: true, color: BLACK, align: "center", valign: "middle",
     margin: 0 });
 }
-function xmark(cx, cy, r, w) {
-  s.addShape(pres.ShapeType.line, { x: cx - r, y: cy - r, w: 2 * r, h: 2 * r,
-    line: { color: RED, width: w } });
-  s.addShape(pres.ShapeType.line, { x: cx - r, y: cy + r, w: 2 * r, h: -2 * r,
-    line: { color: RED, width: w } });
+function box(x, y, w, h, fill, bd, bw) {
+  s.addShape(pres.ShapeType.rect, { x, y, w, h, fill: { color: fill },
+    line: { color: bd, width: bw || 1 } });
+}
+function arrow(x, y, w, h, color, wd, dash) {
+  const ln = { color, width: wd || 1.5, endArrowType: "triangle" };
+  if (dash) ln.dashType = "dash";
+  s.addShape(pres.ShapeType.line, { x, y, w, h, line: ln });
+}
+function dline(x, y, w, h) {
+  s.addShape(pres.ShapeType.line, { x, y, w, h,
+    line: { color: SOFT, width: 1, dashType: "dash" } });
 }
 
-// title ---------------------------------------------------------------------
+// ---- title ----------------------------------------------------------------
 s.addText([
   { text: "Skill Hub：", options: {} },
   { text: "鸿蒙内核智能优化的团队级自进化经验中枢", options: {} },
@@ -41,182 +48,248 @@ s.addText([
 ], { x: 0.30, y: 0.12, w: 12.73, h: 0.52, fontFace: F, fontSize: 21,
   bold: true, color: RED, margin: 0, valign: "middle" });
 
-// panels --------------------------------------------------------------------
 panel(0.30, 0.92, 5.55, 3.70, "问题背景", 2.0);
 panel(5.99, 0.92, 7.03, 3.70, "创新方案", 2.0);
 panel(0.30, 4.80, 5.55, 2.48, "现有方案不足", 2.6);
 panel(5.99, 4.80, 7.03, 2.48, "收益和商业价值", 2.9);
 
-// ---- P1 问题背景 -----------------------------------------------------------
+// ============================== P1 问题背景 ================================
 s.addText([
   { text: "● ", options: { bold: true } },
   { text: "Agent 驱动的内核优化（内存底噪 · 指令数 · 功耗）规模化铺开", options: { bold: true } },
   { text: "——真瓶颈不是「单次优化」，而是", options: {} },
-  { text: "「经验复利」", options: { bold: true, color: RED, breakLine: true } },
-  { text: "● ", options: { bold: true, paraSpaceBefore: 4 } },
-  { text: "经验孤岛：", options: { bold: true } },
-  { text: "哪个招式有效、哪里有坑、热函数怎么改、哪种验证不可信——只存在个人本地，无法跨人 / 跨项目 / 跨时间复用", options: { breakLine: true } },
-  { text: "● ", options: { bold: true, paraSpaceBefore: 4 } },
-  { text: "重复踩坑 · 无法传承：", options: { bold: true } },
-  { text: "团队重复探索同一方向；专家经验带不走，新人与新 Agent 从零开始，", options: {} },
-  { text: "优化边际效率不升反降", options: { color: RED, bold: true } },
-], { x: 0.48, y: 1.06, w: 5.19, h: 1.42, fontFace: F, fontSize: 10,
-  color: BLACK, margin: 0, valign: "top", lineSpacingMultiple: 1.12 });
+  { text: "「经验能否复利积累」", options: { bold: true, color: RED, breakLine: true } },
+  { text: "● ", options: { bold: true, paraSpaceBefore: 3 } },
+  { text: "哪个招式有效、哪里有坑、热函数怎么改、哪种验证不可信——只存在个人本地；团队重复探索、专家经验带不走，", options: {} },
+  { text: "优化边际效率不升反降", options: { bold: true, color: RED } },
+], { x: 0.48, y: 1.04, w: 5.19, h: 0.98, fontFace: F, fontSize: 10,
+  color: BLACK, margin: 0, valign: "top", lineSpacingMultiple: 1.1 });
 
-// mini diagram: silos
-const mems = ["工程师 A", "工程师 B", "工程师 C"];
-mems.forEach((m, i) => {
-  const x = 0.48 + i * (1.55 + 0.27);
-  s.addShape(pres.ShapeType.rect, { x, y: 2.62, w: 1.55, h: 0.52,
-    fill: { color: LIGHT }, line: { color: GRAY, width: 1 } });
-  s.addText([
-    { text: m, options: { bold: true, breakLine: true } },
-    { text: "本地经验", options: { fontSize: 8 } },
-  ], { x, y: 2.62, w: 1.55, h: 0.52, fontFace: F, fontSize: 9, color: BLACK,
-    align: "center", valign: "middle", margin: 0, lineSpacingMultiple: 1.0 });
+// As-Is flow: engineers -> pipeline -> local memory -> broken reuse
+const CHIPX = [0.48, 2.30, 4.12];
+CHIPX.forEach((x, i) => {
+  box(x, 2.08, 1.55, 0.28, LIGHT, SOFT, 1);
+  s.addText("工程师 " + "ABC"[i] + "（各自为战）", { x, y: 2.08, w: 1.55, h: 0.28,
+    fontFace: F, fontSize: 8, bold: true, color: BLACK, align: "center",
+    valign: "middle", margin: 0 });
+  arrow(x + 0.775, 2.36, 0, 0.13, SOFT, 1.25);
 });
-// dashed connectors from each silo down to the (missing) shared pool
-[{ x: 1.255, w: 0.805 }, { x: 3.075, w: -0.055 }, { x: 4.895, w: -0.915 }]
-  .forEach((c) => s.addShape(pres.ShapeType.line, { x: c.x, y: 3.14, w: c.w,
-    h: 0.30, line: { color: GRAY, width: 1, dashType: "dash" } }));
-xmark(2.165, 2.88, 0.07, 1.75);
-xmark(3.985, 2.88, 0.07, 1.75);
-s.addShape(pres.ShapeType.rect, { x: 1.42, y: 3.44, w: 3.20, h: 0.48,
-  fill: { color: WHITE }, line: { color: GRAY, width: 1, dashType: "dash" } });
-s.addText("团队共享经验池（缺失）", { x: 1.42, y: 3.44, w: 3.20, h: 0.48,
-  fontFace: F, fontSize: 9.5, color: GRAY, align: "center", valign: "middle",
-  margin: 0 });
-s.addShape(pres.ShapeType.line, { x: 1.42, y: 3.44, w: 3.20, h: 0.48,
-  line: { color: RED, width: 1.5 } });
-s.addShape(pres.ShapeType.line, { x: 1.42, y: 3.92, w: 3.20, h: -0.48,
-  line: { color: RED, width: 1.5 } });
-s.addText("经验随人员流动而流失；新人 / 新 Agent 每次从零开始", {
-  x: 0.48, y: 4.06, w: 5.19, h: 0.26, fontFace: F, fontSize: 9.5, bold: true,
-  color: RED, align: "center", valign: "middle", margin: 0 });
-
-// ---- P3 现有方案不足 -------------------------------------------------------
+box(0.48, 2.50, 5.19, 0.40, WHITE, MID, 1);
 s.addText([
-  { text: "☐ ", options: {} },
-  { text: "业界 Agent 记忆方案（mem0 / Zep / memU）只解决「存与取」，", options: {} },
-  { text: "没有团队级治理", options: { bold: true, breakLine: true } },
-  { text: "☐ ", options: { paraSpaceBefore: 3 } },
-  { text: "风险① 知识漂移：", options: { bold: true, color: RED } },
-  { text: "经验自相矛盾、随时间失效，越积越乱", options: { breakLine: true } },
-  { text: "☐ ", options: { paraSpaceBefore: 3 } },
-  { text: "风险② 反馈自增强：", options: { bold: true, color: RED } },
-  { text: "自积累让均值变好，个别场景被悄悄做坏", options: { breakLine: true } },
-  { text: "☐ ", options: { paraSpaceBefore: 3 } },
-  { text: "简单 git 共享也不行：", options: { bold: true } },
-  { text: "行级合并让知识自相矛盾、技能被某人一周的坏经验覆盖", options: { breakLine: true } },
-  { text: "☐ ", options: { paraSpaceBefore: 3 } },
-  { text: "无质量门 · 无审计 · 无版本——", options: {} },
-  { text: "规模越大，污染风险越大", options: { bold: true, breakLine: true } },
-  { text: "∴ 需要：带质量治理、可自进化的团队级经验基础设施", options: { bold: true, color: RED, paraSpaceBefore: 7 } },
-], { x: 0.48, y: 5.00, w: 5.19, h: 2.20, fontFace: F, fontSize: 10,
-  color: BLACK, margin: 0, valign: "top", lineSpacingMultiple: 1.18 });
+  { text: "Agent 优化流水线（.opencode 硬门禁）：", options: { bold: true } },
+  { text: "research → 计划评审 → 实现 → 代码评审 → 测试 A/B → 决策", options: {} },
+], { x: 0.56, y: 2.50, w: 5.03, h: 0.40, fontFace: F, fontSize: 8,
+  color: BLACK, margin: 0, valign: "middle", lineSpacingMultiple: 1.05 });
+arrow(3.075, 2.90, 0, 0.12, SOFT, 1.25);
+box(0.48, 3.03, 5.19, 0.42, "FFF8F0", ORGBD, 1);
+s.addText([
+  { text: "本地经验 .opencode/memory/：", options: { bold: true } },
+  { text: "idea_ledger（L001 landed −0.8%）· targets 结构事实 · global_lessons · bad_plans", options: {} },
+], { x: 0.56, y: 3.03, w: 5.03, h: 0.42, fontFace: F, fontSize: 8,
+  color: BLACK, margin: 0, valign: "middle", lineSpacingMultiple: 1.05 });
+CHIPX.forEach((x, i) => {
+  dline(3.075 + (i - 1) * 0.02, 3.45, x + 0.775 - 3.075, 0.16);
+  box(x, 3.62, 1.55, 0.30, WHITE, SOFT, 1);
+  s.addText([
+    { text: ["队友复用 ", "新人接手 ", "新 Agent "][i], options: {} },
+    { text: "✗", options: { bold: true, color: RED } },
+  ], { x, y: 3.62, w: 1.55, h: 0.30, fontFace: F, fontSize: 8.5, color: BLACK,
+    align: "center", valign: "middle", margin: 0 });
+});
+s.addText("经验止步个人目录——无汇聚 · 无治理 · 随人流失，新人与新 Agent 永远从零开始", {
+  x: 0.48, y: 3.99, w: 5.19, h: 0.22, fontFace: F, fontSize: 9.5, bold: true,
+  color: RED, align: "center", valign: "middle", margin: 0 });
+s.addText("例：shrink_node「hoist sc->priority」bench 实测 −0.8%——这类可复用经验此前只躺在个人目录", {
+  x: 0.48, y: 4.26, w: 5.19, h: 0.20, fontFace: F, fontSize: 7.5, color: GRAY,
+  align: "center", valign: "middle", margin: 0 });
 
-// ---- P2 创新方案 -----------------------------------------------------------
+// ============================== P3 现有方案不足 =============================
+s.addText([
+  { text: "业界记忆方案只解决「个体的存与取」；", options: {} },
+  { text: "知识漂移 · 反馈自增强", options: { bold: true, color: RED } },
+  { text: " 两大致命风险与团队级复用均无人治理：", options: {} },
+], { x: 0.48, y: 4.94, w: 5.19, h: 0.40, fontFace: F, fontSize: 9.5,
+  color: BLACK, margin: 0, valign: "top", lineSpacingMultiple: 1.1 });
+
+const th = (t) => ({ text: t, options: { bold: true, color: WHITE, fill: { color: GRAY }, align: "center", fontSize: 7.5 } });
+const ok = (t, hl) => ({ text: t, options: { color: TEALD, bold: true, align: "center", fontSize: 7.5, fill: { color: hl ? TEALBG : WHITE } } });
+const no = (t) => ({ text: t, options: { color: RED, align: "center", fontSize: 7.5, fill: { color: WHITE } } });
+const pt = (t) => ({ text: t, options: { color: GRAY, align: "center", fontSize: 7.5, fill: { color: WHITE } } });
+const nm = (t, hl) => ({ text: t, options: { bold: true, align: "left", fontSize: 7.5, color: hl ? TEALD : BLACK, fill: { color: hl ? TEALBG : WHITE } } });
+s.addTable([
+  [th("方案"), th("存取检索"), th("冲突治理"), th("质量门"), th("版本化发布"), th("团队策展")],
+  [nm("mem0 v3 OSS"), ok("✓"), no("✗ ADD-only"), no("✗"), no("✗"), no("✗")],
+  [nm("Zep / Graphiti"), ok("✓"), pt("△ 双时态"), no("✗"), no("✗"), no("✗")],
+  [nm("memU / EverOS"), ok("✓ 分层"), no("✗"), no("✗"), no("✗"), no("✗")],
+  [nm("git 直接共享"), pt("△"), no("✗ 行级冲突"), no("✗"), pt("△"), no("✗")],
+  [nm("Skill Hub 本方案", 1), ok("✓ 混合检索", 1), ok("✓ 七路+双时态", 1), ok("✓ 3门+eval", 1), ok("✓ semver", 1), ok("✓ 双评审", 1)],
+], { x: 0.44, y: 5.38, w: 5.27, colW: [1.18, 0.82, 1.00, 0.78, 0.87, 0.62],
+  rowH: 0.235, border: { pt: 0.75, color: "A6A6A6" }, fontFace: F,
+  valign: "middle", margin: 0.03 });
+s.addText([
+  { text: "∴ 团队级治理层（门控 · 策展 · 版本化）为本方案独有——差异化护城河", options: { bold: true, color: RED } },
+], { x: 0.48, y: 6.94, w: 5.19, h: 0.24, fontFace: F, fontSize: 9.5,
+  margin: 0, valign: "middle" });
+
+// ============================== P2 创新方案 ================================
 s.addText([
   { text: "核心思想：", options: { bold: true, color: RED } },
-  { text: "把团队优化经验治理成「私有 npm 包」——全自动闭环、越用越准", options: { bold: true, color: RED } },
-], { x: 6.17, y: 1.04, w: 6.67, h: 0.26, fontFace: F, fontSize: 11,
+  { text: "经验如「私有 npm 包」——消费→蒸馏→门控→发布→再消费，全自动闭环、越用越准", options: { bold: true, color: RED } },
+], { x: 6.15, y: 1.00, w: 6.71, h: 0.24, fontFace: F, fontSize: 10,
   margin: 0, valign: "middle" });
 
-// hub box
-s.addShape(pres.ShapeType.rect, { x: 6.17, y: 1.38, w: 6.67, h: 0.88,
-  fill: { color: TEALBG }, line: { color: TEALBD, width: 1.25 } });
+// -- left: layered architecture (hub lane + member lane), 7 numbered steps --
+const DX = 6.15, DW = 4.55;
+box(DX, 1.30, DW, 1.36, "F4FAF9", TEALBD, 1.25);
 s.addText([
-  { text: "hm-skill-hub 团队中央经验仓：", options: { bold: true } },
-  { text: "semver 发布 + lockfile 钉版 · 可回滚 · 全程可审计", options: {} },
-], { x: 6.31, y: 1.42, w: 6.4, h: 0.20, fontFace: F, fontSize: 9.5,
+  { text: "hm-skill-hub 团队中央经验仓", options: { bold: true } },
+  { text: "（semver 发布 · lockfile 钉版 · 可回滚 · 可审计）", options: { fontSize: 7 } },
+], { x: DX + 0.12, y: 1.34, w: DW - 0.24, h: 0.18, fontFace: F, fontSize: 8,
   color: BLACK, margin: 0, valign: "middle" });
-s.addShape(pres.ShapeType.rect, { x: 6.31, y: 1.66, w: 3.16, h: 0.52,
-  fill: { color: TEALBG2 }, line: { color: TEALBD, width: 1 } });
-s.addText([
-  { text: "Knowledge 知识 · 引擎A 治理型合并", options: { bold: true, breakLine: true } },
-  { text: "只追加 + 七路关系分类 · 双时态墓碑不物删", options: {} },
-], { x: 6.40, y: 1.66, w: 3.00, h: 0.52, fontFace: F, fontSize: 8,
-  color: BLACK, margin: 0, valign: "middle", lineSpacingMultiple: 1.05 });
-s.addShape(pres.ShapeType.rect, { x: 9.57, y: 1.66, w: 3.13, h: 0.52,
-  fill: { color: ORGBG }, line: { color: ORGBD, width: 1 } });
-s.addText([
-  { text: "Skills 技能 · 引擎B 竞争式进化", options: { bold: true, breakLine: true } },
-  { text: "SkillOpt 有界编辑 · eval 严格变好 · Pareto 防塌缩", options: {} },
-], { x: 9.66, y: 1.66, w: 3.00, h: 0.52, fontFace: F, fontSize: 8,
-  color: BLACK, margin: 0, valign: "middle", lineSpacingMultiple: 1.05 });
-
-// arrows + step 4 label
-s.addShape(pres.ShapeType.line, { x: 6.55, y: 2.26, w: 0, h: 0.46,
-  line: { color: TEALBD, width: 2, endArrowType: "triangle" } });
-s.addText([
-  { text: "④ 发布回灌：", options: { bold: true, color: RED } },
-  { text: "nightly 七步 → semver + scorecard → broadcast 自动钉版", options: { color: BLACK } },
-], { x: 6.75, y: 2.32, w: 4.55, h: 0.30, fontFace: F, fontSize: 8.5,
-  margin: 0, valign: "middle" });
-s.addShape(pres.ShapeType.line, { x: 12.72, y: 2.72, w: 0, h: -0.46,
-  line: { color: ORGBD, width: 2, endArrowType: "triangle" } });
-s.addText("过三道门 → 入库", { x: 11.30, y: 2.32, w: 1.34, h: 0.30,
-  fontFace: F, fontSize: 8.5, bold: true, color: BLACK, align: "right",
-  valign: "middle", margin: 0 });
-
-// loop row
-const LOOPS = [
-  { t: "① 消费 · 自动挂载", d: "MCP · 6 接入点 · 静默降级" },
-  { t: "② 收口 · 自动蒸馏", d: "规则 + LLM 双段抽取" },
-  { t: "③ 门控 · 策展入库", d: "CI 五道门 + 双人评审" },
+// row A: staging <- CI <- curation (flow right-to-left feeds the stores)
+const RA = [
+  { t: "⑥ 策展入库", d: "七路分类 · 双人评审" },
+  { t: "⑤ CI 五道门", d: "lint·脱敏·去重·eval·测试" },
+  { t: "④ staging 收件箱", d: "成员蒸馏包投稿 PR" },
 ];
-LOOPS.forEach((b, i) => {
-  const x = 6.17 + i * (2.06 + 0.23);
-  s.addShape(pres.ShapeType.rect, { x, y: 2.72, w: 2.06, h: 0.58,
-    fill: { color: WHITE }, line: { color: MID, width: 1 } });
+RA.forEach((b, i) => {
+  const x = DX + 0.12 + i * (1.36 + 0.115);
+  box(x, 1.56, 1.36, 0.34, WHITE, MID, 1);
   s.addText([
     { text: b.t, options: { bold: true, breakLine: true } },
-    { text: b.d, options: { fontSize: 7.5, color: MID } },
-  ], { x: x + 0.08, y: 2.72, w: 2.06 - 0.16, h: 0.58, fontFace: F,
-    fontSize: 8.5, color: BLACK, margin: 0, valign: "middle",
-    lineSpacingMultiple: 1.05 });
-  if (i < 2) {
-    s.addShape(pres.ShapeType.line, { x: x + 2.06, y: 3.01, w: 0.23, h: 0,
-      line: { color: MID, width: 1.75, endArrowType: "triangle" } });
-  }
+    { text: b.d, options: { fontSize: 6, color: GRAY } },
+  ], { x: x + 0.03, y: 1.56, w: 1.30, h: 0.34, fontFace: F, fontSize: 6.5,
+    color: BLACK, align: "center", valign: "middle", margin: 0,
+    lineSpacingMultiple: 1.0 });
+  if (i < 2) arrow(x + 1.36 + 0.115, 1.73, -0.115, 0, MID, 1.25);
+});
+// row B: the two stores (dual engines)
+box(DX + 0.12, 1.96, 2.12, 0.60, TEALBG2, TEALBD, 1);
+s.addText([
+  { text: "knowledge/ 知识库 — 引擎A 治理合并", options: { bold: true, breakLine: true } },
+  { text: "global · subsystems · targets（F/H/A/V/B/L）", options: { fontSize: 6, breakLine: true } },
+  { text: "七路关系分类 · 双时态墓碑 · 永不物删", options: { fontSize: 6.5 } },
+], { x: DX + 0.18, y: 1.96, w: 2.00, h: 0.60, fontFace: F, fontSize: 7,
+  color: BLACK, margin: 0, valign: "middle", lineSpacingMultiple: 1.05 });
+box(DX + 2.31, 1.96, 2.12, 0.60, ORGBG, ORGBD, 1);
+s.addText([
+  { text: "skills/ 技能库 — 引擎B 竞争进化", options: { bold: true, breakLine: true } },
+  { text: "core · technique · domain + best_skill.md", options: { fontSize: 6, breakLine: true } },
+  { text: "SkillOpt 有界编辑 · eval 门 · Pareto 前沿", options: { fontSize: 6.5 } },
+], { x: DX + 2.37, y: 1.96, w: 2.00, h: 0.60, fontFace: F, fontSize: 7,
+  color: BLACK, margin: 0, valign: "middle", lineSpacingMultiple: 1.05 });
+
+// publish arrow (hub -> member lane) + labels
+arrow(6.50, 2.66, 0, 0.26, TEALBD, 2);
+s.addText([
+  { text: "⑦ 发布回灌：", options: { bold: true, color: RED } },
+  { text: "nightly 七步 · semver · broadcast 钉版", options: { color: BLACK } },
+], { x: 6.68, y: 2.66, w: 3.70, h: 0.24, fontFace: F, fontSize: 7.5,
+  margin: 0, valign: "middle" });
+// member lane: 3 stacked stages
+const ML = [
+  [{ text: "① 消费 · 自动挂载：", options: { bold: true } },
+   { text: "skill-memory.lock 钉版 + resolve 注入「Hub 上下文」", options: {} }],
+  [{ text: "② Agent 优化流水线：", options: { bold: true } },
+   { text: "research → 计划评审 → 实现 → 代码评审 → 测试 → 决策", options: {} }],
+  [{ text: "③ 收口蒸馏 sediment：", options: { bold: true } },
+   { text: "规则 + LLM 双段抽取 → Tier-1 候选 → ④ 投稿 PR", options: {} }],
+];
+ML.forEach((runs, i) => {
+  const y = 2.92 + i * 0.44;
+  box(DX, y, 4.43, 0.32, WHITE, MID, 1);
+  s.addText(runs, { x: DX + 0.10, y, w: 4.23, h: 0.32, fontFace: F,
+    fontSize: 7.5, color: BLACK, margin: 0, valign: "middle" });
+  if (i < 2) arrow(8.36, y + 0.32, 0, 0.12, SOFT, 1.25);
+});
+// PR submission arrow back up into staging (right edge)
+arrow(10.66, 3.96, 0, -1.30, ORGBD, 2);
+s.addText("MCP：resolve / sediment / status（7338）· hub 不可达静默降级、不阻塞", {
+  x: DX, y: 4.36, w: DW, h: 0.18, fontFace: F, fontSize: 7, color: GRAY,
+  margin: 0, valign: "middle" });
+
+// -- right: innovation column (KSPECT-style red-headed blocks) --
+const IX = 10.88, IW = 1.98;
+const INNO = [
+  { h: "创新点1：双资产双引擎", b: [
+    { text: "知识＝七路关系分类 + 双时态墓碑，永不物删；技能＝SkillOpt + Pareto，eval 门内进化——", options: {} },
+    { text: "业界记忆方案缺失的治理层", options: { bold: true } }] },
+  { h: "创新点2：eval-gate 反喂安全", b: [
+    { text: "技能改动须留出套件", options: {} },
+    { text: "「严格变好且零回归」", options: { bold: true } },
+    { text: "才入库，根治「自增强跑偏」；≥3 次连续改进才解锁自动合并", options: {} }] },
+  { h: "创新点3：全自动闭环工程化", b: [
+    { text: "蒸馏→门控→发布→回灌全自动，人只握晋升审批权；", options: {} },
+    { text: "≥2 独立实例自动毕业为技能", options: { bold: true } },
+    { text: "；MCP 静默降级不阻塞", options: {} }] },
+];
+let iy = 1.32;
+INNO.forEach((blk) => {
+  s.addText(blk.h, { x: IX, y: iy, w: IW, h: 0.20, fontFace: F, fontSize: 8.5,
+    bold: true, color: RED, margin: 0, valign: "middle" });
+  s.addText(blk.b, { x: IX, y: iy + 0.21, w: IW, h: 0.78, fontFace: F,
+    fontSize: 7.5, color: BLACK, margin: 0, valign: "top",
+    lineSpacingMultiple: 1.08 });
+  iy += 1.06;
 });
 
-// 创新点 bullets
+// ============================== P4 收益和商业价值 ===========================
 s.addText([
-  { text: "创新点1 双资产双引擎：", options: { bold: true, color: RED } },
-  { text: "知识与技能分治、各配治理引擎，根除「漂移」与「坏经验覆盖」——业界记忆方案缺失的治理层", options: { breakLine: true } },
-  { text: "创新点2 eval-gate 反喂安全：", options: { bold: true, color: RED, paraSpaceBefore: 3 } },
-  { text: "技能改动须留出套件「严格变好且零回归」才入库，根治「自增强跑偏」", options: { breakLine: true } },
-  { text: "创新点3 全自动闭环：", options: { bold: true, color: RED, paraSpaceBefore: 3 } },
-  { text: "蒸馏 → 门控 → 发布 → 回灌全自动，≥2 独立实例自动毕业为技能，人只握审批权；MCP 接入，故障静默降级不阻塞", options: {} },
-], { x: 6.17, y: 3.46, w: 6.67, h: 1.12, fontFace: F, fontSize: 9.5,
-  color: BLACK, margin: 0, valign: "top", lineSpacingMultiple: 1.12 });
-
-// ---- P4 收益和商业价值 -----------------------------------------------------
-s.addText([
-  { text: "新人 / 新 Agent 开箱即带全队经验；经验复利，吞吐与命中率随使用持续提升", options: { bold: true, color: RED } },
-], { x: 6.17, y: 4.96, w: 6.67, h: 0.26, fontFace: F, fontSize: 10.5,
+  { text: "新人 / 新 Agent 开箱即带全队经验；经验跨人跨迭代复利，吞吐与命中率随使用持续提升", options: { bold: true, color: RED } },
+], { x: 6.15, y: 4.92, w: 6.71, h: 0.26, fontFace: F, fontSize: 10,
   margin: 0, valign: "middle" });
 s.addText([
   { text: "☐ ", options: {} },
   { text: "提效：", options: { bold: true } },
-  { text: "重复探索与重复踩坑显著减少；专家经验沉淀为质量门保护的团队资产，不随人员流失", options: { breakLine: true } },
+  { text: "告别重复探索与重复踩坑；专家经验成为质量门保护的团队资产，不随人员流失", options: { breakLine: true } },
   { text: "☐ ", options: { paraSpaceBefore: 3 } },
   { text: "通用：", options: { bold: true } },
-  { text: "内存底噪 / 指令数 / 功耗 / 编译器后端等任意 Agent 优化场景即插即用的自进化记忆底座", options: { breakLine: true } },
+  { text: "底噪 / 指令数 / 功耗 / 编译器后端任意 Agent 优化场景即插即用", options: { breakLine: true } },
   { text: "☐ ", options: { paraSpaceBefore: 3 } },
-  { text: "落地验证：", options: { bold: true, color: RED } },
-  { text: "全链路已实现、离线可复现——154 项测试 · 5 道 CI 门 · 3 个 MCP 工具 · 检索 recall@5=", options: {} },
-  { text: "1.0", options: { bold: true, color: RED } },
-  { text: " · 七路分类 ", options: {} },
-  { text: "48/48", options: { bold: true, color: RED } },
-  { text: " · 优化门 ", options: {} },
-  { text: "0.67→1.00", options: { bold: true, color: RED, breakLine: true } },
+  { text: "落地：", options: { bold: true, color: RED } },
+  { text: "双仓全链路已实现——154 项测试 · 7 份 schema · 5 道 CI 门 · 3 个 MCP 工具 · hub v0.2.0 已发版", options: { breakLine: true } },
   { text: "☐ ", options: { paraSpaceBefore: 3 } },
   { text: "前沿：", options: { bold: true } },
-  { text: "直面 self-evolving agent / 长期记忆研究热点——安全积累 · 矛盾治理 · 全程审计", options: {} },
-], { x: 6.17, y: 5.30, w: 6.67, h: 1.88, fontFace: F, fontSize: 10,
+  { text: "self-evolving agent 长期记忆——安全积累 · 矛盾治理 · 全程审计", options: {} },
+], { x: 6.15, y: 5.26, w: 3.30, h: 1.92, fontFace: F, fontSize: 9.5,
   color: BLACK, margin: 0, valign: "top", lineSpacingMultiple: 1.12 });
 
-const out = process.argv[2] || "skill_hub_proposal_onepager.pptx";
+// charts
+s.addText([
+  { text: "技能优化门（9-case 套件）", options: { bold: true, breakLine: true } },
+  { text: "pass rate 0.67 → 1.00", options: { color: RED, bold: true, fontSize: 7 } },
+], { x: 9.60, y: 5.24, w: 1.66, h: 0.32, fontFace: F, fontSize: 7.5,
+  color: BLACK, margin: 0, valign: "top", lineSpacingMultiple: 1.0 });
+s.addChart(pres.ChartType.bar, [
+  { name: "优化前", labels: ["hh 系", "mm 系", "wq 系"], values: [1.0, 0.2, 1.0] },
+  { name: "优化后", labels: ["hh 系", "mm 系", "wq 系"], values: [1.0, 1.0, 1.0] },
+], { x: 9.60, y: 5.58, w: 1.62, h: 1.30, barDir: "col", barGapWidthPct: 40,
+  chartColors: ["BFBFBF", "C00000"], showValue: true,
+  dataLabelPosition: "outEnd", dataLabelFontSize: 6, dataLabelColor: MID,
+  dataLabelFormatCode: "0.0#", dataLabelFontFace: F,
+  catAxisLabelFontSize: 6.5, catAxisLabelColor: MID, catAxisLabelFontFace: F,
+  valAxisHidden: true, valAxisMaxVal: 1.2, valAxisMinVal: 0,
+  valGridLine: { style: "none" }, catGridLine: { style: "none" },
+  showLegend: true, legendPos: "b", legendFontSize: 6, legendFontFace: F,
+  showTitle: false });
+s.addText([
+  { text: "检索消融 recall@5", options: { bold: true, breakLine: true } },
+  { text: "26 查询 · 混合 ≥ 单臂", options: { color: GRAY, fontSize: 7 } },
+], { x: 11.30, y: 5.24, w: 1.66, h: 0.32, fontFace: F, fontSize: 7.5,
+  color: BLACK, margin: 0, valign: "top", lineSpacingMultiple: 1.0 });
+s.addChart(pres.ChartType.bar, [
+  { name: "recall@5", labels: ["BM25", "向量", "混合"], values: [1.0, 0.8, 1.0] },
+], { x: 11.30, y: 5.58, w: 1.58, h: 1.30, barDir: "col", barGapWidthPct: 60,
+  chartColors: ["2E9E94"], showValue: true,
+  dataLabelPosition: "outEnd", dataLabelFontSize: 6.5, dataLabelColor: MID,
+  dataLabelFormatCode: "0.0#", dataLabelFontFace: F,
+  catAxisLabelFontSize: 6.5, catAxisLabelColor: MID, catAxisLabelFontFace: F,
+  valAxisHidden: true, valAxisMaxVal: 1.2, valAxisMinVal: 0,
+  valGridLine: { style: "none" }, catGridLine: { style: "none" },
+  showLegend: false, showTitle: false });
+s.addText("* 离线可复现代理套件——控制流已打通，真机 A/B 为下一步", {
+  x: 9.60, y: 6.96, w: 3.28, h: 0.20, fontFace: F, fontSize: 6.5, color: GRAY,
+  margin: 0, valign: "middle" });
+
+const out = process.argv[2] || "skill_hub_onepager_v3.pptx";
 pres.writeFile({ fileName: out }).then(() => console.log("written:", out));
