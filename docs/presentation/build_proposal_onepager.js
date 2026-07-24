@@ -57,8 +57,8 @@ panel(5.99, 4.80, 7.03, 2.48, "收益和商业价值", 2.9);
 s.addText([
   { text: "● ", options: { bold: true } },
   { text: "Agent 驱动的内核优化（内存底噪 · 指令数 · 功耗）规模化铺开", options: { bold: true } },
-  { text: "——真瓶颈不是「单次优化」，而是", options: {} },
-  { text: "「经验能否复利积累」", options: { bold: true, color: RED, breakLine: true } },
+  { text: "——真瓶颈不是“单次优化”，而是", options: {} },
+  { text: "“经验能否复利积累”", options: { bold: true, color: RED, breakLine: true } },
   { text: "● ", options: { bold: true, paraSpaceBefore: 3 } },
   { text: "哪个招式有效、哪里有坑、热函数怎么改、哪种验证不可信——只存在个人本地；团队重复探索、专家经验带不走，", options: {} },
   { text: "优化边际效率不升反降", options: { bold: true, color: RED } },
@@ -77,14 +77,14 @@ CHIPX.forEach((x, i) => {
 box(0.48, 2.50, 5.19, 0.40, WHITE, MID, 1);
 s.addText([
   { text: "Agent 优化流水线（.opencode 硬门禁）：", options: { bold: true } },
-  { text: "research → 计划评审 → 实现 → 代码评审 → 测试 A/B → 决策", options: {} },
+  { text: "调研 → 计划评审 → 实现 → 代码评审 → 测试 A/B → 决策", options: {} },
 ], { x: 0.56, y: 2.50, w: 5.03, h: 0.40, fontFace: F, fontSize: 8,
   color: BLACK, margin: 0, valign: "middle", lineSpacingMultiple: 1.05 });
 arrow(3.075, 2.90, 0, 0.12, SOFT, 1.25);
 box(0.48, 3.03, 5.19, 0.42, "FFF8F0", ORGBD, 1);
 s.addText([
   { text: "本地经验 .opencode/memory/：", options: { bold: true } },
-  { text: "idea_ledger（L001 landed −0.8%）· targets 结构事实 · global_lessons · bad_plans", options: {} },
+  { text: "决策台账 idea_ledger（L001 实测 −0.8%）· 结构事实 · 通用教训 · 已否决方案", options: {} },
 ], { x: 0.56, y: 3.03, w: 5.03, h: 0.42, fontFace: F, fontSize: 8,
   color: BLACK, margin: 0, valign: "middle", lineSpacingMultiple: 1.05 });
 CHIPX.forEach((x, i) => {
@@ -99,13 +99,13 @@ CHIPX.forEach((x, i) => {
 s.addText("经验止步个人目录——无汇聚 · 无治理 · 随人流失，新人与新 Agent 永远从零开始", {
   x: 0.48, y: 3.99, w: 5.19, h: 0.22, fontFace: F, fontSize: 9.5, bold: true,
   color: RED, align: "center", valign: "middle", margin: 0 });
-s.addText("例：shrink_node「hoist sc->priority」bench 实测 −0.8%——这类可复用经验此前只躺在个人目录", {
+s.addText("例：shrink_node 循环不变量外提，实测指令数 −0.8%——这类可复用经验此前只躺在个人目录", {
   x: 0.48, y: 4.26, w: 5.19, h: 0.20, fontFace: F, fontSize: 7.5, color: GRAY,
   align: "center", valign: "middle", margin: 0 });
 
 // ============================== P3 现有方案不足 =============================
 s.addText([
-  { text: "业界记忆方案只解决「个体的存与取」；", options: {} },
+  { text: "业界记忆方案只解决“个体的存与取”；", options: {} },
   { text: "知识漂移 · 反馈自增强", options: { bold: true, color: RED } },
   { text: " 两大致命风险与团队级复用均无人治理：", options: {} },
 ], { x: 0.48, y: 4.94, w: 5.19, h: 0.40, fontFace: F, fontSize: 9.5,
@@ -117,24 +117,24 @@ const no = (t) => ({ text: t, options: { color: RED, align: "center", fontSize: 
 const pt = (t) => ({ text: t, options: { color: GRAY, align: "center", fontSize: 7.5, fill: { color: WHITE } } });
 const nm = (t, hl) => ({ text: t, options: { bold: true, align: "left", fontSize: 7.5, color: hl ? TEALD : BLACK, fill: { color: hl ? TEALBG : WHITE } } });
 s.addTable([
-  [th("方案"), th("存取检索"), th("冲突治理"), th("质量门"), th("版本化发布"), th("团队策展")],
-  [nm("mem0 v3 OSS"), ok("✓"), no("✗ ADD-only"), no("✗"), no("✗"), no("✗")],
-  [nm("Zep / Graphiti"), ok("✓"), pt("△ 双时态"), no("✗"), no("✗"), no("✗")],
+  [th("方案"), th("存取检索"), th("冲突治理"), th("质量门"), th("版本化发布"), th("团队评审")],
+  [nm("mem0 v3 OSS"), ok("✓"), no("✗ 只会追加"), no("✗"), no("✗"), no("✗")],
+  [nm("Zep / Graphiti"), ok("✓"), pt("△ 时效标注"), no("✗"), no("✗"), no("✗")],
   [nm("memU / EverOS"), ok("✓ 分层"), no("✗"), no("✗"), no("✗"), no("✗")],
   [nm("git 直接共享"), pt("△"), no("✗ 行级冲突"), no("✗"), pt("△"), no("✗")],
-  [nm("Skill Hub 本方案", 1), ok("✓ 混合检索", 1), ok("✓ 七路+双时态", 1), ok("✓ 3门+eval", 1), ok("✓ semver", 1), ok("✓ 双评审", 1)],
+  [nm("Skill Hub 本方案", 1), ok("✓ 混合检索", 1), ok("✓ 七类判定", 1), ok("✓ 评测把关", 1), ok("✓ 版本锁定", 1), ok("✓ 双评审", 1)],
 ], { x: 0.44, y: 5.38, w: 5.27, colW: [1.18, 0.82, 1.00, 0.78, 0.87, 0.62],
   rowH: 0.235, border: { pt: 0.75, color: "A6A6A6" }, fontFace: F,
   valign: "middle", margin: 0.03 });
 s.addText([
-  { text: "∴ 团队级治理层（门控 · 策展 · 版本化）为本方案独有——差异化护城河", options: { bold: true, color: RED } },
+  { text: "团队级治理层（门控 · 审核 · 版本化）为本方案独有——差异化护城河", options: { bold: true, color: RED } },
 ], { x: 0.48, y: 6.94, w: 5.19, h: 0.24, fontFace: F, fontSize: 9.5,
   margin: 0, valign: "middle" });
 
 // ============================== P2 创新方案 ================================
 s.addText([
   { text: "核心思想：", options: { bold: true, color: RED } },
-  { text: "经验如「私有 npm 包」——消费→蒸馏→门控→发布→再消费，全自动闭环、越用越准", options: { bold: true, color: RED } },
+  { text: "经验像内部软件包一样管理——消费→提炼→门控→发布→再消费，全自动闭环、越用越准", options: { bold: true, color: RED } },
 ], { x: 6.15, y: 1.00, w: 6.71, h: 0.24, fontFace: F, fontSize: 10,
   margin: 0, valign: "middle" });
 
@@ -143,14 +143,14 @@ const DX = 6.15, DW = 4.55;
 box(DX, 1.30, DW, 1.36, "F4FAF9", TEALBD, 1.25);
 s.addText([
   { text: "hm-skill-hub 团队中央经验仓", options: { bold: true } },
-  { text: "（semver 发布 · lockfile 钉版 · 可回滚 · 可审计）", options: { fontSize: 7 } },
+  { text: "（版本化发布 · 各项目锁定消费 · 可回滚 · 可审计）", options: { fontSize: 7 } },
 ], { x: DX + 0.12, y: 1.34, w: DW - 0.24, h: 0.18, fontFace: F, fontSize: 8,
   color: BLACK, margin: 0, valign: "middle" });
 // row A: staging <- CI <- curation (flow right-to-left feeds the stores)
 const RA = [
-  { t: "⑥ 策展入库", d: "七路分类 · 双人评审" },
-  { t: "⑤ CI 五道门", d: "lint·脱敏·去重·eval·测试" },
-  { t: "④ staging 收件箱", d: "成员蒸馏包投稿 PR" },
+  { t: "⑥ 审核入库", d: "七类关系判定 · 双人评审" },
+  { t: "⑤ CI 五道门", d: "格式·脱敏·去重·评测·测试" },
+  { t: "④ 投稿收件箱", d: "成员提炼包 PR 待审" },
 ];
 RA.forEach((b, i) => {
   const x = DX + 0.12 + i * (1.36 + 0.115);
@@ -168,14 +168,14 @@ box(DX + 0.12, 1.96, 2.12, 0.60, TEALBG2, TEALBD, 1);
 s.addText([
   { text: "knowledge/ 知识库 — 引擎A 治理合并", options: { bold: true, breakLine: true } },
   { text: "global · subsystems · targets（F/H/A/V/B/L）", options: { fontSize: 6, breakLine: true } },
-  { text: "七路关系分类 · 双时态墓碑 · 永不物删", options: { fontSize: 6.5 } },
+  { text: "七类关系判定 · 旧结论留痕不删除", options: { fontSize: 6.5 } },
 ], { x: DX + 0.18, y: 1.96, w: 2.00, h: 0.60, fontFace: F, fontSize: 7,
   color: BLACK, margin: 0, valign: "middle", lineSpacingMultiple: 1.05 });
 box(DX + 2.31, 1.96, 2.12, 0.60, ORGBG, ORGBD, 1);
 s.addText([
   { text: "skills/ 技能库 — 引擎B 竞争进化", options: { bold: true, breakLine: true } },
   { text: "core · technique · domain + best_skill.md", options: { fontSize: 6, breakLine: true } },
-  { text: "SkillOpt 有界编辑 · eval 门 · GEPA/Pareto", options: { fontSize: 6.5 } },
+  { text: "评测门把关 · GEPA 进化 · 多候选保留", options: { fontSize: 6.5 } },
 ], { x: DX + 2.37, y: 1.96, w: 2.00, h: 0.60, fontFace: F, fontSize: 7,
   color: BLACK, margin: 0, valign: "middle", lineSpacingMultiple: 1.05 });
 
@@ -183,17 +183,17 @@ s.addText([
 arrow(6.50, 2.66, 0, 0.26, TEALBD, 2);
 s.addText([
   { text: "⑦ 发布回灌：", options: { bold: true, color: RED } },
-  { text: "nightly 七步 · GEPA 寻优 · semver · broadcast 钉版", options: { color: BLACK } },
+  { text: "每晚自动归并优化（GEPA）· 版本化发布 · 自动通知升级", options: { color: BLACK } },
 ], { x: 6.68, y: 2.66, w: 3.92, h: 0.24, fontFace: F, fontSize: 7.5,
   margin: 0, valign: "middle" });
 // member lane: 3 stacked stages
 const ML = [
   [{ text: "① 消费 · 自动挂载：", options: { bold: true } },
-   { text: "skill-memory.lock 钉版 + resolve 注入「Hub 上下文」", options: {} }],
+   { text: "锁定版本消费 · 按当前函数自动注入团队经验", options: {} }],
   [{ text: "② Agent 优化流水线：", options: { bold: true } },
-   { text: "research → 计划评审 → 实现 → 代码评审 → 测试 → 决策", options: {} }],
-  [{ text: "③ 收口蒸馏 sediment：", options: { bold: true } },
-   { text: "规则 + LLM 双段抽取 → Tier-1 候选 → ④ 投稿 PR", options: {} }],
+   { text: "调研 → 计划评审 → 实现 → 代码评审 → 测试 → 决策", options: {} }],
+  [{ text: "③ 收口自动提炼：", options: { bold: true } },
+   { text: "规则 + 大模型双重提取 → 候选记录 → ④ 投稿 PR", options: {} }],
 ];
 ML.forEach((runs, i) => {
   const y = 2.92 + i * 0.44;
@@ -204,7 +204,7 @@ ML.forEach((runs, i) => {
 });
 // PR submission arrow back up into staging (right edge)
 arrow(10.66, 3.96, 0, -1.30, ORGBD, 2);
-s.addText("MCP：resolve / sediment / status（7338）· hub 不可达静默降级、不阻塞", {
+s.addText("MCP 接口 3 个工具接入现有流水线 · 经验仓故障自动跳过、不阻塞主流程", {
   x: DX, y: 4.36, w: DW, h: 0.18, fontFace: F, fontSize: 7, color: GRAY,
   margin: 0, valign: "middle" });
 
@@ -212,15 +212,15 @@ s.addText("MCP：resolve / sediment / status（7338）· hub 不可达静默降�
 const IX = 10.88, IW = 1.98;
 const INNO = [
   { h: "创新点1：双资产双引擎", b: [
-    { text: "知识＝七路关系分类 + 双时态墓碑，永不物删；技能＝SkillOpt + Pareto，eval 门内进化——", options: {} },
+    { text: "知识只增不删：七类关系判定，矛盾留痕可追溯；技能竞争进化：评测把关、多候选保留——", options: {} },
     { text: "业界记忆方案缺失的治理层", options: { bold: true } }] },
-  { h: "创新点2：eval门×GEPA 进化", b: [
-    { text: "技能改动须留出套件", options: {} },
-    { text: "「严格变好且零回归」", options: { bold: true } },
-    { text: "才入库，根治「自增强跑偏」；引入 GEPA 反思进化 + Pareto 前沿自动寻优技能文本", options: {} }] },
+  { h: "创新点2：评测门×GEPA 进化", b: [
+    { text: "技能改动必须在固定评测集上", options: {} },
+    { text: "“严格变好且零退化”", options: { bold: true } },
+    { text: "才能入库，根治“自增强跑偏”；引入 GEPA 自动反思改写、多候选择优", options: {} }] },
   { h: "创新点3：零侵入 · 好上手", b: [
     { text: "研发习惯零改动：", options: { bold: true } },
-    { text: "上下文自动挂载、收口自动蒸馏；MCP 即插即用、故障静默降级；蒸馏到发布全自动闭环，人只做晋升审批", options: {} }] },
+    { text: "经验自动挂载、收口自动提炼；MCP 即插即用、故障自动跳过；提炼到发布全自动，人只做晋升审批", options: {} }] },
 ];
 let iy = 1.32;
 INNO.forEach((blk) => {
@@ -250,7 +250,7 @@ s.addText([
   { text: "底噪 / 指令数 / 功耗 / 编译器后端任意 Agent 优化场景即插即用", options: { breakLine: true } },
   { text: "☐ ", options: { paraSpaceBefore: 3 } },
   { text: "前沿：", options: { bold: true } },
-  { text: "self-evolving agent 长期记忆——安全积累 · 矛盾治理 · 全程审计", options: {} },
+  { text: "自进化 Agent（self-evolving）长期记忆：安全积累 · 矛盾治理 · 可审计", options: {} },
 ], { x: 6.15, y: 5.26, w: 3.30, h: 1.92, fontFace: F, fontSize: 9.5,
   color: BLACK, margin: 0, valign: "top", lineSpacingMultiple: 1.12 });
 
