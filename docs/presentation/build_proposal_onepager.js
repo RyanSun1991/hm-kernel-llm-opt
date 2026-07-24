@@ -39,6 +39,12 @@ function dline(x, y, w, h) {
   s.addShape(pres.ShapeType.line, { x, y, w, h,
     line: { color: SOFT, width: 1, dashType: "dash" } });
 }
+function ibadge(x, y, n) {
+  s.addShape(pres.ShapeType.ellipse, { x, y, w: 0.18, h: 0.18,
+    fill: { color: RED }, line: { color: WHITE, width: 1 } });
+  s.addText(n, { x, y, w: 0.18, h: 0.18, fontFace: F, fontSize: 8.5,
+    bold: true, color: WHITE, align: "center", valign: "middle", margin: 0 });
+}
 
 // ---- title ----------------------------------------------------------------
 s.addText([
@@ -164,20 +170,22 @@ RA.forEach((b, i) => {
   if (i < 2) arrow(x + 1.36 + 0.115, 1.73, -0.115, 0, MID, 1.25);
 });
 // row B: the two stores (dual engines)
-box(DX + 0.12, 1.96, 2.12, 0.60, TEALBG2, TEALBD, 1);
+box(DX + 0.12, 1.96, 2.02, 0.60, TEALBG2, TEALBD, 1);
 s.addText([
   { text: "knowledge/ 知识库 — 引擎A 治理合并", options: { bold: true, breakLine: true } },
   { text: "global · subsystems · targets（F/H/A/V/B/L）", options: { fontSize: 6, breakLine: true } },
   { text: "七类关系判定 · 旧结论留痕不删除", options: { fontSize: 6.5 } },
-], { x: DX + 0.18, y: 1.96, w: 2.00, h: 0.60, fontFace: F, fontSize: 7,
+], { x: DX + 0.18, y: 1.96, w: 1.90, h: 0.60, fontFace: F, fontSize: 7,
   color: BLACK, margin: 0, valign: "middle", lineSpacingMultiple: 1.05 });
-box(DX + 2.31, 1.96, 2.12, 0.60, ORGBG, ORGBD, 1);
+box(DX + 2.41, 1.96, 2.02, 0.60, ORGBG, ORGBD, 1);
 s.addText([
   { text: "skills/ 技能库 — 引擎B 竞争进化", options: { bold: true, breakLine: true } },
   { text: "core · technique · domain + best_skill.md", options: { fontSize: 6, breakLine: true } },
-  { text: "评测门把关 · GEPA 进化 · 多候选保留", options: { fontSize: 6.5 } },
-], { x: DX + 2.37, y: 1.96, w: 2.00, h: 0.60, fontFace: F, fontSize: 7,
+  { text: "评测把关 · GEPA 进化 · 多候选保留", options: { fontSize: 6.5 } },
+], { x: DX + 2.47, y: 1.96, w: 1.90, h: 0.60, fontFace: F, fontSize: 7,
   color: BLACK, margin: 0, valign: "middle", lineSpacingMultiple: 1.05 });
+ibadge(8.335, 2.17, "1");
+ibadge(10.37, 2.34, "2");
 
 // publish arrow (hub -> member lane) + labels
 arrow(6.50, 2.66, 0, 0.26, TEALBD, 2);
@@ -202,6 +210,7 @@ ML.forEach((runs, i) => {
     fontSize: 7.5, color: BLACK, margin: 0, valign: "middle" });
   if (i < 2) arrow(8.36, y + 0.32, 0, 0.12, SOFT, 1.25);
 });
+ibadge(10.28, 2.99, "3");
 // PR submission arrow back up into staging (right edge)
 arrow(10.66, 3.96, 0, -1.30, ORGBD, 2);
 s.addText("MCP 接口 3 个工具接入现有流水线 · 经验仓故障自动跳过、不阻塞主流程", {
@@ -214,18 +223,19 @@ const INNO = [
   { h: "创新点1：双资产双引擎", b: [
     { text: "知识只增不删：七类关系判定，矛盾留痕可追溯；技能竞争进化：评测把关、多候选保留——", options: {} },
     { text: "业界记忆方案缺失的治理层", options: { bold: true } }] },
-  { h: "创新点2：评测门×GEPA 进化", b: [
+  { h: "创新点2：评测门×GEPA", b: [
     { text: "技能改动必须在固定评测集上", options: {} },
     { text: "“严格变好且零退化”", options: { bold: true } },
     { text: "才能入库，根治“自增强跑偏”；引入 GEPA 自动反思改写、多候选择优", options: {} }] },
-  { h: "创新点3：零侵入 · 好上手", b: [
+  { h: "创新点3：零侵入·好上手", b: [
     { text: "研发习惯零改动：", options: { bold: true } },
     { text: "经验自动挂载、收口自动提炼；MCP 即插即用、故障自动跳过；提炼到发布全自动，人只做晋升审批", options: {} }] },
 ];
 let iy = 1.32;
-INNO.forEach((blk) => {
-  s.addText(blk.h, { x: IX, y: iy, w: IW, h: 0.20, fontFace: F, fontSize: 8.5,
-    bold: true, color: RED, margin: 0, valign: "middle" });
+INNO.forEach((blk, i) => {
+  ibadge(IX, iy + 0.01, String(i + 1));
+  s.addText(blk.h, { x: IX + 0.24, y: iy, w: IW - 0.24, h: 0.20, fontFace: F,
+    fontSize: 8.5, bold: true, color: RED, margin: 0, valign: "middle" });
   s.addText(blk.b, { x: IX, y: iy + 0.21, w: IW, h: 0.78, fontFace: F,
     fontSize: 7.5, color: BLACK, margin: 0, valign: "top",
     lineSpacingMultiple: 1.08 });
@@ -239,20 +249,17 @@ s.addText([
   margin: 0, valign: "middle" });
 s.addText([
   { text: "☐ ", options: {} },
-  { text: "提效：", options: { bold: true } },
-  { text: "告别重复探索与重复踩坑；专家经验成为质量门保护的团队资产，不随人员流失", options: { breakLine: true } },
-  { text: "☐ ", options: { paraSpaceBefore: 3 } },
-  { text: "易用：", options: { bold: true } },
-  { text: "研发习惯零改动、MCP 即插即用；新人与新 Agent 冷启动预期", options: {} },
+  { text: "提效易用：", options: { bold: true } },
+  { text: "研发习惯零改动、即插即用；告别重复探索与重复踩坑，专家经验不随人员流失，新人与新 Agent 冷启动预期", options: {} },
   { text: "从周级降到天级", options: { bold: true, color: RED, breakLine: true } },
-  { text: "☐ ", options: { paraSpaceBefore: 3 } },
+  { text: "☐ ", options: { paraSpaceBefore: 4 } },
   { text: "通用：", options: { bold: true } },
-  { text: "底噪 / 指令数 / 功耗 / 编译器后端任意 Agent 优化场景即插即用", options: { breakLine: true } },
-  { text: "☐ ", options: { paraSpaceBefore: 3 } },
-  { text: "前沿：", options: { bold: true } },
-  { text: "自进化 Agent（self-evolving）长期记忆：安全积累 · 矛盾治理 · 可审计", options: {} },
+  { text: "不绑定内核——底噪 / 指令数 / 功耗 / 编译器后端等任意 Agent 优化场景直接复用", options: { breakLine: true } },
+  { text: "☐ ", options: { paraSpaceBefore: 4 } },
+  { text: "研究价值：", options: { bold: true } },
+  { text: "自进化 Agent（self-evolving）长期记忆的工程化实践：安全积累 · 矛盾治理 · 可审计", options: {} },
 ], { x: 6.15, y: 5.26, w: 3.30, h: 1.92, fontFace: F, fontSize: 9.5,
-  color: BLACK, margin: 0, valign: "top", lineSpacingMultiple: 1.12 });
+  color: BLACK, margin: 0, valign: "top", lineSpacingMultiple: 1.14 });
 
 // charts: expected-benefit visuals (labelled 示意/目标, not measured results)
 s.addText([
