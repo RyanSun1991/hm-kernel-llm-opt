@@ -175,7 +175,7 @@ box(DX + 2.31, 1.96, 2.12, 0.60, ORGBG, ORGBD, 1);
 s.addText([
   { text: "skills/ 技能库 — 引擎B 竞争进化", options: { bold: true, breakLine: true } },
   { text: "core · technique · domain + best_skill.md", options: { fontSize: 6, breakLine: true } },
-  { text: "SkillOpt 有界编辑 · eval 门 · Pareto 前沿", options: { fontSize: 6.5 } },
+  { text: "SkillOpt 有界编辑 · eval 门 · GEPA/Pareto", options: { fontSize: 6.5 } },
 ], { x: DX + 2.37, y: 1.96, w: 2.00, h: 0.60, fontFace: F, fontSize: 7,
   color: BLACK, margin: 0, valign: "middle", lineSpacingMultiple: 1.05 });
 
@@ -183,8 +183,8 @@ s.addText([
 arrow(6.50, 2.66, 0, 0.26, TEALBD, 2);
 s.addText([
   { text: "⑦ 发布回灌：", options: { bold: true, color: RED } },
-  { text: "nightly 七步 · semver · broadcast 钉版", options: { color: BLACK } },
-], { x: 6.68, y: 2.66, w: 3.70, h: 0.24, fontFace: F, fontSize: 7.5,
+  { text: "nightly 七步 · GEPA 寻优 · semver · broadcast 钉版", options: { color: BLACK } },
+], { x: 6.68, y: 2.66, w: 3.92, h: 0.24, fontFace: F, fontSize: 7.5,
   margin: 0, valign: "middle" });
 // member lane: 3 stacked stages
 const ML = [
@@ -214,14 +214,13 @@ const INNO = [
   { h: "创新点1：双资产双引擎", b: [
     { text: "知识＝七路关系分类 + 双时态墓碑，永不物删；技能＝SkillOpt + Pareto，eval 门内进化——", options: {} },
     { text: "业界记忆方案缺失的治理层", options: { bold: true } }] },
-  { h: "创新点2：eval-gate 反喂安全", b: [
+  { h: "创新点2：eval门×GEPA 进化", b: [
     { text: "技能改动须留出套件", options: {} },
     { text: "「严格变好且零回归」", options: { bold: true } },
-    { text: "才入库，根治「自增强跑偏」；≥3 次连续改进才解锁自动合并", options: {} }] },
-  { h: "创新点3：全自动闭环工程化", b: [
-    { text: "蒸馏→门控→发布→回灌全自动，人只握晋升审批权；", options: {} },
-    { text: "≥2 独立实例自动毕业为技能", options: { bold: true } },
-    { text: "；MCP 静默降级不阻塞", options: {} }] },
+    { text: "才入库，根治「自增强跑偏」；引入 GEPA 反思进化 + Pareto 前沿自动寻优技能文本", options: {} }] },
+  { h: "创新点3：零侵入 · 好上手", b: [
+    { text: "研发习惯零改动：", options: { bold: true } },
+    { text: "上下文自动挂载、收口自动蒸馏；MCP 即插即用、故障静默降级；蒸馏到发布全自动闭环，人只做晋升审批", options: {} }] },
 ];
 let iy = 1.32;
 INNO.forEach((blk) => {
@@ -243,53 +242,54 @@ s.addText([
   { text: "提效：", options: { bold: true } },
   { text: "告别重复探索与重复踩坑；专家经验成为质量门保护的团队资产，不随人员流失", options: { breakLine: true } },
   { text: "☐ ", options: { paraSpaceBefore: 3 } },
+  { text: "易用：", options: { bold: true } },
+  { text: "研发习惯零改动、MCP 即插即用；新人与新 Agent 冷启动预期", options: {} },
+  { text: "从周级降到天级", options: { bold: true, color: RED, breakLine: true } },
+  { text: "☐ ", options: { paraSpaceBefore: 3 } },
   { text: "通用：", options: { bold: true } },
   { text: "底噪 / 指令数 / 功耗 / 编译器后端任意 Agent 优化场景即插即用", options: { breakLine: true } },
-  { text: "☐ ", options: { paraSpaceBefore: 3 } },
-  { text: "落地：", options: { bold: true, color: RED } },
-  { text: "双仓全链路已实现——154 项测试 · 7 份 schema · 5 道 CI 门 · 3 个 MCP 工具 · hub v0.2.0 已发版", options: { breakLine: true } },
   { text: "☐ ", options: { paraSpaceBefore: 3 } },
   { text: "前沿：", options: { bold: true } },
   { text: "self-evolving agent 长期记忆——安全积累 · 矛盾治理 · 全程审计", options: {} },
 ], { x: 6.15, y: 5.26, w: 3.30, h: 1.92, fontFace: F, fontSize: 9.5,
   color: BLACK, margin: 0, valign: "top", lineSpacingMultiple: 1.12 });
 
-// charts
+// charts: expected-benefit visuals (labelled 示意/目标, not measured results)
 s.addText([
-  { text: "技能优化门（9-case 套件）", options: { bold: true, breakLine: true } },
-  { text: "pass rate 0.67 → 1.00", options: { color: RED, bold: true, fontSize: 7 } },
-], { x: 9.60, y: 5.24, w: 1.66, h: 0.32, fontFace: F, fontSize: 7.5,
+  { text: "经验资产复利（示意）", options: { bold: true, breakLine: true } },
+  { text: "有 Hub 复利 · 无 Hub 随人清零", options: { color: GRAY, fontSize: 7 } },
+], { x: 9.58, y: 5.24, w: 1.84, h: 0.32, fontFace: F, fontSize: 7.5,
   color: BLACK, margin: 0, valign: "top", lineSpacingMultiple: 1.0 });
-s.addChart(pres.ChartType.bar, [
-  { name: "优化前", labels: ["hh 系", "mm 系", "wq 系"], values: [1.0, 0.2, 1.0] },
-  { name: "优化后", labels: ["hh 系", "mm 系", "wq 系"], values: [1.0, 1.0, 1.0] },
-], { x: 9.60, y: 5.58, w: 1.62, h: 1.30, barDir: "col", barGapWidthPct: 40,
-  chartColors: ["BFBFBF", "C00000"], showValue: true,
-  dataLabelPosition: "outEnd", dataLabelFontSize: 6, dataLabelColor: MID,
-  dataLabelFormatCode: "0.0#", dataLabelFontFace: F,
-  catAxisLabelFontSize: 6.5, catAxisLabelColor: MID, catAxisLabelFontFace: F,
-  valAxisHidden: true, valAxisMaxVal: 1.2, valAxisMinVal: 0,
+s.addChart(pres.ChartType.line, [
+  { name: "无 Hub", labels: ["1", "2", "3", "4", "5", "6"], values: [10, 12, 9, 13, 10, 12] },
+  { name: "有 Hub", labels: ["1", "2", "3", "4", "5", "6"], values: [10, 22, 36, 52, 70, 90] },
+], { x: 9.56, y: 5.58, w: 1.84, h: 1.30, lineSize: 1.75, lineSmooth: true,
+  lineDataSymbol: "none", chartColors: ["BFBFBF", "C00000"],
+  catAxisLabelFontSize: 6, catAxisLabelColor: MID, catAxisLabelFontFace: F,
+  valAxisHidden: true, valAxisMinVal: 0,
   valGridLine: { style: "none" }, catGridLine: { style: "none" },
   showLegend: true, legendPos: "b", legendFontSize: 6, legendFontFace: F,
-  showTitle: false });
+  showValue: false, showTitle: false });
 s.addText([
-  { text: "检索消融 recall@5", options: { bold: true, breakLine: true } },
-  { text: "26 查询 · 混合 ≥ 单臂", options: { color: GRAY, fontSize: 7 } },
-], { x: 11.30, y: 5.24, w: 1.66, h: 0.32, fontFace: F, fontSize: 7.5,
+  { text: "预期收益目标", options: { bold: true, breakLine: true } },
+  { text: "相对现状改善幅度（%）", options: { color: GRAY, fontSize: 7 } },
+], { x: 11.48, y: 5.24, w: 1.40, h: 0.32, fontFace: F, fontSize: 7.5,
   color: BLACK, margin: 0, valign: "top", lineSpacingMultiple: 1.0 });
 s.addChart(pres.ChartType.bar, [
-  { name: "recall@5", labels: ["BM25", "向量", "混合"], values: [1.0, 0.8, 1.0] },
-], { x: 11.30, y: 5.58, w: 1.58, h: 1.30, barDir: "col", barGapWidthPct: 60,
+  { name: "改善幅度", labels: ["重复探索", "冷启动", "命中率"], values: [50, 70, 30] },
+], { x: 11.46, y: 5.58, w: 1.42, h: 1.30, barDir: "col", barGapWidthPct: 60,
   chartColors: ["2E9E94"], showValue: true,
   dataLabelPosition: "outEnd", dataLabelFontSize: 6.5, dataLabelColor: MID,
-  dataLabelFormatCode: "0.0#", dataLabelFontFace: F,
-  catAxisLabelFontSize: 6.5, catAxisLabelColor: MID, catAxisLabelFontFace: F,
-  valAxisHidden: true, valAxisMaxVal: 1.2, valAxisMinVal: 0,
+  dataLabelFormatCode: '0"%"', dataLabelFontFace: F,
+  catAxisLabelFontSize: 6, catAxisLabelColor: MID, catAxisLabelFontFace: F,
+  valAxisHidden: true, valAxisMaxVal: 85, valAxisMinVal: 0,
   valGridLine: { style: "none" }, catGridLine: { style: "none" },
   showLegend: false, showTitle: false });
-s.addText("* 离线可复现代理套件——控制流已打通，真机 A/B 为下一步", {
-  x: 9.60, y: 6.96, w: 3.28, h: 0.20, fontFace: F, fontSize: 6.5, color: GRAY,
-  margin: 0, valign: "middle" });
+s.addText([
+  { text: "进展：双仓全链路已打通（154 项测试 · 5 道 CI 门 · 离线基准全绿）", options: { breakLine: true } },
+  { text: "GEPA 反思进化集成中 · 真机收益数据随试点回填", options: {} },
+], { x: 9.56, y: 6.90, w: 3.32, h: 0.34, fontFace: F, fontSize: 6.5, color: GRAY,
+  margin: 0, valign: "top", lineSpacingMultiple: 1.1 });
 
 const out = process.argv[2] || "skill_hub_onepager_v3.pptx";
 pres.writeFile({ fileName: out }).then(() => console.log("written:", out));
