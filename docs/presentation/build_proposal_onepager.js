@@ -184,7 +184,7 @@ s.addText([
   { text: "评测把关 · GEPA 进化 · 多候选保留", options: { fontSize: 6.5 } },
 ], { x: DX + 2.47, y: 1.96, w: 1.90, h: 0.60, fontFace: F, fontSize: 7,
   color: BLACK, margin: 0, valign: "middle", lineSpacingMultiple: 1.05 });
-ibadge(8.335, 2.17, "1");
+ibadge(8.06, 2.34, "1");
 ibadge(10.37, 2.34, "2");
 
 // publish arrow (hub -> member lane) + labels
@@ -197,7 +197,7 @@ s.addText([
 // member lane: 3 stacked stages
 const ML = [
   [{ text: "① 消费 · 自动挂载：", options: { bold: true } },
-   { text: "锁定版本消费 · 按当前函数自动注入团队经验", options: {} }],
+   { text: "锁定版本消费 · 按函数场景智能推荐注入团队经验", options: {} }],
   [{ text: "② Agent 优化流水线：", options: { bold: true } },
    { text: "调研 → 计划评审 → 实现 → 代码评审 → 测试 → 决策", options: {} }],
   [{ text: "③ 收口自动提炼：", options: { bold: true } },
@@ -220,16 +220,17 @@ s.addText("MCP 接口 3 个工具接入现有流水线 · 经验仓故障自动�
 // -- right: innovation column (KSPECT-style red-headed blocks) --
 const IX = 10.88, IW = 1.98;
 const INNO = [
-  { h: "创新点1：双资产双引擎", b: [
-    { text: "知识只增不删：七类关系判定，矛盾留痕可追溯；技能竞争进化：评测把关、多候选保留——", options: {} },
-    { text: "业界记忆方案缺失的治理层", options: { bold: true } }] },
-  { h: "创新点2：评测门×GEPA", b: [
-    { text: "技能改动必须在固定评测集上", options: {} },
+  { h: "创新点1：知识可信自演化", b: [
+    { text: "七类语义关系自动判定", options: { bold: true } },
+    { text: "（重复/矛盾/过时/条件/泛化/漂移/口径），按证据强度消解矛盾；时效建模失效不删除、可溯源；≥2 独立实例才能归纳为规律，", options: {} },
+    { text: "防伪泛化", options: { bold: true } }] },
+  { h: "创新点2：技能自进化升级", b: [
+    { text: "基于 GEPA 实现自动反思改写、多候选择优，达到技能自验证与自进化；", options: {} },
     { text: "“严格变好且零退化”", options: { bold: true } },
-    { text: "才能入库，根治“自增强跑偏”；引入 GEPA 自动反思改写、多候选择优", options: {} }] },
-  { h: "创新点3：零侵入·好上手", b: [
+    { text: "才能入库，根治“自增强跑偏”", options: {} }] },
+  { h: "创新点3：场景化智能消费", b: [
     { text: "研发习惯零改动：", options: { bold: true } },
-    { text: "经验自动挂载、收口自动提炼；MCP 即插即用、故障自动跳过；提炼到发布全自动，人只做晋升审批", options: {} }] },
+    { text: "经验自动挂载、Knowledge/Skill 场景化与个性化智能推荐；收口自动提炼；MCP 即插即用，提炼到发布全自动", options: {} }] },
 ];
 let iy = 1.32;
 INNO.forEach((blk, i) => {
