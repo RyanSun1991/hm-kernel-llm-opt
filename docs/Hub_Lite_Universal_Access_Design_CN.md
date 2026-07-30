@@ -1,5 +1,10 @@
 # Hub-Lite：自由会话接入 Memory 与 Skill Hub 的通用接口设计（草案）
 
+> **状态：已归并** —— 本草案的问题分析与接口思路已并入
+> `docs/Team_Experience_Memory_Architecture_CN.md`（v2.0，最终架构），
+> 以该文档为准。本文仅作为演进过程留档；其中 MCP 工具命名（hub_*）
+> 已被 v2.0 的 memory_* 命名取代（ADR-020），捕获通道定位见 ADR-022。
+
 > 场景：整个工程开放给全团队后，多数成员不跑优化 pipeline、不用专用 Agent，只是在
 > OpenCode / Claude Code 里和 LLM 自由交流解决问题。这些会话里的经验目前无法沉淀，
 > 也享受不到团队经验的加持。本设计给出一个"一段配置即接入"的通用形态：读（前向增强）、
