@@ -25,6 +25,12 @@ started in Docker as `hmopt-skillhub-mcp`):
 | `skillhub_sediment([opencode_dir], [contributor], [bundle])`   | **WRITE** — distill `.opencode/memory` → hub candidates + `_bundle.jsonl` |
 | `skillhub_status([opencode_dir])`                              | pinned hub version + reachability |
 
+The same server also exposes the **Team Memory** journal tools
+(`memory_log` / `memory_recall` / `memory_get` / `memory_feedback` /
+`memory_forget` / `memory_status`, plus `skillhub_sediment(include_journal=true)`)
+for free-form-conversation capture outside the pipeline — those are owned by
+`.opencode/skills/team-memory/SKILL.md`, not this file.
+
 The **MCP server** (not the agent) does all `.opencode/` file I/O — it reads
 `<opencode>/memory`, writes `<opencode>/state/retrieval.jsonl`, and writes the
 sediment bundle, via the volume-mounted kernel repo. So the filesystem sandbox on

@@ -1,8 +1,9 @@
 """HTTP MCP server for the team Skill Hub bridge (streamable-http).
 
 Mirrors git_mcp_server.py. Exposes skillhub_resolve / skillhub_sediment /
-skillhub_status so OpenCode agents in a kernel repo reach the hub read/write
-path over MCP instead of the `hmopt` CLI.
+skillhub_status plus the six Team Memory memory_* tools, so pipeline agents and
+free-form coding sessions reach the hub/journal read-write paths over MCP
+instead of the `hmopt` CLI.
 """
 
 from __future__ import annotations
