@@ -142,15 +142,31 @@ def _fname_slug(rec: dict) -> str:
     return s[:40].rstrip("-") or "record"
 
 
+def _safe_path_component(value: object) -> str | None:
+    """Reject candidate-controlled path traversal before materialization."""
+    text = str(value or "")
+    if (
+        not text
+        or text in {".", ".."}
+        or "/" in text
+        or "\\" in text
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", text)
+    ):
+        return None
+    return text
+
+
 def _dest_path(schema: str, rec: dict, new_id: str) -> PurePosixPath | None:
     """Reverse of path_scope.derive_path_scope: scope -> knowledge-relative path."""
     fn = f"{new_id}-{_fname_slug(rec)}.md"
     if schema == "memory_item":
         scope = rec.get("scope") or {}
         if scope.get("level") == "subsystem" and scope.get("subsystem"):
-            return PurePosixPath("subsystems") / scope["subsystem"] / fn
+            subsystem = _safe_path_component(scope["subsystem"])
+            return PurePosixPath("subsystems") / subsystem / fn if subsystem else None
         if scope.get("target_slug"):
-            return PurePosixPath("targets") / scope["target_slug"] / "facts" / fn
+            slug = _safe_path_component(scope["target_slug"])
+            return PurePosixPath("targets") / slug / "facts" / fn if slug else None
         return None
     if schema == "global_lesson":
         cat = _GLOBAL_LESSON_DIR.get(rec.get("kind"))
@@ -159,9 +175,10 @@ def _dest_path(schema: str, rec: dict, new_id: str) -> PurePosixPath | None:
         subs = (rec.get("applies_to") or {}).get("subsystems")
         if not subs or subs == ["*"]:
             return PurePosixPath("global") / "bad_plans" / fn
-        return PurePosixPath("subsystems") / subs[0] / "bad_plans" / fn
+        subsystem = _safe_path_component(subs[0])
+        return PurePosixPath("subsystems") / subsystem / "bad_plans" / fn if subsystem else None
     if schema == "idea":
-        slug = rec.get("target_slug")
+        slug = _safe_path_component(rec.get("target_slug"))
         return PurePosixPath("targets") / slug / "idea_ledger" / fn if slug else None
     return None
 
@@ -204,7 +221,11 @@ def apply_additions(report: CurationReport, candidates: list[dict], hub: list,
         used.add(new_id)
         rec["id"] = new_id
         if write:
-            dest = knowledge_dir / Path(str(rel))
+            root = knowledge_dir.resolve()
+            dest = (root / Path(str(rel))).resolve()
+            if not dest.is_relative_to(root):
+                out.append((d.incoming_id, None, None, "SKIP (unsafe path escaped knowledge root)"))
+                continue
             dest.parent.mkdir(parents=True, exist_ok=True)
             dest.write_text(_to_markdown(rec), encoding="utf-8")
         out.append((d.incoming_id, new_id, str(rel), "WROTE" if write else "PLAN"))
