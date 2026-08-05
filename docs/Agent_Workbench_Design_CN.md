@@ -178,6 +178,35 @@ skill-memory.lock;**修订** CLAUDE.md(薄宪法)、docs/harness_engineer_system
 命中才载全文)· **活跃非核心技能 ≤4**、触发推荐 **≤3 且说明理由** · **composition
 receipt**(§8.4)反馈闭环修触发词。
 
+#### 5.4 注册表工作机制与三方关联(关键流程)
+
+**`_registry.yaml` = 技能系统的唯一索引**:每技能一条元数据(~80 token),全表常驻
+成本 ~2k token;技能**全文**只在被选中后读取。整个机制零运行时 —— 全部由 agent-core
+契约驱动的"读文件"实现,发生在三个时刻:
+
+1. **开工时**:角色 `Read _registry.yaml` 一次 → 知道存在哪些技能,不加载任何全文;
+2. **拿到 brief 时**:任务描述/目标路径 与 `applies_when`(正)/`not_for`(负)匹配
+   → suggest ≤3 个并说明命中理由 → 用户确认 → **此刻才** Read 对应 SKILL.md 全文;
+   `roles:` 过滤角色亲和(reviewer 不会被建议 flash-device),`risk:` 提示审批等级;
+3. **治理时**:lint 脚本校验注册表 ↔ 技能目录一致(缺条目/缺目录/超 500 行未拆均报错)。
+
+**绑定方向(解耦的落点)**:是**技能声明 `roles:`(我适配哪些角色)**,角色文件永不
+点名任何具体技能 —— 加新技能 = 新目录 + 注册表一条,**角色文件零改动**。角色↔技能的
+绑定关系只存在两处:注册表(动态路径:触发建议)与 profile(静态路径:预载清单,
+跳过 suggest 直接开工)。
+
+一次完整交互(把三者串起来):
+
+```
+@researcher "查 shrink_node 竞态"
+  → 读注册表(仅元数据)→ 路径 mm/ 命中 domain-reclaim;"竞态"命中 method-lifetime
+  → suggest 2 个 + 理由 → 用户确认 → 此刻才读两个 SKILL.md 全文
+  → 产出工件,头部 receipt:produced_by: researcher + [domain-reclaim, method-lifetime]
+  → receipt + 工件接受结果回流 hub → 修 applies_when/description → 推荐越来越准(闭环)
+
+@reclaim-investigator(profile)= 把前三步压成一步:预载清单直接生效,开工
+```
+
 ### 6. Profiles(复用层)
 
 Profile = 角色 + 默认技能 + 可选技能 + 权限偏好的**命名组合**,解决"我要定制 agent"

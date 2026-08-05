@@ -195,6 +195,43 @@ resident, ~80 tokens/skill; full text loads on activation) · **≤4 active non-
 **≤3 suggestions with reasons** · **composition receipts** (§8.4) close the feedback loop
 to refine trigger wording.
 
+#### 5.4 How the registry works & how the three parts bind (key flows)
+
+**`_registry.yaml` is the skill system's single index**: one metadata entry per skill
+(~80 tokens); the whole table costs ~2k resident tokens; a skill's **full text** is read
+only after selection. The mechanism needs zero runtime — it is entirely "read a file",
+driven by the agent-core contract, at three moments:
+
+1. **At task start**: the role `Read`s `_registry.yaml` once → it now knows which skills
+   exist, with no full text loaded;
+2. **On receiving a brief**: the task description / target paths are matched against
+   `applies_when` (positive) / `not_for` (negative) → suggest ≤3 skills with the match
+   reasons → user confirms → **only then** Read the corresponding SKILL.md full text;
+   `roles:` filters role affinity (a reviewer is never offered flash-device), `risk:`
+   signals the approval tier;
+3. **Governance**: the lint script checks registry ↔ skill directories consistency
+   (missing entry / missing directory / >500 lines without references split all fail).
+
+**Binding direction (where decoupling lands)**: **skills declare `roles:` (which roles
+they fit)** — role files never name any specific skill. Adding a skill = a new directory
++ one registry entry, with **zero role-file changes**. The role↔skill binding exists in
+exactly two places: the registry (dynamic path: trigger suggestions) and profiles
+(static path: a preload list that skips suggest and starts working immediately).
+
+One complete interaction (tying the three together):
+
+```
+@researcher "investigate the shrink_node race"
+  → read registry (metadata only) → path mm/ hits domain-reclaim; "race" hits method-lifetime
+  → suggest 2 skills + reasons → user confirms → only now read the two SKILL.md files
+  → produce artifact with header receipt: produced_by: researcher + [domain-reclaim, method-lifetime]
+  → receipt + artifact acceptance flow back to the hub → refine applies_when/description
+    → suggestions keep improving (closed loop)
+
+@reclaim-investigator (profile) = the first three steps compressed into one:
+  the preload list takes effect immediately; start working
+```
+
 ### 6. Profiles (the reuse layer)
 
 A profile is a **named composition** of role + default skills + optional skills +
