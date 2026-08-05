@@ -73,6 +73,11 @@ Decoupling map — five things currently welded into agent prompts, and where ea
 | Task state | workspace / capsule files | State survives role switches and session restarts |
 | Quality requirements | artifact status gating (§8.3) | Enforced at status promotion, not by forced stage order |
 
+The two enforcement lines are independent: **permission ceilings answer "may this role
+execute this operation"; status gating answers "may this artifact claim this status"** —
+execution rights and claim rights are separate (an implementer may be authorized to
+produce a draft patch, but it can never reach ready-to-land without review).
+
 ### 3.5 Target `.opencode/` Directory Layout (vs. current state)
 
 Two lanes coexist: the **workbench lane** adds `agents/` (rebuilt), `skills/`
@@ -82,7 +87,9 @@ PR #39 established for sediment_staging).
 
 ```
 .opencode/
-├── CLAUDE.md                    # M2: becomes the "thin constitution"; pipeline enforcement moves into the pipeline skill pack
+├── CLAUDE.md                    # kept as Claude Code compatibility fallback; the thin constitution's
+│                                # canonical carrier is repo-root AGENTS.md (OpenCode convention:
+│                                # CLAUDE.md is ignored when AGENTS.md exists)
 ├── config.yaml                  # unchanged
 ├── skill-memory.lock            # unchanged (hub broadcast output)
 │
@@ -133,8 +140,10 @@ Fate of the current 14 top-level items at a glance: **reorganized** skills/;
 **rebuilt** agents/ (old files into legacy/); **new** agents/profiles/,
 skills/infra/agent-core, local/workspaces/; **unchanged** memory/, commands/,
 pipelines/, bench/, plans/, reviews/, patches/, config.yaml, skill-memory.lock;
-**revised** CLAUDE.md (thin constitution), docs/harness_engineer_system.md (scoped to
-the pipeline lane), state/current_task.json (converges in M4).
+**revised** the thin constitution lands in repo-root **AGENTS.md** (the OpenCode
+canonical file; CLAUDE.md mirrors it for Claude Code compatibility only),
+docs/harness_engineer_system.md (scoped to the pipeline lane),
+state/current_task.json (converges in M4).
 
 ### 4. Role Catalog (7 roles)
 
@@ -218,6 +227,12 @@ they fit)** — role files never name any specific skill. Adding a skill = a new
 exactly two places: the registry (dynamic path: trigger suggestions) and profiles
 (static path: a preload list that skips suggest and starts working immediately).
 
+**When a skill's needs exceed the role's ceiling** (e.g. an R2/R3 skill offered to a
+role without those rights), three degradation behaviors apply — skills can never widen
+permissions: ① the skill **degrades to advisory content** (methodology readable,
+operations not executed); ② individual operations go through OpenCode `ask` per-action
+approval; ③ the role suggests a handoff to a properly-permissioned role in Next options.
+
 One complete interaction (tying the three together):
 
 ```
@@ -249,6 +264,8 @@ optional_skills: [kernel-opt/memory-tlb-optimization]
 Work per the researcher role contract with reclaim domain context preloaded.
 ```
 
+A profile may also declare a model preference (frontmatter `model:`) and interaction
+defaults (e.g. guided).
 Scope precedence: team-curated (hub) < project repo < personal config < explicit session
 choice; permissions are outside this override chain. The 4 existing domain research
 agents become 4 profiles.
@@ -319,7 +336,8 @@ artifacts: [artifacts/research-note.md]
 The active role updates it at the end of every turn (mandatory per agent-core).
 **Handoff/consult passes the capsule + artifact references — never chat history**; after
 compaction only the capsule is re-injected. One file solves handoff, resume, and
-compaction at once.
+compaction at once. Boundary: the workspace is the durable authority, the capsule its
+bounded projection — **never inject the whole workspace into a prompt**.
 
 #### 8.3 Artifact status gating (govern status, not process)
 
@@ -367,6 +385,19 @@ language · Python/LangGraph contract unification · workbench TS plugin · 17 v
 JSON schemas with runtime validation · the full /task /consult command suite (native
 OpenCode suffices) · full Composition Lock pinning.
 
+**Second review round — absorption record (2026-08-05):** an external review of this
+design mostly targeted v3's predecessor document (profiles / capsule / workspace are
+already first-class here); its runtime-machinery recommendations (event sourcing /
+Capability Broker / Policy Engine / AgentTurnResult validation / workflow compiler /
+memory WAL+daemon) remain rejected. Four items actually absorbed: ① the thin
+constitution's canonical carrier becomes repo-root **AGENTS.md** (OpenCode convention:
+CLAUDE.md is ignored when AGENTS.md exists; CLAUDE.md mirrors it for Claude Code
+compatibility) — a factual correction; ② the **execution-rights vs claim-rights
+separation** made explicit (permission ceilings vs status gating, §3); ③ **three
+degradation behaviors when a skill exceeds the role ceiling** (advisory-only / per-action
+ask / suggest handoff, §5.4); ④ M1 gains a HEAD re-verification step, M2's DoD gains
+**restart-resume verification**, M4's DoD gains a **same-task old-vs-new comparison**.
+
 ---
 
 ## Part II — Implementation Approach
@@ -389,10 +420,10 @@ Total new executable code ≈ one registry lint script; everything else is markd
 
 | Phase | Content | DoD |
 |---|---|---|
-| **M1** skill library reorg | 3-tier directory reorg, `_registry.yaml` (applies_when/not_for/risk/cost), skill slimming audit (≤500 lines), reference-path updates | 4 optimize commands pass regression; registry lint green; **zero behavior change** |
-| **M2** roles + base + workspace | agent-core contract skill; 7 role files (permission frontmatter); workspace/capsule templates; old agents aliased | Human-routed end-to-end run of a real task (assistant→researcher→consult reviewer→architect→implementer→reviewer→validator) with capsule-only handoffs; researcher edit attempt rejected at runtime |
+| **M1** skill library reorg | re-verify the agent/skill/command inventory against current HEAD before starting; 3-tier directory reorg, `_registry.yaml` (applies_when/not_for/risk/cost), skill slimming audit (≤500 lines), reference-path updates | 4 optimize commands pass regression; registry lint green; **zero behavior change** |
+| **M2** roles + base + workspace | agent-core contract skill; 7 role files (permission frontmatter); workspace/capsule templates; old agents aliased | Human-routed end-to-end run of a real task (assistant→researcher→consult reviewer→architect→implementer→reviewer→validator) with capsule-only handoffs; researcher edit attempt rejected at runtime; **close and reopen the session — the loaded capsule fully restores the working state** |
 | **M3** profiles + scenarios | 4 domain agents → 4 profiles; kernel-understand and bug-fix non-optimization profiles; receipts live; suggest policy on | Same researcher covers ≥3 domains by swapping skills only; non-optimization tasks show zero optimization vocabulary |
-| **M4** coordinator + wrap-up | manager rebuilt as coordinator; `/optimize_*` on the new chain; old agents deleted; usage guide published | 4 optimize commands pass golden regression |
+| **M4** coordinator + wrap-up | manager rebuilt as coordinator; `/optimize_*` on the new chain; old agents deleted; usage guide published | 4 optimize commands pass golden regression; **run one real task through both the new chain (human-routed) and the legacy pipeline; compare quality/tokens/turns and archive the comparison** |
 
 ### 14. Verification Methods
 

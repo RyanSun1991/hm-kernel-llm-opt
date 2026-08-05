@@ -62,6 +62,10 @@
 | 任务状态 | workspace/capsule 文件 | 状态在文件,换角色/重开会话不丢 |
 | 质量要求 | 工件状态门控(§8.3) | 在状态晋升点把关,不强制流程顺序 |
 
+两条强制线相互独立:**权限天花板回答"此角色能否执行此操作",状态门控回答"此工件能否
+宣称此状态"** —— 执行权与宣称权分离(可以授权 implementer 产出 draft patch,但它不经
+review 永远到不了 ready-to-land)。
+
 ### 3.5 `.opencode/` 目标总目录结构(与现状对照)
 
 双车道共存:**工作台车道**新增 `agents/`(重建)、`skills/`(重排)、`local/workspaces/`;
@@ -70,7 +74,8 @@
 
 ```
 .opencode/
-├── CLAUDE.md                    # M2 改为"薄宪法";pipeline 强制条款移入 pipeline 技能包
+├── CLAUDE.md                    # 保留作 Claude Code 兼容回退;薄宪法的规范载体是仓库根 AGENTS.md
+│                                # (OpenCode 规范:存在 AGENTS.md 时 CLAUDE.md 被忽略)
 ├── config.yaml                  # 不变
 ├── skill-memory.lock            # 不变(hub broadcast 产物)
 │
@@ -120,7 +125,8 @@
 现有 14 项顶层内容的去向速查:**重排** skills/;**重建** agents/(旧件入 legacy/);
 **新增** agents/profiles/、skills/infra/agent-core、local/workspaces/;**不变**
 memory/、commands/、pipelines/、bench/、plans/、reviews/、patches/、config.yaml、
-skill-memory.lock;**修订** CLAUDE.md(薄宪法)、docs/harness_engineer_system.md
+skill-memory.lock;**修订** 薄宪法写入仓库根 **AGENTS.md**(OpenCode 规范
+文件;CLAUDE.md 内容同步、仅作 Claude Code 兼容)、docs/harness_engineer_system.md
 (限定 pipeline 车道)、state/current_task.json(M4 收敛)。
 
 ### 4. 角色目录(7 个)
@@ -195,6 +201,10 @@ receipt**(§8.4)反馈闭环修触发词。
 绑定关系只存在两处:注册表(动态路径:触发建议)与 profile(静态路径:预载清单,
 跳过 suggest 直接开工)。
 
+**技能需求超出角色天花板时**(如某技能标 R2/R3 而当前角色无权),三种降级行为,技能
+永远不能扩权:① 技能**降级为咨询性内容**(方法论可读,操作不执行);② 单次操作走
+OpenCode `ask` 逐次批准;③ 在 Next options 中建议 handoff 给有权限的角色。
+
 一次完整交互(把三者串起来):
 
 ```
@@ -223,6 +233,7 @@ optional_skills: [kernel-opt/memory-tlb-optimization]
 按 researcher 角色契约工作,已预载 reclaim 领域上下文。
 ```
 
+profile 还可声明模型偏好(frontmatter `model:`)与交互默认(如 guided)。
 作用域覆盖:团队策展(hub)< 项目仓库 < 个人配置 < 会话显式;权限不在覆盖链内。
 现有 4 个领域研究 agent → 4 个 profile。
 
@@ -287,6 +298,7 @@ artifacts: [artifacts/research-note.md]
 
 当前角色每回合末更新(agent-core 契约必填);**handoff/consult 传 capsule + 工件引用,
 不传对话史**;compaction 后只重注入 capsule —— 一份文件解决交接、恢复、压缩三个问题。
+边界:工作区是持久权威、capsule 是有界投影,**永不把整个工作区注入 prompt**。
 
 #### 8.3 工件状态门控(管状态,不管流程)
 
@@ -325,6 +337,15 @@ Engine 服务 · Workflow 编译器与条件语言 · Python/LangGraph 契约统
 插件 · 17 个版本化 JSON schema 运行时校验 · 全套 /task /consult 命令(OpenCode 原生够)·
 Composition Lock 全量钉版。
 
+**第二轮评审吸收记录(2026-08-05)**:外部对本设计的审阅报告,多数意见实际针对 v3 的
+前身文档(profiles / capsule / workspace 在本设计中本已一等概念),其运行时机器建议
+(事件溯源 / Broker / Policy Engine / AgentTurnResult 校验 / 工作流编译器 / 记忆
+WAL+daemon)维持拒绝。实际吸收 4 项:① **薄宪法规范载体改为仓库根 AGENTS.md**
+(OpenCode 规范:存在 AGENTS.md 时 CLAUDE.md 被忽略;CLAUDE.md 保留同步内容作 Claude
+Code 兼容)—— 事实性纠正;② 显式化**执行权与宣称权分离**(权限天花板 vs 状态门控,
+§3);③ **技能越权时的三种降级行为**(咨询化 / ask 逐批 / 建议 handoff,§5.4);
+④ M1 加 HEAD 复核、M2 DoD 加**重启恢复验证**、M4 DoD 加**新旧链路同任务对比**。
+
 ---
 
 ## 第二部分 实现思路
@@ -347,10 +368,10 @@ Composition Lock 全量钉版。
 
 | 期 | 内容 | DoD |
 |---|---|---|
-| **M1** 技能库重组 | 三层目录重排、`_registry.yaml`(含 applies_when/not_for/risk/cost)、技能瘦身审计(≤500 行)、引用路径更新 | 4 条 optimize 命令回归通过;注册表 lint 绿;**零行为变化** |
-| **M2** 角色+基座+工作区 | agent-core 契约技能;7 角色文件(权限 frontmatter);工作区/capsule 模板;旧 agent 留 alias | 人为路由端到端跑通真实任务(assistant→researcher→consult reviewer→architect→implementer→reviewer→validator),全程 capsule 交接;researcher 尝试 edit 被运行时拒绝 |
+| **M1** 技能库重组 | 动工前对照当前 HEAD 复核 agent/技能/命令清单;三层目录重排、`_registry.yaml`(含 applies_when/not_for/risk/cost)、技能瘦身审计(≤500 行)、引用路径更新 | 4 条 optimize 命令回归通过;注册表 lint 绿;**零行为变化** |
+| **M2** 角色+基座+工作区 | agent-core 契约技能;7 角色文件(权限 frontmatter);工作区/capsule 模板;旧 agent 留 alias | 人为路由端到端跑通真实任务(assistant→researcher→consult reviewer→architect→implementer→reviewer→validator),全程 capsule 交接;researcher 尝试 edit 被运行时拒绝;**关闭并重开会话,capsule 载入后现场完整恢复** |
 | **M3** profile 化+场景扩展 | 4 领域 agent→4 profile;kernel-understand、bug-fix 两个非优化 profile;receipt 落地;suggest 策略上线 | 同一 researcher 仅换技能跑通 ≥3 领域;非优化任务全程无优化词汇 |
-| **M4** coordinator+收尾 | manager 重构为 coordinator;`/optimize_*` 指向新链路;删旧 agent;使用指南发布 | 4 条 optimize 命令 golden 回归通过 |
+| **M4** coordinator+收尾 | manager 重构为 coordinator;`/optimize_*` 指向新链路;删旧 agent;使用指南发布 | 4 条 optimize 命令 golden 回归通过;**同一真实任务在新链路(人为路由)与旧 pipeline 各跑一遍,对比质量/token/轮次并归档** |
 
 ### 14. 验证方法
 
