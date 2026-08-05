@@ -73,6 +73,69 @@ Decoupling map — five things currently welded into agent prompts, and where ea
 | Task state | workspace / capsule files | State survives role switches and session restarts |
 | Quality requirements | artifact status gating (§8.3) | Enforced at status promotion, not by forced stage order |
 
+### 3.5 Target `.opencode/` Directory Layout (vs. current state)
+
+Two lanes coexist: the **workbench lane** adds `agents/` (rebuilt), `skills/`
+(reorganized), and `local/workspaces/`; the **pipeline lane**'s artifact and memory
+directories all stay in place. `local/` is git-ignored runtime state (the convention
+PR #39 established for sediment_staging).
+
+```
+.opencode/
+├── CLAUDE.md                    # M2: becomes the "thin constitution"; pipeline enforcement moves into the pipeline skill pack
+├── config.yaml                  # unchanged
+├── skill-memory.lock            # unchanged (hub broadcast output)
+│
+├── agents/                      # ── responsibility layer (rebuilt in M2) ──
+│   ├── assistant.md             # 7 generic roles: assistant / researcher / architect /
+│   ├── researcher.md            # implementer / reviewer / validator (mode: all)
+│   ├── architect.md             # + coordinator (mode: primary)
+│   ├── implementer.md
+│   ├── reviewer.md
+│   ├── validator.md
+│   ├── coordinator.md
+│   ├── profiles/                # ── reuse layer (M3) ── thin agent files; OpenCode discovers subdirectories
+│   │   ├── reclaim-investigator.md      # converted from the 4 domain research agents
+│   │   ├── hyperhold-io.md · workqueue.md · sync-mechanism.md
+│   │   ├── kernel-understand.md         # non-optimization scenarios (prove universality)
+│   │   └── bug-fix.md
+│   └── legacy/                  # M2–M4 transition aliases (hm-opt-manager + 14 others); deleted in M4
+│
+├── skills/                      # ── capability layer (reorganized in M1, §5) ──
+│   ├── _registry.yaml
+│   ├── role/                    # research-discipline / plan-funnel / review-checklists /
+│   │                            # implementation-guardrails / validation-flight-check
+│   ├── scenario/
+│   │   └── kernel-opt/          # all current optimization skills: perf-bottleneck-playbooks /
+│   │                            # IC / memory-tlb / ab-test* / iterative / build-and-sign / flash-device
+│   └── infra/
+│       ├── agent-core/          # §7 base contract (new)
+│       ├── team-memory/ hub-bridge/ language-config/
+│       └── pipeline/            # stage-gate + handoff-contract + delegate (coordinator only)
+│
+├── local/                       # ── state layer (git-ignored runtime) ──
+│   ├── workspaces/<task-slug>/  # task.md / capsule.md / artifacts/ / decisions.md (M2, §8)
+│   └── sediment_staging/        # existing team-memory dir, untouched
+│
+├── memory/                      # unchanged: pipeline-lane memory + team-memory sediment source
+│   ├── global_lessons.md · targets/ · subsystems/ · human_decisions/ · idea_ledger/
+├── state/                       # bad_plans.md unchanged; current_task.json is a compatibility pointer in M2–M3, converges in M4
+│
+├── commands/                    # /optimize_* unchanged (pipeline recipe entry); plan/research point to new roles
+├── pipelines/                   # recipe cards unchanged; consumed only by coordinator + pipeline pack
+│
+├── docs/                        # harness_engineer_system.md scoped to the pipeline lane from M2; bootstraps unchanged
+└── bench/ plans/ reviews/ patches/   # pipeline-lane artifact dirs, kept in place;
+                                      # workbench-lane artifacts go to local/workspaces/<slug>/artifacts/
+```
+
+Fate of the current 14 top-level items at a glance: **reorganized** skills/;
+**rebuilt** agents/ (old files into legacy/); **new** agents/profiles/,
+skills/infra/agent-core, local/workspaces/; **unchanged** memory/, commands/,
+pipelines/, bench/, plans/, reviews/, patches/, config.yaml, skill-memory.lock;
+**revised** CLAUDE.md (thin constitution), docs/harness_engineer_system.md (scoped to
+the pipeline lane), state/current_task.json (converges in M4).
+
 ### 4. Role Catalog (7 roles)
 
 Canonical names + aliases, `mode: all` (directly conversable; also delegatable by the

@@ -62,6 +62,67 @@
 | 任务状态 | workspace/capsule 文件 | 状态在文件,换角色/重开会话不丢 |
 | 质量要求 | 工件状态门控(§8.3) | 在状态晋升点把关,不强制流程顺序 |
 
+### 3.5 `.opencode/` 目标总目录结构(与现状对照)
+
+双车道共存:**工作台车道**新增 `agents/`(重建)、`skills/`(重排)、`local/workspaces/`;
+**pipeline 车道**的工件与记忆目录全部原位保留。`local/` 是 git-ignored 运行态
+(沿用 PR#39 为 sediment_staging 建立的约定)。
+
+```
+.opencode/
+├── CLAUDE.md                    # M2 改为"薄宪法";pipeline 强制条款移入 pipeline 技能包
+├── config.yaml                  # 不变
+├── skill-memory.lock            # 不变(hub broadcast 产物)
+│
+├── agents/                      # ── 责任层(M2 重建)──
+│   ├── assistant.md             # 7 个通用角色:assistant / researcher / architect /
+│   ├── researcher.md            # implementer / reviewer / validator(mode: all)
+│   ├── architect.md             # + coordinator(mode: primary)
+│   ├── implementer.md
+│   ├── reviewer.md
+│   ├── validator.md
+│   ├── coordinator.md
+│   ├── profiles/                # ── 复用层(M3)── 薄 agent 文件,OpenCode 子目录可发现
+│   │   ├── reclaim-investigator.md      # 4 个领域研究 agent 转化而来
+│   │   ├── hyperhold-io.md · workqueue.md · sync-mechanism.md
+│   │   ├── kernel-understand.md         # 非优化场景(证明通用性)
+│   │   └── bug-fix.md
+│   └── legacy/                  # M2–M4 过渡别名(hm-opt-manager 等 15 个旧 agent),M4 删除
+│
+├── skills/                      # ── 能力层(M1 重排,§5)──
+│   ├── _registry.yaml
+│   ├── role/                    # research-discipline / plan-funnel / review-checklists /
+│   │                            # implementation-guardrails / validation-flight-check
+│   ├── scenario/
+│   │   └── kernel-opt/          # 现有优化技能全家:perf-bottleneck-playbooks / IC /
+│   │                            # memory-tlb / ab-test* / iterative / build-and-sign / flash-device
+│   └── infra/
+│       ├── agent-core/          # §7 基座契约(新)
+│       ├── team-memory/ hub-bridge/ language-config/
+│       └── pipeline/            # stage-gate + handoff-contract + delegate(仅 coordinator 加载)
+│
+├── local/                       # ── 状态层(git-ignored 运行态)──
+│   ├── workspaces/<task-slug>/  # task.md / capsule.md / artifacts/ / decisions.md(M2,§8)
+│   └── sediment_staging/        # team-memory 既有,不动
+│
+├── memory/                      # 不变:pipeline 车道记忆 + team-memory sediment 源
+│   ├── global_lessons.md · targets/ · subsystems/ · human_decisions/ · idea_ledger/
+├── state/                       # bad_plans.md 不变;current_task.json M2–M3 作兼容指针,M4 收敛
+│
+├── commands/                    # /optimize_* 不变(pipeline 配方入口);plan/research 等指向新角色
+├── pipelines/                   # 配方卡不变,仅 coordinator + pipeline 包消费
+│
+├── docs/                        # harness_engineer_system.md M2 起只约束 pipeline 车道;bootstrap 不变
+└── bench/ plans/ reviews/ patches/   # pipeline 车道工件目录,原位保留;
+                                      # 工作台车道工件写 local/workspaces/<slug>/artifacts/
+```
+
+现有 14 项顶层内容的去向速查:**重排** skills/;**重建** agents/(旧件入 legacy/);
+**新增** agents/profiles/、skills/infra/agent-core、local/workspaces/;**不变**
+memory/、commands/、pipelines/、bench/、plans/、reviews/、patches/、config.yaml、
+skill-memory.lock;**修订** CLAUDE.md(薄宪法)、docs/harness_engineer_system.md
+(限定 pipeline 车道)、state/current_task.json(M4 收敛)。
+
 ### 4. 角色目录(7 个)
 
 规范名 + 别名,`mode: all`(人可直接对话,coordinator 也可委派):
