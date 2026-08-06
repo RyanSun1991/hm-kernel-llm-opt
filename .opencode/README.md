@@ -1,71 +1,95 @@
-# OpenCode Multi-Agent Workspace
+# OpenCode Agent Workbench Workspace
 
-This directory is the canonical OpenCode-facing workspace for kernel analysis and optimization in this repository.
+This directory is the canonical OpenCode-facing workspace for kernel analysis and
+optimization in this repository. Since the Agent Workbench migration (design:
+`docs/Agent_Workbench_Design_EN.md`) it hosts **two lanes**: the interactive
+workbench (default) and the automated pipeline (explicit `/optimize_*` recipes).
 
 ## Layout
 
-- `commands/`: slash-command files for one-click pipeline triggering in OpenCode
-- `agents/`: primary OpenCode agent prompt files
-- `pipelines/`: one-click pipeline preset cards
-- `skills/`: reusable capability packs for agent loading
+- `CLAUDE.md`: the thin constitution (mirrors repo-root `AGENTS.md`)
+- `agents/`: the 7 generic workbench roles (assistant · researcher · architect ·
+  implementer · reviewer · validator · coordinator) — see `agents/README.md`
+  - `agents/profiles/`: named role+skill compositions (thin agent files, from M3)
+  - `agents/legacy/`: the pre-workbench pipeline cast (hm-opt-manager + specialists);
+    the fallback chain; deleted only after the live old-vs-new comparison is archived
+- `commands/`: slash-command files — `/optimize_*` (pipeline recipes), `/research`
+  (researcher role), `/plan` (architect role), `/function_detail` (legacy explainer)
+- `pipelines/`: pipeline preset cards (consumed by the pipeline lane)
+- `skills/`: 3-tier skill library (`role/` · `scenario/` · `infra/`) indexed by
+  `skills/_registry.yaml` — see `skills/README.md`
+- `templates/workspace/`: tracked template for task workspaces
+  (instantiate via `bash scripts/new_workspace.sh <task-slug>`)
+- `local/`: git-ignored runtime state — task workspaces
+  (`local/workspaces/<task-slug>/`) and sediment staging
 - `docs/`: living subsystem design notes and bootstrap docs
+  (`docs/harness_engineer_system.md` = pipeline-lane spec)
 - `memory/`: long-term memory across runs
   - `targets/`, `subsystems/`, `global_lessons.md`: stable structural / heuristic memory
-  - `human_decisions/`: per-target chronological log populated by primary-agent human workflows (`kernel-research`, `kernel-plan`, `kernel-function-research`) — see `skills/human-interaction-memory/SKILL.md`
-  - `idea_ledger/`: per-target approved / landed / rejected / deferred mechanism ledger; populated by the primary-agent human workflows and consulted by both primary agents and pipeline sub-agents during the optimization-funnel dedup step
-- `state/`: persistent task and ideation state
-- `plans/`: approved implementation plans
-- `reviews/`: independent review outputs from the pipeline's review sub-agents
-- `bench/`: validation plans and before/after evidence
-- `patches/`: exported patches when needed
+  - `human_decisions/`: per-target chronological log from human-in-the-loop sessions
+    (see `skills/infra/human-interaction-memory/SKILL.md`)
+  - `idea_ledger/`: per-target approved / landed / rejected / deferred mechanism ledger
+- `state/`: pipeline-lane persistent state (`current_task.json`, bad-plan ledgers).
+  Workbench tasks do NOT use it — their truth lives in `local/workspaces/`.
+- `plans/` · `reviews/` · `bench/` · `patches/`: pipeline-lane artifact directories
+  (workbench-lane artifacts live inside each task workspace's `artifacts/`)
 
 ## Configuration
 
-- `config.yaml`: workspace-level settings (session language, etc.)
+- `config.yaml`: workspace-level settings (session language)
   - `language: zh-CN` for Chinese, `language: en` for English (default)
-  - Applied automatically via `skills/language-config/SKILL.md`
+  - Applied automatically via `skills/infra/language-config/SKILL.md`
 
-## Entry Points — Three Routes For Three Kinds Of Work
+## Entry Points
 
-The workspace supports three complementary entry points depending on what the user is trying to do:
+### 1. Just talk (default — workbench lane)
 
-### 1. Full automated pipeline — for end-to-end optimization runs
+Open OpenCode and ask. The default agent is `assistant`: simple questions get direct
+answers; for bigger tasks it proposes "open a workspace + bring in <role> with
+<skills>" and **waits for your confirmation**. Ordinary prompts never start a
+pipeline.
 
-`@hm-opt-manager` (or `/optimize_generic`, `/optimize_hyperhold`, etc.) runs the complete `research → plan review → implement → code review → tester → decision` pipeline with sub-agents delegated by the manager. Use this when the target is well-understood and you want an automated land-it run.
+### 2. Pick a role or profile
 
-### 2. Primary-agent human-in-the-loop — for expert-driven iterative work
+Tab-switch or `@researcher` / `@architect` / `@implementer` / `@reviewer` /
+`@validator` — or a preloaded composition from `agents/profiles/`
+(e.g. `@reclaim-investigator`). Roles suggest skills from the registry; you confirm.
+Task state persists in `local/workspaces/<task-slug>/` (capsule = resume carrier;
+say "continue <task-slug>" in a new session).
 
-Two standalone primary agents own their own multi-turn dialogue with a human expert and write artifacts + memory live every turn:
+### 3. Human-in-the-loop commands
 
-- `@kernel-research` (`/research`) — iterative research. Produces `.opencode/docs/<target_slug>_design.md` as a living document grown across many turns. Explain-only; no optimization ideation.
-- `@kernel-plan` (`/plan`) — iterative ideation + planning. Reads the design doc + memory + idea ledger, runs the 5-idea funnel, triages per-idea with the human, writes `.opencode/plans/<target_slug>_plan.md`. Precondition: design doc exists.
+- `/research` — researcher role, iterative living design doc with per-turn human
+  verdict persistence
+- `/plan` — architect role, 5-idea optimization funnel with per-idea human triage
 
-Output of `kernel-plan` (`<target_slug>_plan.md` + idea-ledger rows) is directly consumable by route 1 — run `/optimize_generic <target>` after `@kernel-plan` and the pipeline will pick up the plan and land the approved ideas.
+### 4. Automated pipeline (explicit recipes)
 
-All human verdicts in routes 2 and 3 are persisted live to `memory/human_decisions/` and `memory/idea_ledger/` before the turn ends, so sessions survive compaction and new sessions resume from disk.
-
-### 3. Per-function deep dive — for a single-shot explainer
-
-`@kernel-function-research` (`/function_detail`) produces a complete design + callee-graph report on ONE kernel function in a single pass. Explain-only. Useful when routes 1 or 2 need a deeper understanding of a specific function before continuing.
+`/optimize_generic` · `/optimize_hyperhold` · `/optimize_memmgr_reclaim` ·
+`/optimize_workqueue` run the full staged pipeline (research → plan review GATE →
+implement → code review GATE → tester A/B → decision) under
+`docs/harness_engineer_system.md` rules. Entry agent: `@coordinator` driving the
+workbench roles (see `skills/infra/pipeline/recipe-execution/SKILL.md`); the legacy
+`@hm-opt-manager` chain (`agents/legacy/`) remains the fallback until the live
+old-vs-new comparison is archived.
 
 ## Working Rules
 
-0. Read `config.yaml` and load `skills/language-config/SKILL.md` at the start of every session to apply the configured language.
-1. For automated end-to-end runs: `agents/hm-opt-manager.md` (central hub) or `agents/kernel-pipeline-starter.md` (legacy alias).
-2. For expert-driven iterative research: `agents/kernel-research.md` (`/research`).
-3. For expert-driven iterative ideation + planning: `agents/kernel-plan.md` (`/plan`) — reads the design doc produced in step 2.
-4. For a single-shot function deep dive: `agents/kernel-function-research.md` (`/function_detail`).
-5. Treat instruction-count reduction as the default primary optimization goal unless the staged task explicitly overrides it.
-6. Research before optimization.
-7. Use Sequential Thinking MCP first.
-8. Use Kernel Index MCP early.
-9. In the pipeline route (1): route every optimization plan through `agents/kernel-plan-reviewer.md` before implementation; route every implemented patch through `agents/kernel-code-reviewer.md`; route reviewed patches to `agents/kernel-tester-agent.md` only when code review requires Build MCP + Auto-Test MCP validation.
-10. Save durable findings under `docs/`.
-11. Promote stable reusable findings into `memory/`.
-12. Save approved plans under `plans/`.
-13. Save reviewer output under `reviews/` (pipeline only).
-14. Save validation output under `bench/`.
+0. Read `config.yaml` and apply `skills/infra/language-config/SKILL.md` at the start
+   of every session.
+1. Workbench lane: follow `skills/infra/agent-core/SKILL.md` (output contract, six
+   verbs, capsule upkeep, status gating, permission discipline). The user owns
+   routing.
+2. Pipeline lane: follow `docs/harness_engineer_system.md` + `skills/infra/pipeline/`
+   (stage gates, handoff packets, hub-and-spoke delegation).
+3. Research before optimization; use Sequential Thinking MCP first and Kernel Index
+   MCP early.
+4. Durable findings → `docs/`; stable reusable findings → `memory/`; approved plans →
+   `plans/`; reviews → `reviews/`; validation evidence → `bench/`.
+5. Artifact headers carry `status:` + `produced_by:` receipts; status promotions have
+   role-owned conditions (agent-core §6).
 
 ## Current Canonical Bootstrap
 
-For memmgr and reclaim work, read `docs/memmgr-reclaim_bootstrap.md` before new exploration.
+For memmgr and reclaim work, read `docs/memmgr-reclaim_bootstrap.md` before new
+exploration.

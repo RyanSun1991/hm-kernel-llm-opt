@@ -241,7 +241,7 @@ LLM 置信度是元数据,不是证据。
 | journal 存储/检索/redact-on-write | `src/hmopt/sediment/journal.py`(新) | 布局、frontmatter 读写、词法打分、ULID |
 | 6 个 MCP 工具 + sediment 扩展 | `src/hmopt/api/skillhub_mcp_service.py`(改) | §6 规格;`_TOOL_DISPATCH` 同步(server.py) |
 | journal→候选确定性映射 | `src/hmopt/sediment/pipeline.py` + `parse_memory.py`(改) | journal tier;outcome 闸;bundle 时间戳名 |
-| 契约技能(规范副本) | `.opencode/skills/team-memory/SKILL.md`(新) | §5 片段完整版 |
+| 契约技能(规范副本) | `.opencode/skills/infra/team-memory/SKILL.md`(新) | §5 片段完整版 |
 | 上手文档 | `docs/Team_Memory_Onboarding_CN.md`(新) | 两步接入 + 模板 + FAQ |
 | 测试 | `tests/test_journal*.py`(新) | 存储/召回/get/feedback/forget/redact 拒写/sediment 映射/outcome 闸/降级 |
 

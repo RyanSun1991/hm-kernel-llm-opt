@@ -1,10 +1,18 @@
-# Harness Engineer System
+# Harness Engineer System (pipeline lane)
 
-This document defines the upgraded `.opencode` harness engineer system for this repository.
+> **Scope (since M2 of the Agent Workbench migration):** this document governs the
+> **pipeline lane only** — the staged optimization recipes started explicitly via
+> `/optimize_*` commands (entry: `@coordinator`; the legacy `@hm-opt-manager` chain
+> in `agents/legacy/` is the fallback until the live old-vs-new comparison is
+> archived). It does not govern ordinary sessions: the interactive workbench lane
+> (default entry `assistant`, user-owned routing) is defined by the repo-root
+> `AGENTS.md` constitution and `skills/infra/agent-core/SKILL.md`.
+
+This document defines the staged `.opencode` pipeline system for this repository.
 
 ## Language Configuration
 
-The workspace supports configurable session language. Read `.opencode/config.yaml` for the `language` field and load `.opencode/skills/language-config/SKILL.md` at session start. All agent dialogue, analysis prose, review verdicts, and documentation prose must follow the configured language. Code, commit messages, and technical identifiers remain in English. See the language-config skill for full rules.
+The workspace supports configurable session language. Read `.opencode/config.yaml` for the `language` field and load `.opencode/skills/infra/language-config/SKILL.md` at session start. All agent dialogue, analysis prose, review verdicts, and documentation prose must follow the configured language. Code, commit messages, and technical identifiers remain in English. See the language-config skill for full rules.
 
 ## Primary Objective
 
@@ -23,27 +31,35 @@ IC by default" — judge non-compute targets against their class metric, not IC.
 
 ## Agent Topology
 
-1. `hm-opt-manager` — **entry agent and central hub** (handles intake, routing, and stage chaining)
-2. research specialist (domain-specific sub-agent)
-3. `kernel-plan-reviewer` (sub-agent)
-4. `kernel-code-agent` (sub-agent)
-5. `kernel-code-reviewer` (sub-agent)
-6. `kernel-tester-agent` (conditional sub-agent)
-7. `kernel-pipeline-starter` — legacy alias, redirects to `hm-opt-manager`
+Since the M4 rewire the recipe commands run on the **workbench chain** (default);
+the **legacy cast** (`agents/legacy/`) remains the fallback until the live
+old-vs-new comparison is archived:
+
+| Stage duty | New chain (default) | Legacy cast (fallback) |
+|---|---|---|
+| entry agent + central hub (intake, routing, stage chaining) | `coordinator` + `recipe-execution` skill | `hm-opt-manager` |
+| research specialist | `researcher` + routed domain pack (`domain-reclaim` / `domain-hyperhold-io` / `domain-sync` / `domain-workqueue`) | `kernel-source-research`, `memmgr-reclaim-research`, `hyperhold-io-opt`, `basic-mechanism-sync-opt`, `wq-threadpool-opt` |
+| plan review gate | `reviewer` (plan-review brief) | `kernel-plan-reviewer` |
+| implementation | `implementer` | `kernel-code-agent` |
+| code review gate | `reviewer` (code-review brief) | `kernel-code-reviewer` |
+| conditional tester | `validator` | `kernel-tester-agent` |
+| legacy redirect alias | — | `kernel-pipeline-starter` |
+
+Role summaries below describe stage duties; both casts satisfy them.
 
 ## Stage Order
 
-1. intake, config loading, and routing (`hm-opt-manager`)
+1. intake, config loading, and routing (the hub: `coordinator`; legacy `hm-opt-manager`)
 2. research, bottleneck classification (Stage 0), and primary-metric hypothesis (specialist, returns to manager)
 3. plan review (returns to manager)
 4. implementation (returns to manager)
 5. code review (returns to manager)
 6. conditional flash + A/B test validation: flash stock, test stock, flash feature, test feature, compare (returns to manager)
-7. decision, memory update, and next-step routing (`hm-opt-manager`)
+7. decision, memory update, and next-step routing (the hub: `coordinator`; legacy `hm-opt-manager`)
 
 ### Iterative Close-Loop Mode (Optional)
 
-When a command carries `Auto-Iterate: N` (with N ≥ 2) and loads `.opencode/skills/iterative-optimization/SKILL.md`, stage 7 for a **pass** verdict does not end the session — the manager automatically starts pass K+1 on the same target, treating all prior-pass plans/patches as LANDED context. The researcher must propose orthogonal new mechanisms each pass. Iteration stops when N passes complete, the researcher returns `no_more_ideas`, two consecutive passes land within noise, or a failure hits the back-edge stall cap. See `iterative-optimization/SKILL.md` for the full protocol.
+When a command carries `Auto-Iterate: N` (with N ≥ 2) and loads `.opencode/skills/scenario/kernel-opt/iterative-optimization/SKILL.md`, stage 7 for a **pass** verdict does not end the session — the manager automatically starts pass K+1 on the same target, treating all prior-pass plans/patches as LANDED context. The researcher must propose orthogonal new mechanisms each pass. Iteration stops when N passes complete, the researcher returns `no_more_ideas`, two consecutive passes land within noise, or a failure hits the back-edge stall cap. See `iterative-optimization/SKILL.md` for the full protocol.
 
 ## Role Summary
 
@@ -96,7 +112,7 @@ Every stage must produce a handoff packet that includes:
 
 ## Hub-and-Spoke Delegation Model
 
-Only agents with `permission: skill: "delegate": "allow"` in their front-matter (currently only `hm-opt-manager`) may delegate. Load `.opencode/skills/delegate/SKILL.md` for the full mechanism — the `task(subagent_type=...)` tool is the delegation primitive.
+Only agents with `permission: skill: "delegate": "allow"` in their front-matter (the pipeline hubs: `coordinator`, and legacy `hm-opt-manager`) may delegate. Load `.opencode/skills/infra/pipeline/delegate/SKILL.md` for the full mechanism — the `task(subagent_type=...)` tool is the delegation primitive.
 
 **Sub-agents (specialists, reviewers, coder, tester) do NOT delegate.** They complete their work, write their artifacts, and return their handoff packet to the manager. The manager then reads the artifacts, checks stage-gate conditions, and delegates to the next stage.
 

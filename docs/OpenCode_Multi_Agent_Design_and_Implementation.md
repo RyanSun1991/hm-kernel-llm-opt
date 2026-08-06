@@ -124,7 +124,7 @@ The system is designed to improve over time by promoting reusable results into l
 
 ### 5.1 Entry agent
 
-- [kernel-pipeline-starter.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/kernel-pipeline-starter.md)
+- [kernel-pipeline-starter.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/legacy/kernel-pipeline-starter.md)
 
 Purpose:
 
@@ -148,11 +148,11 @@ Purpose:
 
 ### 5.3 Research and optimizer specialists
 
-- [kernel-source-research.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/kernel-source-research.md)
-- [memmgr-reclaim-research.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/memmgr-reclaim-research.md)
-- [hyperhold-io-opt.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/hyperhold-io-opt.md)
-- [basic-mechanism-sync-opt.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/basic-mechanism-sync-opt.md)
-- [wq-threadpool-opt.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/wq-threadpool-opt.md)
+- [kernel-source-research.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/legacy/kernel-source-research.md)
+- [memmgr-reclaim-research.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/legacy/memmgr-reclaim-research.md)
+- [hyperhold-io-opt.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/legacy/hyperhold-io-opt.md)
+- [basic-mechanism-sync-opt.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/legacy/basic-mechanism-sync-opt.md)
+- [wq-threadpool-opt.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/legacy/wq-threadpool-opt.md)
 
 Purpose:
 
@@ -163,10 +163,10 @@ Purpose:
 
 ### 5.4 Implementation and review
 
-- [kernel-code-agent.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/kernel-code-agent.md)
-- [kernel-plan-reviewer.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/kernel-plan-reviewer.md)
-- [kernel-code-reviewer.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/kernel-code-reviewer.md)
-- [kernel-tester-agent.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/kernel-tester-agent.md)
+- [kernel-code-agent.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/legacy/kernel-code-agent.md)
+- [kernel-plan-reviewer.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/legacy/kernel-plan-reviewer.md)
+- [kernel-code-reviewer.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/legacy/kernel-code-reviewer.md)
+- [kernel-tester-agent.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/agents/legacy/kernel-tester-agent.md)
 
 Purpose:
 
@@ -213,13 +213,13 @@ Skill packs are repo-local reusable instruction sets under [.opencode/skills](/m
 
 Implemented packs:
 
-- [instruction-count-first.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/instruction-count-first.md)
-- [research-discipline.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/research-discipline.md)
-- [optimization-funnel.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/optimization-funnel.md)
-- [handoff-contract.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/handoff-contract.md)
-- [implementation-guardrails.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/implementation-guardrails.md)
-- [validation-flight-check.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/validation-flight-check.md)
-- [memory-accumulation.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/memory-accumulation.md)
+- [instruction-count-first.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/scenario/kernel-opt/instruction-count-first/SKILL.md)
+- [research-discipline.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/role/research-discipline/SKILL.md)
+- [optimization-funnel.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/scenario/kernel-opt/optimization-funnel/SKILL.md)
+- [handoff-contract.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/infra/pipeline/handoff-contract/SKILL.md)
+- [implementation-guardrails.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/role/implementation-guardrails/SKILL.md)
+- [validation-flight-check.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/role/validation-flight-check/SKILL.md)
+- [memory-accumulation.md](/mnt/d/work/hm-kernel-llm-opt/.opencode/skills/infra/memory-accumulation/SKILL.md)
 
 These are loaded by presets and starter prompts to avoid repeating complex instructions in every user request.
 

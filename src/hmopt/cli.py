@@ -686,12 +686,12 @@ def sediment_opencode_cmd(
 
 @app.command("promote-skill")
 def promote_skill_cmd(
-    skill_dir: str = typer.Argument(..., help="Member skill dir, e.g. .opencode/skills/optimization-funnel"),
+    skill_dir: str = typer.Argument(..., help="Member skill dir, e.g. .opencode/skills/scenario/kernel-opt/optimization-funnel"),
     kind: str = typer.Option(..., "--kind", help="Hub skill taxonomy: core|domain|technique"),
     hub: Optional[str] = typer.Option(None, "--hub", help="Hub root (default: auto-discover)"),
     force: bool = typer.Option(False, "--force", help="Overwrite an existing hub skill"),
 ) -> None:
-    # Demo: python -m hmopt.cli promote-skill .opencode/skills/optimization-funnel --kind core
+    # Demo: python -m hmopt.cli promote-skill .opencode/skills/scenario/kernel-opt/optimization-funnel --kind core
     # Purpose: scaffold a member .opencode/skill into the hub skills/ taxonomy (design §6.2).
     from hmopt.sediment.skill_promote import promote_opencode_skill
 

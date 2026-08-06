@@ -1,0 +1,386 @@
+_meta:
+  frozen_from: '5f91a94 + M1-M4 migration + independent-review fixes (domain packs on the new chain) (2026-08-05)'
+  purpose: Golden contract for the OpenCode pipeline lane. Pins WHAT each command/profile loads (skill
+    names, agents, gates) independent of WHERE skills live, so directory reorgs pass and behavior changes
+    fail. Update deliberately when a phase intends a contract change.
+artifact_contract:
+  code_review: .opencode/reviews/<slug>_code_review.md
+  design_doc: .opencode/docs/<slug>_design.md
+  patch: .opencode/patches/<slug>.patch
+  plan: .opencode/plans/<slug>_plan.md
+  plan_review: .opencode/reviews/<slug>_plan_review.md
+  validation: .opencode/bench/<slug>_validation.md
+commands:
+  function_detail:
+    agent_file: .opencode/agents/legacy/kernel-function-research.md
+    auto_iterate: false
+    bootstrap_docs: []
+    entry_agent: kernel-function-research
+    memory_packs:
+    - .opencode/memory/global_lessons.md
+    skills:
+    - handoff-contract
+    - language-config
+    - research-discipline
+  optimize_generic:
+    agent_file: .opencode/agents/coordinator.md
+    auto_iterate: true
+    bootstrap_docs:
+    - .opencode/docs/harness_engineer_system.md
+    entry_agent: coordinator
+    memory_packs:
+    - .opencode/memory/global_lessons.md
+    pipeline_card: .opencode/pipelines/generic_full.md
+    profile: generic_full
+    skills:
+    - ab-test-comparison
+    - ab-test-comparison-lmbench
+    - agent-core
+    - build-and-sign
+    - delegate
+    - domain-hyperhold-io
+    - domain-reclaim
+    - domain-sync
+    - domain-workqueue
+    - flash-device-operations
+    - handoff-contract
+    - hub-bridge
+    - implementation-guardrails
+    - instruction-count-first
+    - iterative-optimization
+    - language-config
+    - memory-accumulation
+    - memory-tlb-optimization
+    - optimization-funnel
+    - perf-bottleneck-playbooks
+    - recipe-execution
+    - research-discipline
+    - review-checklists
+    - stage-gate-enforcement
+    - validation-flight-check
+  optimize_hyperhold:
+    agent_file: .opencode/agents/coordinator.md
+    auto_iterate: true
+    bootstrap_docs:
+    - .opencode/docs/harness_engineer_system.md
+    - .opencode/docs/memmgr-reclaim_bootstrap.md
+    entry_agent: coordinator
+    memory_packs:
+    - .opencode/memory/global_lessons.md
+    pipeline_card: .opencode/pipelines/hyperhold_full.md
+    profile: hyperhold_full
+    skills:
+    - ab-test-comparison
+    - ab-test-comparison-lmbench
+    - agent-core
+    - build-and-sign
+    - delegate
+    - domain-hyperhold-io
+    - flash-device-operations
+    - handoff-contract
+    - hub-bridge
+    - implementation-guardrails
+    - instruction-count-first
+    - iterative-optimization
+    - language-config
+    - memory-accumulation
+    - memory-tlb-optimization
+    - optimization-funnel
+    - perf-bottleneck-playbooks
+    - recipe-execution
+    - research-discipline
+    - review-checklists
+    - stage-gate-enforcement
+    - validation-flight-check
+  optimize_memmgr_reclaim:
+    agent_file: .opencode/agents/coordinator.md
+    auto_iterate: true
+    bootstrap_docs:
+    - .opencode/docs/harness_engineer_system.md
+    - .opencode/docs/memmgr-reclaim_bootstrap.md
+    entry_agent: coordinator
+    memory_packs:
+    - .opencode/memory/global_lessons.md
+    pipeline_card: .opencode/pipelines/memmgr_reclaim_full.md
+    profile: memmgr_reclaim_full
+    skills:
+    - ab-test-comparison
+    - ab-test-comparison-lmbench
+    - agent-core
+    - build-and-sign
+    - delegate
+    - domain-reclaim
+    - flash-device-operations
+    - handoff-contract
+    - hub-bridge
+    - implementation-guardrails
+    - instruction-count-first
+    - iterative-optimization
+    - language-config
+    - memory-accumulation
+    - memory-tlb-optimization
+    - optimization-funnel
+    - perf-bottleneck-playbooks
+    - recipe-execution
+    - research-discipline
+    - review-checklists
+    - stage-gate-enforcement
+    - validation-flight-check
+  optimize_workqueue:
+    agent_file: .opencode/agents/coordinator.md
+    auto_iterate: true
+    bootstrap_docs:
+    - .opencode/docs/harness_engineer_system.md
+    entry_agent: coordinator
+    memory_packs:
+    - .opencode/memory/global_lessons.md
+    pipeline_card: .opencode/pipelines/workqueue_full.md
+    profile: workqueue_full
+    skills:
+    - ab-test-comparison
+    - ab-test-comparison-lmbench
+    - agent-core
+    - build-and-sign
+    - delegate
+    - domain-workqueue
+    - flash-device-operations
+    - handoff-contract
+    - hub-bridge
+    - implementation-guardrails
+    - instruction-count-first
+    - iterative-optimization
+    - language-config
+    - memory-accumulation
+    - optimization-funnel
+    - perf-bottleneck-playbooks
+    - recipe-execution
+    - research-discipline
+    - review-checklists
+    - stage-gate-enforcement
+    - validation-flight-check
+  plan:
+    agent_file: .opencode/agents/architect.md
+    auto_iterate: false
+    bootstrap_docs:
+    - .opencode/docs/memory_system.md
+    entry_agent: architect
+    memory_packs:
+    - .opencode/memory/global_lessons.md
+    skills:
+    - agent-core
+    - hub-bridge
+    - human-interaction-memory
+    - instruction-count-first
+    - language-config
+    - memory-accumulation
+    - optimization-funnel
+    - perf-bottleneck-playbooks
+  research:
+    agent_file: .opencode/agents/researcher.md
+    auto_iterate: false
+    bootstrap_docs:
+    - .opencode/docs/memory_system.md
+    entry_agent: researcher
+    memory_packs:
+    - .opencode/memory/global_lessons.md
+    skills:
+    - agent-core
+    - hub-bridge
+    - human-interaction-memory
+    - language-config
+    - memory-accumulation
+    - research-discipline
+  research_only:
+    agent_file: .opencode/agents/coordinator.md
+    auto_iterate: false
+    bootstrap_docs:
+    - .opencode/docs/harness_engineer_system.md
+    entry_agent: coordinator
+    memory_packs:
+    - .opencode/memory/global_lessons.md
+    pipeline_card: .opencode/pipelines/generic_full.md
+    profile: generic_full
+    skills:
+    - agent-core
+    - delegate
+    - handoff-contract
+    - hub-bridge
+    - instruction-count-first
+    - language-config
+    - memory-accumulation
+    - optimization-funnel
+    - perf-bottleneck-playbooks
+    - recipe-execution
+    - research-discipline
+    - review-checklists
+    - stage-gate-enforcement
+  review_sync:
+    agent_file: .opencode/agents/coordinator.md
+    auto_iterate: false
+    bootstrap_docs:
+    - .opencode/docs/harness_engineer_system.md
+    entry_agent: coordinator
+    memory_packs:
+    - .opencode/memory/global_lessons.md
+    pipeline_card: .opencode/pipelines/sync_review.md
+    profile: sync_review
+    skills:
+    - agent-core
+    - delegate
+    - domain-sync
+    - handoff-contract
+    - hub-bridge
+    - instruction-count-first
+    - language-config
+    - recipe-execution
+    - research-discipline
+    - review-checklists
+    - stage-gate-enforcement
+    - validation-flight-check
+profiles:
+  generic_full:
+    bootstrap_docs:
+    - .opencode/docs/memory_system.md
+    code_reviewer_agent: reviewer
+    entry_agent: coordinator
+    handoff_contract_skill: handoff-contract
+    manager_agent: coordinator
+    pipeline_card: .opencode/pipelines/generic_full.md
+    plan_reviewer_agent: reviewer
+    primary_goal: instruction_count
+    research_first: true
+    skills:
+    - ab-test-comparison
+    - agent-core
+    - delegate
+    - domain-hyperhold-io
+    - domain-reclaim
+    - domain-sync
+    - domain-workqueue
+    - flash-device-operations
+    - handoff-contract
+    - implementation-guardrails
+    - instruction-count-first
+    - memory-accumulation
+    - optimization-funnel
+    - recipe-execution
+    - research-discipline
+    - review-checklists
+    - stage-gate-enforcement
+    - validation-flight-check
+    specialist_hint: auto
+    tester_agent: validator
+    validation_mode: plan_review_code_review_tester
+  hyperhold_full:
+    bootstrap_docs:
+    - .opencode/docs/memmgr-reclaim_bootstrap.md
+    code_reviewer_agent: reviewer
+    entry_agent: coordinator
+    handoff_contract_skill: handoff-contract
+    manager_agent: coordinator
+    pipeline_card: .opencode/pipelines/hyperhold_full.md
+    plan_reviewer_agent: reviewer
+    primary_goal: instruction_count
+    research_first: true
+    skills:
+    - ab-test-comparison
+    - agent-core
+    - delegate
+    - domain-hyperhold-io
+    - flash-device-operations
+    - handoff-contract
+    - implementation-guardrails
+    - instruction-count-first
+    - memory-accumulation
+    - optimization-funnel
+    - recipe-execution
+    - research-discipline
+    - review-checklists
+    - stage-gate-enforcement
+    - validation-flight-check
+    specialist_hint: domain-hyperhold-io
+    tester_agent: validator
+    validation_mode: plan_review_code_review_tester
+  memmgr_reclaim_full:
+    bootstrap_docs:
+    - .opencode/docs/memmgr-reclaim_bootstrap.md
+    code_reviewer_agent: reviewer
+    entry_agent: coordinator
+    handoff_contract_skill: handoff-contract
+    manager_agent: coordinator
+    pipeline_card: .opencode/pipelines/memmgr_reclaim_full.md
+    plan_reviewer_agent: reviewer
+    primary_goal: instruction_count
+    research_first: true
+    skills:
+    - ab-test-comparison
+    - agent-core
+    - delegate
+    - domain-reclaim
+    - flash-device-operations
+    - handoff-contract
+    - instruction-count-first
+    - memory-accumulation
+    - optimization-funnel
+    - recipe-execution
+    - research-discipline
+    - review-checklists
+    - stage-gate-enforcement
+    - validation-flight-check
+    specialist_hint: domain-reclaim
+    tester_agent: validator
+    validation_mode: plan_review_code_review_tester
+  sync_review:
+    bootstrap_docs: []
+    code_reviewer_agent: reviewer
+    entry_agent: coordinator
+    handoff_contract_skill: handoff-contract
+    manager_agent: coordinator
+    pipeline_card: .opencode/pipelines/sync_review.md
+    plan_reviewer_agent: reviewer
+    primary_goal: instruction_count
+    research_first: true
+    skills:
+    - agent-core
+    - delegate
+    - domain-sync
+    - handoff-contract
+    - instruction-count-first
+    - memory-accumulation
+    - recipe-execution
+    - research-discipline
+    - review-checklists
+    - stage-gate-enforcement
+    - validation-flight-check
+    specialist_hint: domain-sync
+    tester_agent: validator
+    validation_mode: plan_review_code_review
+  workqueue_full:
+    bootstrap_docs: []
+    code_reviewer_agent: reviewer
+    entry_agent: coordinator
+    handoff_contract_skill: handoff-contract
+    manager_agent: coordinator
+    pipeline_card: .opencode/pipelines/workqueue_full.md
+    plan_reviewer_agent: reviewer
+    primary_goal: instruction_count
+    research_first: true
+    skills:
+    - ab-test-comparison
+    - agent-core
+    - delegate
+    - domain-workqueue
+    - flash-device-operations
+    - handoff-contract
+    - implementation-guardrails
+    - instruction-count-first
+    - memory-accumulation
+    - optimization-funnel
+    - recipe-execution
+    - research-discipline
+    - review-checklists
+    - stage-gate-enforcement
+    - validation-flight-check
+    specialist_hint: domain-workqueue
+    tester_agent: validator
+    validation_mode: plan_review_code_review_tester

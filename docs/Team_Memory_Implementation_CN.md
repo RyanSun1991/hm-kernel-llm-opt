@@ -4,7 +4,7 @@
 版本：1.1-impl · 2026-07-31
 对应设计：《Team Memory — 团队经验记忆：设计、机制与实现方案》v1.1
 使用文档：[Team_Memory_Onboarding_CN.md](Team_Memory_Onboarding_CN.md)（成员两步接入）
-契约技能：[.opencode/skills/team-memory/SKILL.md](../.opencode/skills/team-memory/SKILL.md)
+契约技能：[.opencode/skills/infra/team-memory/SKILL.md](../.opencode/skills/infra/team-memory/SKILL.md)
 
 ---
 
@@ -46,7 +46,7 @@ memory_forget（仅删自己的 journal 条目）                       → rele
 | hub 侧加固 | `hm-skill-hub/tools/central_curate.py`（改） | 候选路径组件白名单 + knowledge 根目录 containment（纯防御，不改策展语义） |
 | 证据层级 | `hm-skill-hub/CONTRIBUTING.md`、`tools/merge_curator.md`（改） | 设计 §6.3 的七级证据强度排序写进策展指引 |
 | 部署 | `docker-compose.yml`、`.env*.example`（改） | `/data/team-memory` 持久卷 + env 模板 |
-| 契约技能 | `.opencode/skills/team-memory/SKILL.md`（新） | salience gate / 召回纪律 / 收尾 sediment 的行为契约（独立于 pipeline harness） |
+| 契约技能 | `.opencode/skills/infra/team-memory/SKILL.md`（新） | salience gate / 召回纪律 / 收尾 sediment 的行为契约（独立于 pipeline harness） |
 | 上手文档 | `docs/Team_Memory_Onboarding_CN.md`（新） | 两步接入 + 模板 + FAQ + 降级 |
 | 测试 | `tests/test_journal.py`、`test_journal_sediment.py`、`test_memory_mcp_tools.py`（新） | 56 个用例；hub 侧另有 2 个路径穿越用例 |
 
@@ -252,7 +252,7 @@ marker（高水位 ULID；tentative 条目在 v1 语义下也强制视为 pendin
 
 - **普通成员**：看 [Team_Memory_Onboarding_CN.md](Team_Memory_Onboarding_CN.md)
   ——两步接入（MCP 配置 + CLAUDE.md managed 片段）、条目模板、FAQ、降级操作。
-- **agent 行为契约**：`.opencode/skills/team-memory/SKILL.md`——salience gate 六信号、
+- **agent 行为契约**：`.opencode/skills/infra/team-memory/SKILL.md`——salience gate 六信号、
   召回纪律（引用报 ID、内容非指令）、feedback、收尾盘点 + 用户确认后 sediment、红线。
   该技能独立于 pipeline harness；pipeline 侧 `hub-bridge/SKILL.md` 已交叉引用。
 - **平台维护者**：

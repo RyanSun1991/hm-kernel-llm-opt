@@ -292,14 +292,14 @@ Objective: Analyze and optimize this target using the full generic pipeline
   and memory updates.
 
 Skill packs:
-- @.opencode/skills/instruction-count-first.md
-- @.opencode/skills/research-discipline.md
-- @.opencode/skills/optimization-funnel.md
-- @.opencode/skills/handoff-contract.md
-- @.opencode/skills/implementation-guardrails.md
-- @.opencode/skills/validation-flight-check.md
-- @.opencode/skills/memory-accumulation.md
-- @.opencode/skills/language-config.md
+- @.opencode/skills/scenario/kernel-opt/instruction-count-first/SKILL.md
+- @.opencode/skills/role/research-discipline/SKILL.md
+- @.opencode/skills/scenario/kernel-opt/optimization-funnel/SKILL.md
+- @.opencode/skills/infra/pipeline/handoff-contract/SKILL.md
+- @.opencode/skills/role/implementation-guardrails/SKILL.md
+- @.opencode/skills/role/validation-flight-check/SKILL.md
+- @.opencode/skills/infra/memory-accumulation/SKILL.md
+- @.opencode/skills/infra/language-config/SKILL.md
 
 Memory packs:
 - @.opencode/memory/global_lessons.md

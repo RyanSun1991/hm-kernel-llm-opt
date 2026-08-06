@@ -1,0 +1,397 @@
+# Skill Registry — the single index for .opencode/skills/
+#
+# Purpose: keep only metadata resident (~80 tokens/skill); a skill's SKILL.md full
+# text is read ONLY after it is selected (progressive disclosure, design §5.3).
+# Roles read this file once at task start, match the brief against applies_when /
+# not_for, suggest ≤3 skills with reasons, and Read the chosen SKILL.md only after
+# the user confirms. Profiles preload skills statically and skip the suggest step.
+#
+# Fields
+#   name          skill directory name (unique across all tiers)
+#   tier          role | scenario[/<pack>] | infra | infra/pipeline
+#   class         core | domain | method | scenario | review | validation | tool | output
+#   roles         which workbench roles this skill fits; filters suggestions
+#                 (the pipeline lane loads skills by explicit path and ignores this)
+#   applies_when  POSITIVE triggers — task descriptions / paths that should surface it
+#   not_for       NEGATIVE triggers — cases where surfacing it is wrong
+#   conflicts     skills that must not be ACTIVE at the same time for one task.
+#                 Alternatives selected at runtime by a gate (e.g. the two A/B test
+#                 protocols, IC-first vs memory-tlb chosen by Stage-0 classification)
+#                 are NOT conflicts — commands legitimately co-load them.
+#   context_cost  approximate SKILL.md size; >500 lines must split into references/
+#   risk          R0 read-only · R1 doc-write · R2 source/build · R3 device/publish
+#                 A skill can never widen a role's permission ceiling: when a skill's
+#                 risk exceeds the role's rights it degrades to advisory content,
+#                 individual operations go through per-action ask, or the role
+#                 suggests a handoff (design §5.4).
+#
+# Governance: scripts/lint_skill_registry.py checks registry ↔ directory
+# consistency, tier placement, and the size ceiling. Run it before committing
+# skill changes.
+
+skills:
+
+  # ── infra: cross-cutting behavior contracts and bridges ─────────────────────
+
+  - name: agent-core
+    tier: infra
+    class: core
+    roles: [assistant, researcher, architect, implementer, reviewer, validator, coordinator]
+    applies_when: ["every workbench session — the base behavior contract all roles load"]
+    not_for: []
+    conflicts: []
+    context_cost: ~260 lines
+    risk: R0
+
+  - name: language-config
+    tier: infra
+    class: core
+    roles: [assistant, researcher, architect, implementer, reviewer, validator, coordinator]
+    applies_when: ["every session — determines the session output language"]
+    not_for: []
+    conflicts: []
+    context_cost: ~66 lines
+    risk: R0
+
+  - name: team-memory
+    tier: infra
+    class: core
+    roles: [assistant, researcher, architect, implementer, reviewer, validator, coordinator]
+    applies_when:
+      - "recalling prior team experience on a component before starting"
+      - "recording a reusable lesson or outcome from this session"
+    not_for: ["one-off questions with no reusable outcome"]
+    conflicts: []
+    context_cost: ~107 lines
+    risk: R1
+
+  - name: hub-bridge
+    tier: infra
+    class: tool
+    roles: [researcher, architect, reviewer, coordinator]
+    applies_when:
+      - "team-curated knowledge or bad-plan lists needed before proposing a mechanism"
+      - "sedimenting a finished run back to the team Skill Hub"
+    not_for: ["offline work with no skill-hub MCP available"]
+    conflicts: []
+    context_cost: ~152 lines
+    risk: R1
+
+  - name: human-interaction-memory
+    tier: infra
+    class: method
+    roles: [researcher, architect]
+    applies_when:
+      - "long iterative session with a human expert, per-turn verdict capture"
+      - "session must survive compaction with decisions intact"
+    not_for: ["short single-turn tasks", "fully delegated pipeline sub-agent runs"]
+    conflicts: []
+    context_cost: ~182 lines
+    risk: R1
+
+  - name: memory-accumulation
+    tier: infra
+    class: output
+    roles: [researcher, architect, coordinator, validator]
+    applies_when:
+      - "a run finished and produced stable findings, rejects, or heuristics"
+      - "decision stage of a pipeline pass"
+    not_for: ["mid-investigation — nothing stable to promote yet"]
+    conflicts: []
+    context_cost: ~68 lines
+    risk: R1
+
+  # ── infra/pipeline: pipeline-recipe process machinery (coordinator lane) ─────
+
+  - name: stage-gate-enforcement
+    tier: infra/pipeline
+    class: core
+    roles: [coordinator]
+    applies_when: ["running an /optimize_* pipeline recipe with mandatory stage gates"]
+    not_for: ["interactive human-routed work — the user owns routing, not a gate table"]
+    conflicts: []
+    context_cost: ~123 lines
+    risk: R0
+
+  - name: handoff-contract
+    tier: infra/pipeline
+    class: core
+    roles: [coordinator]
+    applies_when: ["pipeline stage transition requiring a full handoff packet"]
+    not_for: ["workbench handoffs — the task capsule is the carrier there"]
+    conflicts: []
+    context_cost: ~232 lines
+    risk: R0
+
+  - name: recipe-execution
+    tier: infra/pipeline
+    class: core
+    roles: [coordinator]
+    applies_when: ["running an /optimize_* recipe — the coordinator's operational manual"]
+    not_for: ["any non-recipe session", "any role other than coordinator"]
+    conflicts: []
+    context_cost: ~250 lines
+    risk: R1
+
+  - name: delegate
+    tier: infra/pipeline
+    class: tool
+    roles: [coordinator]
+    applies_when: ["spawning a sub-agent for a pipeline stage or a genuinely parallel branch"]
+    not_for: ["any role without delegate permission", "sequential work one role can do"]
+    conflicts: []
+    context_cost: ~131 lines
+    risk: R0
+
+  # ── role: domain-free discipline, one per responsibility ─────────────────────
+
+  - name: research-discipline
+    tier: role
+    class: method
+    roles: [researcher]
+    applies_when:
+      - "building a trustworthy system model of unfamiliar code"
+      - "investigation whose conclusions others will depend on"
+    not_for: ["questions answerable from a single file read"]
+    conflicts: []
+    context_cost: ~33 lines
+    risk: R0
+
+  - name: plan-funnel
+    tier: role
+    class: method
+    roles: [architect]
+    applies_when:
+      - "turning findings into options, trade-offs, and a defensible plan"
+      - "a decision with real alternatives that must be recorded"
+    not_for:
+      - "kernel performance-optimization ideation — use optimization-funnel"
+      - "the approach is already decided and only needs writing down"
+    conflicts: [optimization-funnel]
+    context_cost: ~95 lines
+    risk: R1
+
+  - name: review-checklists
+    tier: role
+    class: review
+    roles: [reviewer]
+    applies_when:
+      - "independently challenging a research note, plan, or patch"
+      - "an artifact wants to promote past draft"
+    not_for: ["authoring or repairing the artifact under review"]
+    conflicts: []
+    context_cost: ~100 lines
+    risk: R1
+
+  - name: implementation-guardrails
+    tier: role
+    class: method
+    roles: [implementer]
+    applies_when:
+      - "implementing an approved plan"
+      - "any source change that will go to code review"
+    not_for: ["exploratory throwaway edits the user explicitly framed as scratch"]
+    conflicts: []
+    context_cost: ~17 lines
+    risk: R2
+
+  - name: validation-flight-check
+    tier: role
+    class: validation
+    roles: [validator, reviewer]
+    applies_when:
+      - "confirming or falsifying a claim by build/test/benchmark execution"
+      - "deciding which validation rungs a patch requires"
+    not_for: ["claims with no executable test — say so instead of running theatre"]
+    conflicts: []
+    context_cost: ~26 lines
+    risk: R2
+
+  # ── scenario/kernel-opt: kernel performance-optimization pack ────────────────
+
+  - name: perf-bottleneck-playbooks
+    tier: scenario/kernel-opt
+    class: scenario
+    roles: [researcher, architect, reviewer, validator]
+    applies_when:
+      - "kernel performance optimization — classify the dominant cost before ideation"
+      - "choosing which metric a performance claim is judged against"
+    not_for: ["explanation-only tasks", "correctness bug fixing"]
+    conflicts: []
+    context_cost: ~89 lines
+    risk: R0
+
+  - name: instruction-count-first
+    tier: scenario/kernel-opt
+    class: method
+    roles: [researcher, architect, implementer, reviewer, validator]
+    applies_when:
+      - "the classification gate found the hot path compute-bound"
+      - "instruction-count reduction is the stated objective"
+    not_for:
+      - "io-bound / ipc-bound / memory-tlb-bound targets — IC cannot see the real cost"
+      - "explanation-only or bug-fix tasks"
+    conflicts: [kernel-understand, bug-fix]
+    context_cost: ~55 lines
+    risk: R0
+
+  - name: memory-tlb-optimization
+    tier: scenario/kernel-opt
+    class: method
+    roles: [researcher, architect, reviewer, validator]
+    applies_when:
+      - "memory-management syscall optimization (mprotect/madvise/munmap/mmap/mlock/brk)"
+      - "TLB, page-table, or shootdown-dominated paths"
+    not_for:
+      - "explanation-only tasks"
+      - "latency claims without memory-path evidence"
+    conflicts: []
+    context_cost: ~96 lines
+    risk: R0
+
+  - name: optimization-funnel
+    tier: scenario/kernel-opt
+    class: method
+    roles: [researcher, architect, reviewer]
+    applies_when:
+      - "kernel optimization ideation — five diverse-scope ideas with bad-plan dedup"
+      - "running an /optimize_* recipe or architect-led optimization planning"
+    not_for: ["non-optimization planning — use role/plan-funnel", "explanation-only tasks"]
+    conflicts: [plan-funnel, kernel-understand, bug-fix]
+    context_cost: ~96 lines
+    risk: R1
+
+  - name: iterative-optimization
+    tier: scenario/kernel-opt
+    class: method
+    roles: [coordinator]
+    applies_when: ["auto-iterate close-loop: a pass finished clean and another should start"]
+    not_for: ["single-pass runs", "human-routed interactive work"]
+    conflicts: []
+    context_cost: ~149 lines
+    risk: R0
+
+  - name: build-and-sign
+    tier: scenario/kernel-opt
+    class: tool
+    roles: [implementer, validator]
+    applies_when: ["compiling the patched kernel and signing a flashable feature image"]
+    not_for: ["source-only review with no build step"]
+    conflicts: []
+    context_cost: ~90 lines
+    risk: R2
+
+  - name: flash-device-operations
+    tier: scenario/kernel-opt
+    class: tool
+    roles: [validator]
+    applies_when: ["deploying a stock or feature image to the target device via Flash MCP"]
+    not_for: ["any role without device authority", "review or planning stages"]
+    conflicts: []
+    context_cost: ~188 lines
+    risk: R3
+
+  - name: ab-test-comparison
+    tier: scenario/kernel-opt
+    class: validation
+    roles: [validator]
+    applies_when:
+      - "per-function instruction-count A/B validation via Auto-Test MCP"
+      - "stock-vs-feature instruction comparison for a compute-bound micro-optimization"
+    not_for: ["latency or throughput claims — use the lmbench protocol"]
+    conflicts: []
+    context_cost: ~301 lines
+    risk: R3
+
+  - name: ab-test-comparison-lmbench
+    tier: scenario/kernel-opt
+    class: validation
+    roles: [validator]
+    applies_when:
+      - "lmbench full-suite A/B validation (the default test method)"
+      - "latency/throughput claims needing a benchmark delta with a noise floor"
+    not_for: ["fast per-function instruction-count-only checks — use ab-test-comparison"]
+    conflicts: []
+    context_cost: ~81 lines
+    risk: R3
+
+  # ── scenario/kernel-opt: subsystem domain packs (extracted in M3 from the four
+  #    legacy specialist agents; a profile preloads one, any role may load one) ────
+
+  - name: domain-reclaim
+    tier: scenario/kernel-opt
+    class: domain
+    roles: [researcher, architect, implementer, reviewer, validator]
+    applies_when:
+      - "sysmgr/memmgr reclaim, allocator slow paths, vmpressure, psi, watermarks"
+      - "path match: sysmgr/memmgr/mem/reclaim, sysmgr/memmgr/page, sysmgr/memmgr/psi"
+    not_for: ["subsystems outside memmgr reclaim"]
+    conflicts: []
+    context_cost: ~75 lines
+    risk: R0
+
+  - name: domain-hyperhold-io
+    tier: scenario/kernel-opt
+    class: domain
+    roles: [researcher, architect, implementer, reviewer, validator]
+    applies_when:
+      - "hyperhold, swap I/O, hpio, iotab, eid, inflight state, compression branches"
+      - "path match: sysmgr/memmgr/mem/swap/hyperhold"
+    not_for: ["non-swap I/O paths"]
+    conflicts: []
+    context_cost: ~70 lines
+    risk: R0
+
+  - name: domain-workqueue
+    tier: scenario/kernel-opt
+    class: domain
+    roles: [researcher, architect, implementer, reviewer, validator]
+    applies_when:
+      - "workqueue, thread pool, worker loop, enqueue/dequeue, dispatch, wakeup"
+      - "keywords: worker, queueing, batching, flush, per-cpu queue"
+    not_for: ["single-threaded paths with no dispatch machinery"]
+    conflicts: []
+    context_cost: ~75 lines
+    risk: R0
+
+  - name: domain-sync
+    tier: scenario/kernel-opt
+    class: domain
+    roles: [researcher, architect, implementer, reviewer, validator]
+    applies_when:
+      - "keywords: race, lock, deadlock, refcount, lifetime, wakeup ordering, contention"
+      - "lock splitting/sharding proposals, or reviewing a change for locking/lifetime risk"
+    not_for: ["single-threaded code with no shared state"]
+    conflicts: []
+    context_cost: ~80 lines
+    risk: R0
+
+  # ── scenario: non-optimization problem spaces ────────────────────────────────
+
+  - name: kernel-understand
+    tier: scenario
+    class: scenario
+    roles: [assistant, researcher, reviewer]
+    applies_when:
+      - "explanation only: how does X work, what calls Y, walk me through this path"
+      - "onboarding to unfamiliar kernel code"
+    not_for:
+      - "optimization tasks — this pack forbids performance framing"
+      - "tasks whose deliverable is a change"
+    conflicts: [instruction-count-first, optimization-funnel]
+    context_cost: ~60 lines
+    risk: R0
+
+  - name: bug-fix
+    tier: scenario
+    class: scenario
+    roles: [researcher, architect, implementer, reviewer, validator]
+    applies_when:
+      - "correctness work: something is wrong and must be made right"
+      - "keywords: crash, panic, hang, corruption, wrong result, regression"
+    not_for:
+      - "performance work — the objective here is correctness only"
+      - "explanation-only questions"
+    conflicts: [instruction-count-first, optimization-funnel]
+    context_cost: ~65 lines
+    risk: R2

@@ -21,9 +21,9 @@ OpenCode expands `@<path>` references inline, so the agent receives the full con
 | `optimize_workqueue` | `workqueue_full` pipeline | Workqueue and thread-pool optimization |
 | `review_sync` | `sync_review` pipeline | Synchronization and lock safety review (no implementation) |
 | `research_only` | `generic_full` pipeline | Research and analysis only (stops before implementation) |
-| `function_detail` | `@kernel-function-research` primary agent | One-shot deep dive on ONE kernel function — design + callee-graph report, no optimization |
-| `research` | `@kernel-research` primary agent | Iterative subsystem / file / function research with a human in the loop — builds a living design doc across many turns, no optimization |
-| `plan` | `@kernel-plan` primary agent | Iterative ideation + planning with a human in the loop — reads an existing design doc + memory + idea ledger, triages per idea, produces a plan |
+| `function_detail` | `@kernel-function-research` (agents/legacy/) | One-shot deep dive on ONE kernel function — design + callee-graph report, no optimization |
+| `research` | `@researcher` workbench role | Iterative subsystem / file / function research with a human in the loop — builds a living design doc across many turns, no optimization (`@kernel-research` in agents/legacy/ remains the fallback until the live comparison is archived) |
+| `plan` | `@architect` workbench role | Iterative ideation + planning with a human in the loop — reads an existing design doc + memory + idea ledger, triages per idea, produces a plan (`@kernel-plan` in agents/legacy/ remains the fallback until the live comparison is archived) |
 
 ## Customizing a Command
 
@@ -32,7 +32,7 @@ Before triggering a command, you typically need to edit it to set your specific 
 1. Open the `.md` file in this directory.
 2. Change the `Target:` line to your actual file or subsystem path.
 3. Optionally adjust the `Objective:` to narrow or broaden the scope.
-4. Optionally set `Auto-Iterate: N` — on clean pass verdicts the manager will auto-start another full pipeline pass on the same target, up to N passes total. Prior passes' plans/patches are treated as LANDED context and the researcher must find **orthogonal** new wins each pass. Default is 1 (single pass, legacy behavior). See `.opencode/skills/iterative-optimization/SKILL.md`.
+4. Optionally set `Auto-Iterate: N` — on clean pass verdicts the manager will auto-start another full pipeline pass on the same target, up to N passes total. Prior passes' plans/patches are treated as LANDED context and the researcher must find **orthogonal** new wins each pass. Default is 1 (single pass, legacy behavior). See `.opencode/skills/scenario/kernel-opt/iterative-optimization/SKILL.md`.
 5. Save and trigger via `/commands` in OpenCode.
 
 ## Creating Your Own Command
@@ -53,7 +53,7 @@ Then edit:
 
 ## Language Control
 
-All commands reference `@.opencode/config.yaml` and `@.opencode/skills/language-config/SKILL.md`. The session language is determined by the `language` field in `config.yaml`:
+All commands reference `@.opencode/config.yaml` and `@.opencode/skills/infra/language-config/SKILL.md`. The session language is determined by the `language` field in `config.yaml`:
 
 - `language: zh-CN` → all agent dialogue in Chinese
 - `language: en` → all agent dialogue in English
