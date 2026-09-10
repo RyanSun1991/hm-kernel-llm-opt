@@ -78,7 +78,7 @@ def _infer_memory_paths(repo_root: Path, target: str) -> list[str]:
         repo_root / ".opencode" / "memory" / "targets" / f"{slug}.md",
         repo_root / ".opencode" / "memory" / "global_lessons.md",
     ]
-    return [str(path.relative_to(repo_root)) for path in candidates]
+    return [path.relative_to(repo_root).as_posix() for path in candidates]
 
 
 def load_pipeline_profiles(path: str | Path = DEFAULT_PROFILES_PATH) -> dict[str, PipelineProfile]:
@@ -249,7 +249,7 @@ def initialize_pipeline_session(
         "stock_image_dir": profile.stock_image_dir,
         "artifacts": _parse_artifact_specs(artifact_specs or []),
         "memory_files": memory_paths,
-        "prompt_file": str(resolved_prompt_path.relative_to(root)),
+        "prompt_file": resolved_prompt_path.relative_to(root).as_posix(),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "notes": [],
     }

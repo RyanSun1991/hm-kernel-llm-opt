@@ -16,6 +16,44 @@ The platform is designed as an **agentic, closed-loop pipeline**:
 
 ## Quickstart
 
+### Evidence-driven evolution loop (V2 local integration)
+
+The new `hmopt.evolution` module implements the shared workflow for historical mining,
+pattern curation, candidate screening, owner confirmation, agent handoffs, review gates,
+paired A/B or correctness report evaluation, and journal/staging/hub knowledge.
+V2 adds typed workspace evidence, owner review sheets, task-specific OpenCode
+dispatch artifacts, strict IC conversion, quality overlays, checkpointed discovery,
+12 research templates, and sanitized knowledge review bundles. It runs independently
+of the legacy analysis stack. The included demo creates a new example Git repository
+and uses explicitly synthetic measurements; it does not run a kernel or a device.
+
+```bash
+python -m pip install -r requirements-evolution.txt
+PYTHONPATH=src python -m hmopt.evolution.cli demo-v2 --output /tmp/hmopt-evolution-v2-example
+```
+
+The output directory must not already exist. On PowerShell, first set
+`$env:PYTHONPATH = "src"`, then run the Python command with a new local output path.
+Git must be on `PATH`, or supplied via `--git-bin` before the subcommand.
+With a full package installation, use `hmopt evolve` or `hmopt-evolve`.
+
+Start with the [V2 design and delivery plan](docs/EVOLUTION_V2_IMPLEMENTATION_CN.md)
+and [V2 operations guide](docs/EVOLUTION_V2_OPERATIONS_CN.md).
+For a first installation and one real candidate, follow the
+[step-by-step setup guide](docs/EVOLUTION_V2_FIRST_RUN_CN.md), including the existing
+team delegate runtime prerequisite and a CLI-only execution path.
+The [baseline design](docs/EVOLUTION_PLATFORM_DESIGN_CN.md),
+[gate contract guide](docs/EVOLUTION_QUICKSTART_CN.md), and
+[production roadmap](docs/EVOLUTION_ROADMAP_CN.md) explain the shared foundations.
+Actual model execution, authenticated identities, trusted device collection and
+native team Skill Hub publication still require deployment integrations.
+
+### Existing analysis and device services
+
+The legacy `run`/`index` path in this checkout references a missing trace preprocessing
+module. The new evolution commands and lightweight pipeline entrypoints do not import
+that path. See [the repository assessment](docs/PROJECT_UNDERSTANDING.md) for details.
+
 - Configure the internal LLM API in `configs/model_server.yaml` (or set `HMOPT_LLM_API_KEY` / `HMOPT_LLM_BASE_URL`).
 - Point the platform at the `hm-verif-kernel` repo path in `configs/app.yaml`.
 - Run an end-to-end loop (dummy adapters by default, safe for local testing):

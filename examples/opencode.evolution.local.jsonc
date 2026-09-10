@@ -1,0 +1,27 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  // Merge this MCP entry into your existing local OpenCode configuration.
+  // Replace every path; use the SAME state directory as operator CLI commands.
+  // This starts a local stdio service, not an Agent or hardware experiment.
+  "mcp": {
+    "hmopt_evolution": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "C:/ABSOLUTE/PATH/TO/venv/Scripts/python.exe",
+        "-m",
+        "hmopt.evolution.cli",
+        "--root",
+        "C:/ABSOLUTE/PATH/TO/evolution-state",
+        "--git-bin",
+        "C:/ABSOLUTE/PATH/TO/git.exe",
+        "mcp-stdio"
+      ],
+      "environment": {
+        "PYTHONPATH": "C:/ABSOLUTE/PATH/TO/hm-kernel-llm-opt/src",
+        "PYTHONIOENCODING": "utf-8"
+      },
+      "timeout": 180000
+    }
+  }
+}

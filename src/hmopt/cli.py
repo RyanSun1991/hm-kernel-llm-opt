@@ -7,29 +7,27 @@ import logging
 from pathlib import Path
 import shutil
 import subprocess
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import typer
 
-from hmopt.core.config import AppConfig
+from hmopt.evolution.cli import app as evolution_app
 from hmopt.opencode import (
     initialize_pipeline_session,
     load_pipeline_profiles,
     resume_pipeline_session,
 )
-from hmopt.orchestration import run_artifact_analysis, run_pipeline, run_runtime_ingest
-from hmopt.indexing import build_kernel_index, build_runtime_index, route_query
-from hmopt.storage.artifact_store import ArtifactStore
-from hmopt.storage.db.engine import init_engine
-from hmopt.storage.db import models
-from hmopt.storage.db.engine import session_scope
-from hmopt.core.config import load_yaml, normalize_raw_config
-from hmopt.models.hiperf_report import HiperfReport, Frame
+
+if TYPE_CHECKING:
+    from hmopt.core.config import AppConfig
 
 app = typer.Typer(help="HM-VERIF kernel optimization platform")
+app.add_typer(evolution_app, name="evolve")
 
 
 def _load_config(path: str) -> AppConfig:
+    from hmopt.core.config import AppConfig
+
     return AppConfig.from_yaml(path)
 
 
@@ -37,6 +35,8 @@ def _load_config(path: str) -> AppConfig:
 def run(config: str = typer.Option("configs/app.yaml", help="Path to config YAML")) -> None:
     # Demo: python -m hmopt.cli run --config configs/app.yaml
     # Purpose: run full optimization pipeline (baseline profile + iterative loop).
+    from hmopt.orchestration import run_pipeline
+
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
     run_id = run_pipeline(cfg)
@@ -50,6 +50,8 @@ def optimize(
 ) -> None:
     # Demo: python -m hmopt.cli optimize --config configs/app.yaml --iterations 3
     # Purpose: same as run, but override iteration budget.
+    from hmopt.orchestration import run_pipeline
+
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
     cfg.iterations = iterations
@@ -66,6 +68,9 @@ def ingest_artifact(
 ) -> None:
     # Demo: python -m hmopt.cli ingest-artifact outputs/flamegraph.json --kind flamegraph
     # Purpose: manually stash an artifact into the DB/artifact store.
+    from hmopt.storage.artifact_store import ArtifactStore
+    from hmopt.storage.db.engine import init_engine, session_scope
+
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
     engine = init_engine(cfg.storage.db_url, schema_path=Path("src/hmopt/storage/db/schema.sql"))
@@ -79,6 +84,8 @@ def ingest_artifact(
 def analyze(config: str = typer.Option("configs/app.yaml", help="Config YAML")) -> None:
     # Demo: python -m hmopt.cli analyze --config configs/app.yaml
     # Purpose: run a single-iteration baseline analysis (no extra iterations).
+    from hmopt.orchestration import run_pipeline
+
     cfg = _load_config(config)
     cfg.iterations = 1
     run_id = run_pipeline(cfg)
@@ -92,6 +99,9 @@ def report(
 ) -> None:
     # Demo: python -m hmopt.cli report <run_id> --config configs/app.yaml
     # Purpose: fetch status/metrics/hotspots for a finished run.
+    from hmopt.storage.db import models
+    from hmopt.storage.db.engine import init_engine, session_scope
+
     cfg = _load_config(config)
     engine = init_engine(cfg.storage.db_url, schema_path=Path("src/hmopt/storage/db/schema.sql"))
     with session_scope(engine) as session:
@@ -158,6 +168,8 @@ def analyze_artifacts(
         kind, path = spec.split(":", 1)
         artifacts.append({"kind": kind, "path": path})
     if legacy_pipeline or with_patch:
+        from hmopt.orchestration import run_artifact_analysis
+
         run_id = run_artifact_analysis(
             cfg,
             artifacts,
@@ -167,6 +179,8 @@ def analyze_artifacts(
             run_profile=with_profile,
         )
     else:
+        from hmopt.orchestration import run_runtime_ingest
+
         run_id = run_runtime_ingest(cfg, artifacts)
     typer.echo(f"Artifact analysis complete. run_id={run_id}")
 
@@ -186,6 +200,8 @@ def index_kernel(
     # Demo: python -m hmopt.cli index-kernel --repo-path /path/to/hm-verif-kernel \
     #          --compile-commands-dir /path/to/hm-verif-kernel
     # Purpose: build kernel code ingestion + LlamaIndex index (clangd preferred).
+    from hmopt.indexing import build_kernel_index
+
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
     if repo_path:
@@ -203,6 +219,8 @@ def index_runtime(
 ) -> None:
     # Demo: python -m hmopt.cli index-runtime <run_id>
     # Purpose: build runtime metrics/hotspots index for a run.
+    from hmopt.indexing import build_runtime_index
+
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
     build_runtime_index(cfg, run_id)
@@ -236,6 +254,8 @@ def query(
     # Demo: python -m hmopt.cli query @queries/runtime_prompt.md --mode runtime_code
     # Demo: python -m hmopt.cli query "analyze hotspots" --prompt-file configs/prompts/analysis.md
     # Purpose: query routing across code/runtime indexes with optional custom prompt.
+    from hmopt.indexing import route_query
+
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
     prompt_path = Path(prompt_file) if prompt_file else None

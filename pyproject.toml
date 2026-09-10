@@ -31,6 +31,7 @@ dependencies = [
 
 [project.scripts]
 hmopt = "hmopt.cli:app"
+hmopt-evolve = "hmopt.evolution.cli:main"
 
 [tool.ruff]
 line-length = 100

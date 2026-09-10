@@ -46,6 +46,11 @@ hmopt start-pipeline --profile generic_full --target <symbol>
 
 # Resume pipeline session
 hmopt resume-pipeline
+
+# Evidence-driven evolution (independent minimal stack)
+python -m pip install -r requirements-evolution.txt
+PYTHONPATH=src python -m hmopt.evolution.cli demo-v2 --output /tmp/hmopt-evolution-v2-example
+PYTHONPATH=src python -m hmopt.evolution.cli --root data/evolution mcp-stdio
 ```
 
 ### MCP Servers
@@ -96,6 +101,7 @@ ruff format src/ tests/
 |---|---|
 | `cli.py` | Typer CLI entrypoint |
 | `core/` | Config loading (`AppConfig` from YAML), shared models |
+| `evolution/` | Local evidence, discovery, versioned gates, task dispatch, A/B and correctness acceptance, curated learning; see `docs/EVOLUTION_V2_IMPLEMENTATION_CN.md` |
 | `agents/` | LangGraph agent implementations (Conductor, TraceAnalyst, Coder, Reviewer, Verifier, Profiler, SafetyGuard) |
 | `orchestration/` | Pipeline runner — wires agents into the closed loop |
 | `analysis/` | Hotspot detection, bottleneck classification, artifact parsers |

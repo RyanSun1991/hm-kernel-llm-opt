@@ -1,0 +1,10 @@
+{
+  "kind": "correctness",
+  "required_checks": ["defect-reproduction", "functional-regression"],
+  "reproduction_checks": ["defect-reproduction"],
+  "execution_kind": "local",
+  "device_id": "REPLACE_WITH_EXECUTION_ENVIRONMENT_ID",
+  "workload_id": "REPLACE_WITH_CORRECTNESS_SUITE_ID",
+  "workload_config_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "environment_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+}

@@ -1,0 +1,18 @@
+{
+  "repo_path": "C:/work/kernel",
+  "owners": {
+    "kernel/**": "kernel-owner",
+    "mm/**": "memory-owner"
+  },
+  "revision": "HEAD",
+  "workspace": "C:/work/kernel",
+  "repo_id": "kernel-main",
+  "hotspots": [],
+  "page_size": 200,
+  "max_pages": 5,
+  "source_page_size": 200,
+  "source_page_bytes": 8388608,
+  "max_files": 5000,
+  "top_k": 20,
+  "scheduling_budget_s": 120
+}

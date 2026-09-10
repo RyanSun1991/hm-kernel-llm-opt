@@ -1,12 +1,17 @@
-"""Agent implementations."""
+"""Agent implementations, imported only when their exports are requested."""
 
-from .coder import CoderAgent
-from .conductor import ConductorAgent
-from .profiler import ProfilerAgent
-from .reviewer import ReviewerAgent
-from .safety import SafetyGuard
-from .trace_analyst import TraceAnalystAgent
-from .verifier import VerifierAgent
+from importlib import import_module
+from typing import Any
+
+_EXPORT_MODULES = {
+    "CoderAgent": "coder",
+    "ConductorAgent": "conductor",
+    "ProfilerAgent": "profiler",
+    "ReviewerAgent": "reviewer",
+    "SafetyGuard": "safety",
+    "TraceAnalystAgent": "trace_analyst",
+    "VerifierAgent": "verifier",
+}
 
 __all__ = [
     "CoderAgent",
@@ -17,3 +22,16 @@ __all__ = [
     "TraceAnalystAgent",
     "VerifierAgent",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    module_name = _EXPORT_MODULES.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(f".{module_name}", __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))
