@@ -7,38 +7,33 @@ import logging
 from pathlib import Path
 import shutil
 import subprocess
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import typer
 
-from hmopt.core.config import AppConfig
+from hmopt.evolution.cli import app as evolution_app
 from hmopt.opencode import (
     initialize_pipeline_session,
     load_pipeline_profiles,
     resume_pipeline_session,
 )
-from hmopt.orchestration import run_artifact_analysis, run_pipeline, run_runtime_ingest
-from hmopt.indexing import (
-    build_kernel_index,
-    build_runtime_index,
-    fetch_code_snippets,
-    retrieve_call_chain,
-    route_query,
-)
-from hmopt.storage.artifact_store import ArtifactStore
-from hmopt.storage.db.engine import init_engine
-from hmopt.storage.db import models
-from hmopt.storage.db.engine import session_scope
+if TYPE_CHECKING:
+    from hmopt.core.config import AppConfig
 
 app = typer.Typer(help="HM-VERIF kernel optimization platform")
+app.add_typer(evolution_app, name="evolve")
 
 
 def _load_config(path: str) -> AppConfig:
+    from hmopt.core.config import AppConfig
+
     return AppConfig.from_yaml(path)
 
 
 @app.command()
 def run(config: str = typer.Option("configs/app.yaml", help="Path to config YAML")) -> None:
+    from hmopt.orchestration import run_pipeline
+
     # Demo: python -m hmopt.cli run --config configs/app.yaml
     # Purpose: run full optimization pipeline (baseline profile + iterative loop).
     logging.basicConfig(level=logging.INFO)
@@ -54,6 +49,8 @@ def optimize(
 ) -> None:
     # Demo: python -m hmopt.cli optimize --config configs/app.yaml --iterations 3
     # Purpose: same as run, but override iteration budget.
+    from hmopt.orchestration import run_pipeline
+
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
     cfg.iterations = iterations
@@ -70,6 +67,9 @@ def ingest_artifact(
 ) -> None:
     # Demo: python -m hmopt.cli ingest-artifact outputs/flamegraph.json --kind flamegraph
     # Purpose: manually stash an artifact into the DB/artifact store.
+    from hmopt.storage.artifact_store import ArtifactStore
+    from hmopt.storage.db.engine import init_engine, session_scope
+
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
     engine = init_engine(cfg.storage.db_url, schema_path=Path("src/hmopt/storage/db/schema.sql"))
@@ -81,6 +81,8 @@ def ingest_artifact(
 
 @app.command()
 def analyze(config: str = typer.Option("configs/app.yaml", help="Config YAML")) -> None:
+    from hmopt.orchestration import run_pipeline
+
     # Demo: python -m hmopt.cli analyze --config configs/app.yaml
     # Purpose: run a single-iteration baseline analysis (no extra iterations).
     cfg = _load_config(config)
@@ -96,6 +98,9 @@ def report(
 ) -> None:
     # Demo: python -m hmopt.cli report <run_id> --config configs/app.yaml
     # Purpose: fetch status/metrics/hotspots for a finished run.
+    from hmopt.storage.db import models
+    from hmopt.storage.db.engine import init_engine, session_scope
+
     cfg = _load_config(config)
     engine = init_engine(cfg.storage.db_url, schema_path=Path("src/hmopt/storage/db/schema.sql"))
     with session_scope(engine) as session:
@@ -162,6 +167,8 @@ def analyze_artifacts(
         kind, path = spec.split(":", 1)
         artifacts.append({"kind": kind, "path": path})
     if legacy_pipeline or with_patch:
+        from hmopt.orchestration import run_artifact_analysis
+
         run_id = run_artifact_analysis(
             cfg,
             artifacts,
@@ -171,6 +178,8 @@ def analyze_artifacts(
             run_profile=with_profile,
         )
     else:
+        from hmopt.orchestration import run_runtime_ingest
+
         run_id = run_runtime_ingest(cfg, artifacts)
     typer.echo(f"Artifact analysis complete. run_id={run_id}")
 
@@ -190,7 +199,7 @@ def index_kernel(
         None,
         help=(
             "Code-index backend: clangd | scip-clang. Overrides config.indexing.backend. "
-            "scip-clang requires the scip-clang binary on PATH and protobuf>=4.25."
+            "scip-clang requires the scip-clang binary on PATH and protobuf>=6.31.1."
         ),
     ),
 ) -> None:
@@ -213,6 +222,8 @@ def index_kernel(
             )
             raise typer.Exit(code=2)
         cfg.indexing.backend = normalized
+    from hmopt.indexing import build_kernel_index
+
     build_kernel_index(cfg, repo_path=cfg.project.repo_path)
     typer.echo(f"Kernel code index built (backend={cfg.indexing.backend})")
 
@@ -226,6 +237,8 @@ def index_runtime(
     # Purpose: build runtime metrics/hotspots index for a run.
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
+    from hmopt.indexing import build_runtime_index
+
     build_runtime_index(cfg, run_id)
     typer.echo(f"Runtime index built for run_id={run_id}")
 
@@ -261,6 +274,8 @@ def query(
     cfg = _load_config(config)
     prompt_path = Path(prompt_file) if prompt_file else None
     symbol_list = [s.strip() for s in symbols.split(",")] if symbols else None
+    from hmopt.indexing import route_query
+
     response = route_query(
         cfg,
         query_str,
@@ -306,6 +321,8 @@ def call_chain_cmd(
     kinds_list = (
         [k.strip() for k in edge_kinds.split(",") if k.strip()] if edge_kinds else None
     )
+    from hmopt.indexing import retrieve_call_chain
+
     out = retrieve_call_chain(
         cfg,
         sym_list,
@@ -343,6 +360,8 @@ def get_snippets_cmd(
     logging.basicConfig(level=logging.INFO)
     cfg = _load_config(config)
     sym_list = [s.strip() for s in symbols.split(",") if s.strip()]
+    from hmopt.indexing import fetch_code_snippets
+
     out = fetch_code_snippets(
         cfg,
         sym_list,

@@ -4,7 +4,7 @@ mode: all
 description: >-
   Planning role — turns established findings into genuinely different options with
   trade-offs, records decisions and rejected alternatives, and writes plans with
-  acceptance criteria and a validation path. Never edits source (runtime-enforced);
+  acceptance criteria and a validation path. Never edits source;
   plan artifacts and decision records are its only writes.
 tools:
   read: true
@@ -13,25 +13,26 @@ tools:
   mcp: true
 permission:
   edit:
+    "*": deny
     ".opencode/local/**": allow
     ".opencode/plans/**": allow
     ".opencode/memory/**": allow
-    "*": deny
   bash:
-    "git status*": allow
-    "git log*": allow
-    "git diff*": allow
-    "git show*": allow
-    "git rev-parse*": allow
-    "ls*": allow
-    "cat *": allow
-    "head *": allow
-    "tail *": allow
-    "grep *": allow
-    "rg *": allow
-    "find *": allow
-    "wc *": allow
     "*": ask
+    # Fixed inspection commands only; other arguments require approval.
+    # Use read/grep/glob for file access. These rules are not a shell sandbox.
+    "pwd": allow
+    "git status": allow
+    "git status --short": allow
+    "git status --porcelain": allow
+    "git rev-parse --show-toplevel": allow
+    "git rev-parse HEAD": allow
+    "git log --no-patch --oneline -10": allow
+    "git diff --no-ext-diff --no-textconv": allow
+    "git diff --no-ext-diff --no-textconv --stat": allow
+    "git diff --no-ext-diff --no-textconv --name-status": allow
+    "git diff --no-ext-diff --no-textconv --cached": allow
+    "git show --no-ext-diff --no-textconv --stat HEAD": allow
   task: ask
   skill:
     "delegate": "deny"
@@ -98,9 +99,13 @@ Run the funnel (role/plan-funnel, or the loaded scenario funnel):
 Choosing the change and making the change are separate responsibilities with separate
 failure modes. The runtime scopes your writes to plan artifacts (`.opencode/plans/`),
 memory stores (`.opencode/memory/` — idea ledgers, decision logs), and workspaces
-(`.opencode/local/`); **source files are denied**, and bash is read-only (anything
-mutating asks). Your plan names files and changes; the implementer turns it into a
-diff after review. Never route around the ceiling (agent-core §10).
+(`.opencode/local/`); edit paths outside these roots are denied. Shared workspace
+access does not isolate each role's artifacts; do not edit source or another role's
+artifact there. Only listed fixed inspection commands run without bash approval;
+other forms and arguments ask. Use read/grep/glob for ordinary file inspection;
+command rules are not a shell sandbox. Your plan names files and changes; the
+implementer turns it into a diff after review. Never route around the ceiling
+(agent-core §10).
 
 ## Typical Next options you offer
 

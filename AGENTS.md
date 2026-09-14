@@ -101,7 +101,7 @@ ruff format src/ tests/
 | `analysis/` | Hotspot detection, bottleneck classification, artifact parsers |
 | `indexing/` | LlamaIndex + clangd index builders, query routing |
 | `storage/` | SQLAlchemy ORM (SQLite default), artifact file store, vector embeddings |
-| `api/` | FastAPI REST + MCP server endpoints (main, git, build, auto-test, sequential-thinking) |
+| `api/` | FastAPI REST + MCP endpoints; main `mcp_service` registry combines kernel retrieval and Evolution for HTTP/stdio; device, Git and Skill Hub services retain their own endpoints |
 | `mcp_server_git/` | Git MCP tool implementations |
 | `opencode/` | Pipeline session init, profile loading, OpenCode integration |
 | `sequential_thinking/` | Step-by-step reasoning MCP service |
@@ -148,7 +148,25 @@ skill set + a lightweight task workspace.
   permissions. Execution rights ≠ claim rights: artifact status promotions
   (approved / ready-to-land / validated) have role-owned conditions.
 
-**Pipeline lane (explicit recipes only).** `/optimize_*` commands run the strict
+**Pipeline lane (explicit recipes only).** `/evolve-candidate <absolute task.json>`
+uses the existing generic roles with `infra/pipeline/evolution-execution`, service
+evidence gates and a task-local workspace/capsule. It preserves default routing
+and role permissions, and does not use the optimization singleton state.
+`/evolve-research` selects versioned pattern-synthesis/candidate-assessment methods
+for existing researcher/reviewer roles. `/evolve-queue` reads approvals and dossiers;
+`/evolve-batch` explicitly selects approved IDs for serial execution with durable
+claims and isolated worktrees, reusing evolution-execution and all service gates.
+`/evolve-production` lets coordinator explicitly queue bounded OpenCode research
+campaigns, inspect/cancel them, suggest synthesis groups, or queue expert review.
+Production settings remain in the same Evolution config. The operator starts
+workers and notifications; authenticated gateway callbacks under `src/hmopt/api/`
+archive expert decisions. No tool grants owner authority or automatic implementation.
+`/evolve-workspace` manages explicitly selected Git projects under source_workspace;
+the business root is not assumed to be a Git repository. Runs freeze selected and
+build-only dependency revisions. `serve` advances research/scans; experiment IDs
+bind operator-configured build/test adapters to the same reviewed evidence gates.
+
+`/optimize_*` commands run the strict
 staged pipeline with mandatory gates:
 
 ```

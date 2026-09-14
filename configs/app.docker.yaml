@@ -2,6 +2,10 @@ includes:
   model_server: ./model_server.yaml
   workloads: ./workloads.yaml
 
+# Evolution uses this same config and existing PROJECT_REPO_PATH/KERNEL_REPO_PATH.
+# `hmopt evolve setup-workspace` appends its selected projects/owners section.
+# Runtime configuration: configs/evolution/README.md
+
 project:
   name: hm-verif-kernel
   repo_path: /workspace/kernel

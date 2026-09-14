@@ -500,8 +500,9 @@ def test_outcome_gate_note_survives_earlier_errors(tmp_path):
     from hmopt.sediment import journal as jm
 
     root = tmp_path / "tm"
-    _log_one(root, outcome="attempted")
-    jdir = root / "ryan" / "projA" / "journal" / "2026-07"
+    journal_id = _log_one(root, outcome="attempted")
+    # Use the actual entry month; this test must also run after July 2026.
+    jdir = next(root.rglob(f"{journal_id}.md")).parent
     for i in range(4):  # four malformed files would previously crowd the note out
         (jdir / f"J-000000000{i}AAAAAAAAAAAAAAAA.md").write_text("garbage", encoding="utf-8")
     out = svc.skillhub_sediment(

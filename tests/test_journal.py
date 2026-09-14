@@ -8,6 +8,7 @@ and non-blocking degradation on malformed files.
 
 from __future__ import annotations
 
+import os
 import stat
 from datetime import datetime, timezone
 from pathlib import Path
@@ -281,8 +282,11 @@ def test_feedback_rejects_secrets_and_uses_private_permissions(tmp_path):
         tmp_path, contributor="ryan", entry_id="F031", verdict="helpful"
     )
     assert errs == [] and path is not None
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    # Windows chmod does not expose POSIX owner/group mode semantics.
+    # Content/redaction checks above still run on every platform.
+    if os.name != "nt":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
 
 
 # --- status + pending marker --------------------------------------------------
@@ -354,14 +358,15 @@ def test_resolve_memory_root_env(monkeypatch, tmp_path):
     assert jm.resolve_memory_root(None) == tmp_path / "envroot"
     assert jm.resolve_memory_root(tmp_path / "explicit") == tmp_path / "explicit"
     monkeypatch.delenv("HMOPT_MEMBER_MEMORY_ROOT")
-    assert str(jm.resolve_memory_root(None)) == jm.DEFAULT_MEMORY_ROOT
+    assert jm.resolve_memory_root(None) == Path(jm.DEFAULT_MEMORY_ROOT)
 
 
 def test_write_permissions_and_input_bounds(tmp_path):
     entry = _log(tmp_path, outcome="validated")
     path = Path(entry.path)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert stat.S_IMODE((tmp_path / "ryan").stat().st_mode) == 0o700
+    if os.name != "nt":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        assert stat.S_IMODE((tmp_path / "ryan").stat().st_mode) == 0o700
 
     rejected, errors = jm.write_entry(
         tmp_path,

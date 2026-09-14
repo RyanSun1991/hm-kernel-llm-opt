@@ -21,10 +21,23 @@ services:
       HMOPT_LLM_BASE_URL: ${HMOPT_LLM_BASE_URL:-http://host.docker.internal:20010/v1}
       HMOPT_LLM_API_KEY: ${HMOPT_LLM_API_KEY:-}
       HMOPT_MCP_SERVER_API_KEY: ${HMOPT_MCP_SERVER_API_KEY:-}
+      HMOPT_APPROVAL_GATEWAY_KEY: ${HMOPT_APPROVAL_GATEWAY_KEY:-}
+      HMOPT_SMTP_PASSWORD: ${HMOPT_SMTP_PASSWORD:-}
       HMOPT_MCP_ALLOWED_HOSTS: ${HMOPT_MCP_ALLOWED_HOSTS:-}
       HMOPT_MCP_DISABLE_HOST_CHECK: ${HMOPT_MCP_DISABLE_HOST_CHECK:-}
       HMOPT_MCP_HOST: 0.0.0.0
       HMOPT_MCP_PORT: 7331
+      HMOPT_MCP_CONFIG: ${HMOPT_MCP_CONFIG:-configs/app.docker.yaml}
+      PROJECT_REPO_PATH: ${PROJECT_REPO_PATH:-}
+      KERNEL_REPO_PATH: ${KERNEL_REPO_PATH:-}
+      KERNEL_WORKSPACE_PATH: ${KERNEL_WORKSPACE_PATH:-}
+      # Legacy overrides stay wired for existing deployments; new setups use the shared YAML.
+      HMOPT_EVOLUTION_CONFIG: ${HMOPT_EVOLUTION_CONFIG:-}
+      HMOPT_EVOLUTION_ROOT: ${HMOPT_EVOLUTION_ROOT:-}
+      HMOPT_EVOLUTION_GIT_BIN: ${HMOPT_EVOLUTION_GIT_BIN:-}
+      HMOPT_EVOLUTION_WORKSPACE_ROOT: ${HMOPT_EVOLUTION_WORKSPACE_ROOT:-}
+      HMOPT_EVOLUTION_ARTIFACTS_ROOT: ${HMOPT_EVOLUTION_ARTIFACTS_ROOT:-}
+      HMOPT_EVOLUTION_DISCOVERY_PROFILES: ${HMOPT_EVOLUTION_DISCOVERY_PROFILES:-}
       HMOPT_SEQ_MCP_HOST: 0.0.0.0
       HMOPT_SEQ_MCP_PORT: 7333
       HMOPT_AUTO_TEST_MCP_HOST: 0.0.0.0
@@ -46,7 +59,7 @@ services:
       - ./:/app
       - ${KERNEL_REPO_PATH:-./data/sample-kernel}:/workspace/kernel:rw
       - ${KERNEL_REPO_PATH}:${KERNEL_REPO_PATH}:rw
-      - ${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:rw
+      - ${PROJECT_REPO_PATH:-${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}}:${PROJECT_REPO_PATH:-${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}}:rw
       - ./data/neo4j/data:/var/lib/neo4j
       - ./data/neo4j/logs:/var/log/neo4j
       - ./data/neo4j/plugins:/var/lib/neo4j/plugins
@@ -68,7 +81,7 @@ services:
       - ./:/app
       - ${KERNEL_REPO_PATH:-./data/sample-kernel}:/workspace/kernel:rw
       - ${KERNEL_REPO_PATH}:${KERNEL_REPO_PATH}:rw
-      - ${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:rw
+      - ${PROJECT_REPO_PATH:-${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}}:${PROJECT_REPO_PATH:-${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}}:rw
     working_dir: /app
     command: ["bash", "-lc", "bash scripts/run_git_mcp_server.sh"]
 
@@ -93,7 +106,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${KERNEL_REPO_PATH:-./data/sample-kernel}:/workspace/kernel:rw
       - ${KERNEL_REPO_PATH}:${KERNEL_REPO_PATH}:rw
-      - ${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:rw
+      - ${PROJECT_REPO_PATH:-${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}}:${PROJECT_REPO_PATH:-${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}}:rw
     working_dir: /app
     command: ["bash", "-lc", "bash scripts/run_build_mcp_server.sh"]
 
@@ -122,6 +135,6 @@ services:
       - ${HMOPT_MEMBER_MEMORY_HOST_ROOT:-./data/team-memory}:/data/team-memory:rw
       - ${KERNEL_REPO_PATH:-./data/sample-kernel}:/workspace/kernel:rw
       - ${KERNEL_REPO_PATH}:${KERNEL_REPO_PATH}:rw
-      - ${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}:rw
+      - ${PROJECT_REPO_PATH:-${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}}:${PROJECT_REPO_PATH:-${KERNEL_WORKSPACE_PATH:-${KERNEL_REPO_PATH}}}:rw
     working_dir: /app
     command: ["bash", "-lc", "bash scripts/run_skillhub_mcp_server.sh"]

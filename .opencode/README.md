@@ -3,7 +3,7 @@
 This directory is the canonical OpenCode-facing workspace for kernel analysis and
 optimization in this repository. Since the Agent Workbench migration (design:
 `docs/Agent_Workbench_Design_EN.md`) it hosts **two lanes**: the interactive
-workbench (default) and the automated pipeline (explicit `/optimize_*` recipes).
+workbench (default) and explicit recipes (`/optimize_*` and `/evolve-candidate`).
 
 ## Layout
 
@@ -73,6 +73,14 @@ workbench roles (see `skills/infra/pipeline/recipe-execution/SKILL.md`); the leg
 `@hm-opt-manager` chain (`agents/legacy/`) remains the fallback until the live
 old-vs-new comparison is archived.
 
+`/evolve-candidate <absolute task.json>` runs a separately staged Evolution
+candidate with the same generic roles. The service owns evidence gates;
+researcher → architect → independent reviewer precedes implementation, code
+review and validation. Runtime projections and role artifacts stay in
+`local/workspaces/evolution-<dispatch-id>/`, with no writes to the optimization
+singleton state. See `skills/infra/pipeline/evolution-execution/SKILL.md` and the
+Evolution configuration guide in the platform's `docs/` directory.
+
 ## Working Rules
 
 0. Read `config.yaml` and apply `skills/infra/language-config/SKILL.md` at the start
@@ -80,8 +88,9 @@ old-vs-new comparison is archived.
 1. Workbench lane: follow `skills/infra/agent-core/SKILL.md` (output contract, six
    verbs, capsule upkeep, status gating, permission discipline). The user owns
    routing.
-2. Pipeline lane: follow `docs/harness_engineer_system.md` + `skills/infra/pipeline/`
-   (stage gates, handoff packets, hub-and-spoke delegation).
+2. Optimization recipes: follow `docs/harness_engineer_system.md` + their
+   `skills/infra/pipeline/` packs. Evolution recipes use `evolution-execution` and
+   the supplied task-local capsule instead.
 3. Research before optimization; use Sequential Thinking MCP first and Kernel Index
    MCP early.
 4. Durable findings → `docs/`; stable reusable findings → `memory/`; approved plans →
