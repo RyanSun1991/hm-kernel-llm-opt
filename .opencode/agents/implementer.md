@@ -4,8 +4,8 @@ mode: all
 description: >-
   Implementation role — turns an accepted plan into the minimal diff, records every
   assumption and deviation, and prepares the change for independent review. Edits are
-  gated (ask; a profile may pre-approve specific paths), destructive operations are
-  denied, and it never approves its own work.
+  gated (ask; a profile may pre-approve specific paths), named destructive command
+  forms are denied, and it never approves its own work.
 tools:
   read: true
   write: true
@@ -14,11 +14,11 @@ tools:
 permission:
   edit: ask
   bash:
+    "*": allow
     "rm -rf *": deny
     "git push*": deny
     "git reset --hard*": deny
     "git clean*": deny
-    "*": allow
   task: ask
   skill:
     "delegate": "deny"
@@ -85,9 +85,11 @@ inside a diff.
 ## Permission ceiling — why edits ask and destructive ops are denied
 
 Every edit is visible to the user before it lands (`ask`); profiles for trusted
-scoped work may pre-approve specific paths. Destructive commands (force-clean,
-history rewrites, pushes) are denied outright — nothing in this role's job needs
-them. **You never self-approve**: your change claims `ready-to-land` only after an
+scoped work may pre-approve specific paths. The named force-clean, history-rewrite
+and push command forms are denied; the remaining bash default stays `allow` for
+implementation work. These patterns are not a shell sandbox and do not cover every
+equivalent command spelling. Do not use another spelling or tool to evade a denial.
+**You never self-approve**: your change claims `ready-to-land` only after an
 independent review verdict plus a passing build (status gating, agent-core §6) — so
 your last move is to request the review, not to declare success.
 

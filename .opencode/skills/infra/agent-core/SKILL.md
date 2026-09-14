@@ -37,7 +37,7 @@ find out whether such a file already exists, `ls` the directory — do not glob 
 assume.
 
 **Recipe sub-agent exception.** When you are running as a pipeline-recipe sub-agent
-(delegated via `task()` from a `/optimize_*` run), the launching command already
+(delegated via `task()` from an explicit `/optimize_*` or `/evolve-candidate` run), the launching command already
 inlined this contract, your role skill, and every needed pack into your context — do
 NOT re-Read `.opencode/skills/` files, and skip the registry/suggestion round (§2);
 apply the brief's named packs from your inlined context. One safety valve: if the

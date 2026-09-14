@@ -1,5 +1,24 @@
 # HM-VERIF Kernel Code & Performance Optimization Platform (LLM-Driven)
 
+The team's active development branch is **`opencode`**. Start with the
+[platform overview](docs/Platform_Overview_Quickstart_CN.md) and
+[Agent Workbench guide](docs/Agent_Workbench_Usage_CN.md).
+
+Evolution adds evidence-driven discovery and reviewed execution to the existing
+workbench, Team Memory and Skill Hub:
+
+- [Evolution 设计文档 — architecture, responsibilities and evidence gates](docs/EVOLUTION_DESIGN_CN.md)
+- [Evolution 实现文档 — code, data contracts and implementation details](docs/EVOLUTION_IMPLEMENTATION_CN.md)
+- **[Evolution 配置使用文档 — configuration, startup and complete operator workflow](docs/EVOLUTION_USAGE_CN.md)**
+
+Install with `pip install -e '.[dev,validation]'`, then use `hmopt evolve --help`.
+Evolution's 38 MCP tools are included in the existing `hmopt.api` main service
+(`python -m hmopt.api.mcp_stdio` or the HTTP `/mcp` endpoint). Configure selected Git
+projects and their owners with `hmopt evolve setup-workspace` in the existing platform
+YAML selected by `HMOPT_MCP_CONFIG`, then check readiness with `hmopt evolve doctor`.
+The explicit `/evolve-candidate` recipe uses the existing generic roles; everyday
+conversations continue to use the assistant workbench.
+
 This repository contains a **code + performance analysis and optimization platform** targeting the `hm-verif-kernel` codebase.
 
 The platform is designed as an **agentic, closed-loop pipeline**:

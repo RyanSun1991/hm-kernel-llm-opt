@@ -166,12 +166,13 @@ class ValidateTargetTests(unittest.TestCase):
             report_compare._validate_target("process", process=None, thread=None, lib=None, function=None)
         report_compare._validate_target("process", process="p", thread=None, lib=None, function=None)
 
-    def test_thread_requires_process_and_thread(self) -> None:
-        with self.assertRaisesRegex(ValueError, "--process.*--thread|--thread.*--process"):
+    def test_thread_requires_thread_and_accepts_optional_process_filter(self) -> None:
+        with self.assertRaisesRegex(ValueError, "--thread"):
             report_compare._validate_target("thread", process=None, thread=None, lib=None, function=None)
         with self.assertRaisesRegex(ValueError, "--thread"):
             report_compare._validate_target("thread", process="p", thread=None, lib=None, function=None)
         report_compare._validate_target("thread", process="p", thread="t", lib=None, function=None)
+        report_compare._validate_target("thread", process=None, thread="t", lib=None, function=None)
 
     def test_function_requires_all_four(self) -> None:
         with self.assertRaisesRegex(ValueError, "--function"):
@@ -536,7 +537,7 @@ class CompareReportsTests(_TmpBase):
         self.assertEqual(rc, 1)
         payload = json.loads(buf.getvalue().strip())
         self.assertFalse(payload["success"])
-        self.assertIn("--process", payload["error"])
+        self.assertIn("--thread", payload["error"])
 
 
 if __name__ == "__main__":

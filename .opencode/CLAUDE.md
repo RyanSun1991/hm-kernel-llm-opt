@@ -49,6 +49,25 @@ workspace**.
 
 ## Lane 2 — Pipeline recipes (explicit only)
 
+`/evolve-candidate <absolute task.json>` is a separate explicit recipe using
+`infra/pipeline/evolution-execution`: coordinator delegates the generic roles,
+EvolutionService enforces candidate/evidence gates, and a task-local workspace
+capsule carries resume. It never uses the optimization singleton state or widens
+role permissions. Its planning stage includes an independent reviewer task.
+`/evolve-research` selects versioned pattern-synthesis/candidate-assessment methods
+for existing researcher/reviewer roles; `/evolve-queue` reads approvals/dossiers.
+`/evolve-batch` explicitly selects approved IDs for serial, isolated execution,
+with durable claims and the same evolution-execution gates. Only coordinator delegates.
+`/evolve-production` explicitly schedules frozen research campaigns or expert review
+requests. Operator-owned workers/notifications share Evolution config; authenticated
+HTTP gateway decisions create receipts and manual continuations, without widening roles.
+`/evolve-workspace` explicitly starts or resumes selected projects within a
+multi-Git business workspace. `source_workspace.selected` limits discovery;
+`dependencies` freeze build inputs without discovery. The operator's `evolve serve`
+advances authorized discovery and research only. Experimental validation uses
+frozen manifests and explicit operator execution, with existing role and device gates.
+The optimization stage specification below applies to `/optimize_*` only.
+
 `/optimize_*` commands run the staged optimization pipeline on the workbench role
 chain — `coordinator` as hub, delegating to researcher / reviewer / implementer /
 validator (the legacy `@hm-opt-manager` chain in `agents/legacy/` remains the

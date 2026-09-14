@@ -21,25 +21,26 @@ tools:
   mcp: true
 permission:
   edit:
+    "*": deny
     ".opencode/local/**": allow
     ".opencode/docs/**": allow
     ".opencode/memory/**": allow
-    "*": deny
   bash:
-    "git status*": allow
-    "git log*": allow
-    "git diff*": allow
-    "git show*": allow
-    "git rev-parse*": allow
-    "ls*": allow
-    "cat *": allow
-    "head *": allow
-    "tail *": allow
-    "grep *": allow
-    "rg *": allow
-    "find *": allow
-    "wc *": allow
     "*": ask
+    # Fixed inspection commands only; other arguments require approval.
+    # Use read/grep/glob for file access. These rules are not a shell sandbox.
+    "pwd": allow
+    "git status": allow
+    "git status --short": allow
+    "git status --porcelain": allow
+    "git rev-parse --show-toplevel": allow
+    "git rev-parse HEAD": allow
+    "git log --no-patch --oneline -10": allow
+    "git diff --no-ext-diff --no-textconv": allow
+    "git diff --no-ext-diff --no-textconv --stat": allow
+    "git diff --no-ext-diff --no-textconv --name-status": allow
+    "git diff --no-ext-diff --no-textconv --cached": allow
+    "git show --no-ext-diff --no-textconv --stat HEAD": allow
   task: ask
   skill:
     "delegate": "deny"

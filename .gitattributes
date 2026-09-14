@@ -1,0 +1,2 @@
+# Keep text files in LF form on every platform. Binary files are auto-detected.
+* text=auto eol=lf

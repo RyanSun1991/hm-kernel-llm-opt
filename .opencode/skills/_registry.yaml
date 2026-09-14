@@ -31,6 +31,36 @@
 
 skills:
 
+  - name: pattern-synthesis
+    tier: infra/pipeline
+    class: method
+    roles: [researcher, reviewer, coordinator]
+    applies_when: ["explicit Evolution pattern synthesis or independent pattern review"]
+    not_for: ["ordinary questions", "owner approval"]
+    conflicts: []
+    context_cost: ~42 lines
+    risk: R1
+
+  - name: candidate-assessment
+    tier: infra/pipeline
+    class: method
+    roles: [researcher, coordinator]
+    applies_when: ["explicit Evolution candidate applicability investigation"]
+    not_for: ["owner approval", "source implementation"]
+    conflicts: []
+    context_cost: ~35 lines
+    risk: R1
+
+  - name: evolution-batch
+    tier: infra/pipeline
+    class: method
+    roles: [coordinator]
+    applies_when: ["explicit batch execution of selected approved Evolution candidate IDs"]
+    not_for: ["ordinary prompts", "implicit approval or queue-wide execution"]
+    conflicts: []
+    context_cost: ~47 lines
+    risk: R2
+
   # ── infra: cross-cutting behavior contracts and bridges ─────────────────────
 
   - name: agent-core
@@ -129,7 +159,7 @@ skills:
     roles: [coordinator]
     applies_when: ["running an /optimize_* recipe — the coordinator's operational manual"]
     not_for: ["any non-recipe session", "any role other than coordinator"]
-    conflicts: []
+    conflicts: [evolution-execution]
     context_cost: ~250 lines
     risk: R1
 
@@ -142,6 +172,26 @@ skills:
     conflicts: []
     context_cost: ~131 lines
     risk: R0
+
+  - name: evolution-mining
+    tier: infra/pipeline
+    class: method
+    roles: [researcher]
+    applies_when: ["explicit Evolution discovery from actual before/after code changes"]
+    not_for: ["ordinary questions", "owner or curator decisions", "candidate execution"]
+    conflicts: []
+    context_cost: ~75 lines
+    risk: R1
+
+  - name: evolution-execution
+    tier: infra/pipeline
+    class: core
+    roles: [coordinator]
+    applies_when: ["explicit /evolve-candidate recipe with a service-approved Evolution dispatch"]
+    not_for: ["ordinary workbench requests", "/optimize_* recipes", "owner or curator decisions"]
+    conflicts: [recipe-execution]
+    context_cost: ~100 lines
+    risk: R1
 
   # ── role: domain-free discipline, one per responsibility ─────────────────────
 

@@ -15,6 +15,12 @@ OpenCode expands `@<path>` references inline, so the agent receives the full con
 
 | Command | Pipeline / Agent | Description |
 |---------|------------------|-------------|
+| `evolve-discover <profile> [batch-id]` | `@researcher` + evolution-mining Skill | Run one bounded discovery batch from a registered profile, or explicitly resume that batch; stop at human gates |
+| `evolve-production <operation> ...` | `@coordinator` | Explicit background mining, progress/cancel, grouping suggestions or expert review requests; production settings are operator-owned |
+| `evolve-candidate <candidate-id or absolute task.json> [scope]` | `@coordinator` + Evolution service gates | Inspect a candidate, execute the full candidate loop, or stop after the requested stage/step |
+| `evolve-research <profile> <synthesize or review or assess> <ids>` | `@coordinator` + selected research Skill | Archive code-grounded synthesis, independent review or candidate applicability |
+| `evolve-queue <profile> [state]` | `@assistant` + candidate catalog | Read approval IDs, readiness and dossiers |
+| `evolve-batch <profile> <scope> <ids>` / `resume <batch-id>` | `@coordinator` + evolution-batch Skill | Explicit serial execution with isolated worktrees, durable claims and current gates |
 | `optimize_generic` | `generic_full` pipeline | Full pipeline for any kernel target with auto-routing |
 | `optimize_memmgr_reclaim` | `memmgr_reclaim_full` pipeline | Memory reclaim and allocator analysis |
 | `optimize_hyperhold` | `hyperhold_full` pipeline | Swap I/O, compression, hpio, iotab |
@@ -26,6 +32,50 @@ OpenCode expands `@<path>` references inline, so the agent receives the full con
 | `plan` | `@architect` workbench role | Iterative ideation + planning with a human in the loop — reads an existing design doc + memory + idea ledger, triages per idea, produces a plan (`@kernel-plan` in agents/legacy/ remains the fallback until the live comparison is archived) |
 
 ## Customizing a Command
+
+The Evolution commands need the local MCP configured using
+`examples/opencode.evolution.workbench.jsonc`; discovery also needs an
+operator-registered discovery profile. Both OpenCode and its local MCP process must
+see the same paths. No command-template edit is needed.
+
+```text
+/evolve-discover kernel-main
+/evolve-discover kernel-main <returned-batch-id>
+/evolve-candidate <candidate-id> status
+/evolve-candidate <candidate-id> full
+/evolve-candidate <candidate-id> stage
+/evolve-candidate <candidate-id> research
+/evolve-candidate <candidate-id> plan
+/evolve-candidate <candidate-id> implement
+/evolve-candidate <candidate-id> review
+/evolve-candidate <candidate-id> validate
+/evolve-candidate "C:/path with spaces/dispatch/task.json" stage
+```
+
+`kernel-main` above is an example profile name; use one returned by
+`evolution_discovery_profiles`. Discovery runs one bounded batch per invocation and
+reports its continuation ID. Draft pattern activation and candidate confirmation
+remain explicit operator CLI actions. After confirmation, `full` continues the
+candidate through research/plan review, implementation, code review and validation,
+stopping at a failed gate or an action requiring the operator. It does not include
+automatic candidate confirmation or Skill Hub publication.
+
+`stage` stops after the current service stage. `research` creates only the evidence
+note; `plan` includes research and independent plan review. `implement`, `review`
+and `validate` require respectively `plan_approved`, `implemented` and
+`code_approved`; a missing prerequisite is reported instead of silently executing
+earlier steps. `status` reads state without staging tasks. Omitting scope defaults
+to `full`, including the original absolute-task-path form.
+
+For candidate ID input the coordinator requests a fresh dispatch. The original
+absolute `state_path` returned by dispatch or workspace materialization also works.
+An unbound export must be bound to the target repository's
+`.opencode/local/workspaces` through `evolution_materialize_workspace`; a missing
+configured workspace root stops execution. The MCP store and candidate must match.
+This recipe uses its task-local capsule and execution state, preserving the
+optimization commands' singleton state. The commands are prompt contracts over
+service-enforced gates: source/device runtime permissions remain in effect and the
+MCP does not itself launch OpenCode agents.
 
 Before triggering a command, you typically need to edit it to set your specific target:
 

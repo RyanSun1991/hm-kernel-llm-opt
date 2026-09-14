@@ -1,8 +1,17 @@
-# OpenCode MCP Integration Guide (HMOPT Kernel Index)
+# OpenCode MCP Integration Guide (HMOPT Main Service)
 
 ## Goal
 
 Expose the existing HMOPT kernel index (LlamaIndex + Neo4j) through standard MCP so OpenCode can retrieve deeper, dependency-aware kernel context while coding and analysis.
+
+The same main service now exposes the Evolution optimization workflow. Its 38
+`evolution_*` tools share the existing stdio and HTTP entrypoints with the five
+kernel-index tools. Keep the existing OpenCode main MCP connection; configure
+Evolution on that service instead of adding another MCP server.
+For first use, follow the [Evolution configuration and usage guide](EVOLUTION_USAGE_CN.md#quickstart):
+setup updates the existing platform YAML, doctor checks readiness, and workbench commands start the workflow.
+The [design document](EVOLUTION_DESIGN_CN.md) explains the architecture and gates;
+the [implementation document](EVOLUTION_IMPLEMENTATION_CN.md) maps them to code and data contracts.
 
 ## Capability Assessment
 
@@ -37,11 +46,35 @@ This yields more complete and accurate context for change impact analysis and pe
 
 ## MCP Tools Exposed
 
-Tool names are configurable via environment variables:
+The main server exposes 43 tools: five kernel-index tools and 38 Evolution tools.
+`api/mcp_service.py` composes the tools; `api/evolution_mcp_service.py` owns the
+Evolution adapter. Business rules remain in `evolution/`, and its old standalone
+MCP module is a compatibility bridge to the API implementation.
+
+Kernel-index tool names are configurable via environment variables:
 
 - `HMOPT_MCP_TOOL_NAME` (default: `kernel_index_code`)
 - `HMOPT_MCP_GRAPH_TOOL_NAME` (default: `kernel_symbol_graph`)
 - `HMOPT_MCP_HOTSPOT_TOOL_NAME` (default: `kernel_hotspot_context`)
+- `HMOPT_MCP_CALL_CHAIN_TOOL_NAME` (default: `kernel_call_chain`)
+- `HMOPT_MCP_SNIPPETS_TOOL_NAME` (default: `kernel_get_snippets`)
+
+Evolution tool names retain the `evolution_` prefix. Configure selected Git projects
+and owners using `hmopt evolve setup-workspace`, which adds `evolution` to the existing
+platform YAML. The main MCP and operator CLI share `HMOPT_MCP_CONFIG`; an explicit
+CLI override uses `--config /absolute/app.yaml`. Existing paths, storage and OpenCode
+model settings are reused. See the [configuration reference](EVOLUTION_USAGE_CN.md#configuration)
+and [MCP connection instructions](EVOLUTION_USAGE_CN.md#mcp).
+For remote or container deployments, the file and every configured repository,
+workbench and artifact directory must be visible to the server. Setup does not
+upload files or translate local paths into container paths.
+
+Legacy JSON configuration and `HMOPT_EVOLUTION_*` overrides remain supported for
+existing deployments. New deployments use the shared platform YAML; avoid duplicating
+its values in environment overrides. Keep the CLI and server on the same configuration
+and state directory. For remote MCP, configure the server process and restart it after
+changes. Tool registration does not create an Evolution database; initialization is
+deferred until a tool needs the store. Profile configuration is frozen at server startup.
 
 ### 1) `kernel_index_code` (general, scenario-aware)
 

@@ -14,7 +14,7 @@ inside their own framing. Its value is exactly proportional to its independence.
 
 ## Clean-context inputs (all you need, all you may use)
 
-1. the requirement (objective + constraints, from the capsule or brief)
+1. the requirement (objective + constraints + any frozen metric/validation policy, from the capsule or brief)
 2. the artifact under review, at a named version
 3. the evidence it cites
 4. the decision record (what was already considered and rejected)
@@ -53,8 +53,10 @@ what was checked and what was deliberately not checked.
 - Does the plan solve the stated problem, or a nearby easier one?
 - Were real alternatives considered, with reasons the losers lost? (An empty or
   ceremonial trade-off section is a finding.)
-- Is every expected effect **measurable** — observable named, baseline available,
-  threshold stated?
+- Is every expected effect **checkable** against the frozen task policy — expected
+  behavior or metric named, with the required checks, baseline and thresholds?
+  A correctness claim needs behavioral evidence; do not replace it with an IC target
+  or add device/A/B requirements absent from that task or its selected scenario.
 - Are acceptance criteria falsifiable? Could a lazy implementation pass them while
   missing the point?
 - Does it duplicate something already rejected in the decision record?
@@ -80,7 +82,9 @@ what was checked and what was deliberately not checked.
 Per agent-core §6: your `approved` verdict is what lets a plan claim `approved`, and —
 together with a passing build — lets a patch claim `ready-to-land`. Performance and
 runtime claims are **not** yours to validate; that promotion belongs to the validator
-with A/B evidence. Do not approve a claim whose validation has not happened; approve
+with evidence required by the task's frozen policy (functional checks for correctness,
+the selected A/B protocol for performance). Recipe service gates remain authoritative;
+a review file alone does not change service state. Do not approve a claim whose validation has not happened; approve
 the artifact and state what validation is still owed.
 
 ## Discipline

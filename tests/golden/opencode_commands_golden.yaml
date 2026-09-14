@@ -1,5 +1,5 @@
 _meta:
-  frozen_from: '5f91a94 + M1-M4 migration + independent-review fixes (domain packs on the new chain) (2026-08-05)'
+  frozen_from: '5f91a94 + M1-M4 migration + independent-review fixes + Evolution interactive entrypoints + code-first history research (2026-09-11)'
   purpose: Golden contract for the OpenCode pipeline lane. Pins WHAT each command/profile loads (skill
     names, agents, gates) independent of WHERE skills live, so directory reorgs pass and behavior changes
     fail. Update deliberately when a phase intends a contract change.
@@ -11,6 +11,79 @@ artifact_contract:
   plan_review: .opencode/reviews/<slug>_plan_review.md
   validation: .opencode/bench/<slug>_validation.md
 commands:
+  evolve-workspace:
+    agent_file: .opencode/agents/coordinator.md
+    auto_iterate: false
+    bootstrap_docs: []
+    entry_agent: coordinator
+    memory_packs: []
+    skills:
+    - agent-core
+    - language-config
+  evolve-production:
+    agent_file: .opencode/agents/coordinator.md
+    auto_iterate: false
+    bootstrap_docs: []
+    entry_agent: coordinator
+    memory_packs: []
+    skills:
+    - agent-core
+    - language-config
+  evolve-research:
+    agent_file: .opencode/agents/coordinator.md
+    auto_iterate: false
+    bootstrap_docs: []
+    entry_agent: coordinator
+    memory_packs: []
+    skills:
+    - agent-core
+    - language-config
+  evolve-queue:
+    agent_file: .opencode/agents/assistant.md
+    auto_iterate: false
+    bootstrap_docs: []
+    entry_agent: assistant
+    memory_packs: []
+    skills:
+    - agent-core
+    - language-config
+  evolve-batch:
+    agent_file: .opencode/agents/coordinator.md
+    auto_iterate: false
+    bootstrap_docs: []
+    entry_agent: coordinator
+    memory_packs: []
+    skills:
+    - agent-core
+    - evolution-batch
+    - evolution-execution
+    - language-config
+  evolve-candidate:
+    agent_file: .opencode/agents/coordinator.md
+    auto_iterate: false
+    bootstrap_docs: []
+    entry_agent: coordinator
+    profile: evolution_stage
+    memory_packs: []
+    skills:
+    - agent-core
+    - evolution-execution
+    - implementation-guardrails
+    - language-config
+    - plan-funnel
+    - research-discipline
+    - review-checklists
+    - validation-flight-check
+  evolve-discover:
+    agent_file: .opencode/agents/researcher.md
+    auto_iterate: false
+    bootstrap_docs: []
+    entry_agent: researcher
+    memory_packs: []
+    skills:
+    - agent-core
+    - evolution-mining
+    - language-config
   function_detail:
     agent_file: .opencode/agents/legacy/kernel-function-research.md
     auto_iterate: false
