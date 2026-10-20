@@ -1,0 +1,9 @@
+# Minimal source-tree runtime for the local evolution CLI and stdio MCP.
+# Use PYTHONPATH=src; a full editable install uses pyproject.toml instead.
+pydantic>=2,<3
+typer>=0.12,<1
+mcp>=1.16.0,<2
+# Native Team Memory / Hub bridge. Raw lmbench conversion additionally needs
+# openpyxl>=3.1,<4 (or install the package's validation extra).
+pyyaml>=6
+jsonschema>=4

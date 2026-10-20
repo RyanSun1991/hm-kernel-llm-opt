@@ -6,7 +6,7 @@ This guide describes the fastest repo-native way to stage and run the OpenCode m
 
 The repo now has:
 
-- a one-shot starter agent at `.opencode/agents/kernel-pipeline-starter.md`
+- a one-shot starter agent at `.opencode/agents/legacy/kernel-pipeline-starter.md`
 - pipeline presets under `.opencode/pipelines/`
 - reusable skill packs under `.opencode/skills/`
 - machine-readable profiles in `configs/pipeline_profiles.yaml`

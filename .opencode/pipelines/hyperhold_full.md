@@ -6,27 +6,32 @@ Full-spectrum instruction-count-first analysis and optimization pipeline for Hyp
 
 ## Specialist Bias
 
-- research: `hyperhold-io-opt`
-- plan review: `kernel-plan-reviewer`
-- implementation: `kernel-code-agent`
-- code review: `kernel-code-reviewer`
-- tester: `kernel-tester-agent`
+- research: `researcher` + `domain-hyperhold-io` pack (legacy: `hyperhold-io-opt`)
+- plan review: `reviewer` (legacy: `kernel-plan-reviewer`)
+- implementation: `implementer` (legacy: `kernel-code-agent`)
+- code review: `reviewer` (legacy: `kernel-code-reviewer`)
+- tester: `validator` (legacy: `kernel-tester-agent`)
 
 ## Load First
 
 - `.opencode/config.yaml`
-- `.opencode/skills/language-config/SKILL.md`
-- `.opencode/skills/stage-gate-enforcement/SKILL.md`
+- `.opencode/skills/infra/language-config/SKILL.md`
+- `.opencode/skills/infra/pipeline/stage-gate-enforcement/SKILL.md`
+- `.opencode/skills/infra/agent-core/SKILL.md`
+- `.opencode/skills/infra/pipeline/recipe-execution/SKILL.md`
+- `.opencode/skills/infra/pipeline/delegate/SKILL.md`
+- `.opencode/skills/role/review-checklists/SKILL.md`
 - `.opencode/docs/harness_engineer_system.md`
 - `.opencode/docs/memmgr-reclaim_bootstrap.md`
-- `.opencode/skills/instruction-count-first/SKILL.md`
-- `.opencode/skills/research-discipline/SKILL.md`
-- `.opencode/skills/optimization-funnel/SKILL.md`
-- `.opencode/skills/perf-bottleneck-playbooks/SKILL.md`
-- `.opencode/skills/memory-tlb-optimization/SKILL.md`
-- `.opencode/skills/handoff-contract/SKILL.md`
-- `.opencode/skills/implementation-guardrails/SKILL.md`
-- `.opencode/skills/validation-flight-check/SKILL.md`
+- `.opencode/skills/scenario/kernel-opt/instruction-count-first/SKILL.md`
+- `.opencode/skills/role/research-discipline/SKILL.md`
+- `.opencode/skills/scenario/kernel-opt/domain-hyperhold-io/SKILL.md`
+- `.opencode/skills/scenario/kernel-opt/optimization-funnel/SKILL.md`
+- `.opencode/skills/scenario/kernel-opt/perf-bottleneck-playbooks/SKILL.md`
+- `.opencode/skills/scenario/kernel-opt/memory-tlb-optimization/SKILL.md`
+- `.opencode/skills/infra/pipeline/handoff-contract/SKILL.md`
+- `.opencode/skills/role/implementation-guardrails/SKILL.md`
+- `.opencode/skills/role/validation-flight-check/SKILL.md`
 
 ## Execution Shape
 

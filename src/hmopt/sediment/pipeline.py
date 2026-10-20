@@ -4,10 +4,12 @@
 It is non-blocking by contract: extraction failures are collected, not raised,
 so the main pipeline is never gated on sedimentation (design §8 cadence).
 """
+
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -35,21 +37,26 @@ class SedimentResult:
         return len(self.candidates)
 
 
-def extract_candidates(arts: RunArtifacts, *, contributor: str, llm: Any | None = None,
-                       no_llm: bool = False) -> list[dict[str, Any]]:
+def extract_candidates(
+    arts: RunArtifacts, *, contributor: str, llm: Any | None = None, no_llm: bool = False
+) -> list[dict[str, Any]]:
     cands: list[dict[str, Any]] = []
     seq = {"fact": 0, "anti": 0, "bad": 0, "idea": 0}
 
     for b in arts.bench:
         if b.verdict in ("landed", "approved"):
             seq["fact"] += 1
-            cands.append(ex.bench_to_fact(b, run_id=arts.run_id, contributor=contributor,
-                                          seq=seq["fact"]))
+            cands.append(
+                ex.bench_to_fact(b, run_id=arts.run_id, contributor=contributor, seq=seq["fact"])
+            )
     for v in arts.reviews:
         if v.decision == "reject":
             seq["anti"] += 1
-            cands.append(ex.review_to_anti_pattern(v, run_id=arts.run_id, contributor=contributor,
-                                                   seq=seq["anti"]))
+            cands.append(
+                ex.review_to_anti_pattern(
+                    v, run_id=arts.run_id, contributor=contributor, seq=seq["anti"]
+                )
+            )
             seq["bad"] += 1
             cands.append(ex.review_to_bad_plan(v, run_id=arts.run_id, seq=seq["bad"]))
     for c in arts.ledger:
@@ -57,8 +64,9 @@ def extract_candidates(arts: RunArtifacts, *, contributor: str, llm: Any | None 
         cands.append(ex.ledger_to_idea(c, run_id=arts.run_id, seq=seq["idea"]))
 
     if not no_llm:
-        cands.extend(llm_salience_pass(arts.free_text, llm, run_id=arts.run_id,
-                                       contributor=contributor))
+        cands.extend(
+            llm_salience_pass(arts.free_text, llm, run_id=arts.run_id, contributor=contributor)
+        )
     return cands
 
 
@@ -150,8 +158,9 @@ def sediment_opencode(
     seen: dict[str, set[int]] = {}
     for cand in mem.candidates:
         _namespace_id(cand, seen)
-    result = SedimentResult(run_id=run_id, parse_errors=list(mem.parse_errors),
-                            scanned=dict(mem.scanned))
+    result = SedimentResult(
+        run_id=run_id, parse_errors=list(mem.parse_errors), scanned=dict(mem.scanned)
+    )
 
     def _resolve(hr: str | Path | None) -> Path | None:
         if hr is not None:
@@ -185,6 +194,133 @@ def sediment_opencode(
     return result
 
 
+def sediment_journal(
+    memory_root: str | Path,
+    *,
+    contributor: str,
+    out_dir: str | Path,
+    project: str | None = None,
+    hub_root: str | Path | None = None,
+) -> SedimentResult:
+    """Distill a contributor's Team Memory journal into Tier-1 candidates.
+
+    Journal tier of the sediment flow (Team Memory design §4.6): entries are
+    already structured episodes, so the mapping is fully deterministic (no
+    LLM) — `journal_to_candidates` handles type/title/body/evidence directly
+    and withholds outcome attempted/unknown entries (the anti-optimism gate).
+    Same downstream as `sediment_opencode`: renumber -> validate -> jsonl.
+    """
+    from ..skillhub.resolver import find_hub_root
+    from .journal import (
+        candidate_eligible_entries,
+        iter_entries,
+        journal_to_candidates,
+        redact_scan,
+        render_entry,
+        safe_name,
+        write_sediment_marker,
+    )
+
+    def _resolve(hr: str | Path | None) -> Path | None:
+        if hr is not None:
+            path = Path(hr)
+            return path if (path / "schemas").is_dir() else find_hub_root(path)
+        return find_hub_root(Path.cwd())
+
+    resolved_hub = _resolve(hub_root)
+    entries, read_errors = iter_entries(memory_root, contributor, project=project)
+    clean_entries = []
+    redact_errors: list[str] = []
+    for entry in entries:
+        hits = redact_scan(render_entry(entry), hub_root=resolved_hub)
+        if hits:
+            patterns = ", ".join(sorted({name for _line, name, _snippet in hits}))
+            redact_errors.append(
+                f"{entry.id}: sediment redact check rejected secret pattern(s): {patterns}"
+            )
+            continue
+        clean_entries.append(entry)
+    cands, gated, map_errors = journal_to_candidates(clean_entries, contributor=contributor)
+    eligible_entries = candidate_eligible_entries(clean_entries)
+
+    run_id = f"journal-{safe_name(contributor, fallback='anonymous')}"
+    if project:
+        run_id += f"-{safe_name(project, fallback='general')}"
+    result = SedimentResult(
+        run_id=run_id,
+        parse_errors=[*read_errors, *redact_errors, *map_errors],
+    )
+    result.scanned["journal"] = len(entries)
+    if gated:
+        # First position: the onboarding docs point members at this exact line
+        # to explain a smaller-than-expected candidate count, so it must never
+        # be pushed out of the summary by earlier read/redact errors.
+        result.parse_errors.insert(
+            0,
+            f"outcome gate: {len(gated)} entr{'y' if len(gated) == 1 else 'ies'} with outcome "
+            f"attempted/unknown withheld ({', '.join(e.id for e in gated[:5])}"
+            f"{', …' if len(gated) > 5 else ''}) — validate or verdict them first",
+        )
+
+    seen: dict[str, set[int]] = {}
+    for cand in cands:
+        _namespace_id(cand, seen)
+
+    # Mapping is one candidate per eligible entry, in source order. Keep the
+    # pair so the pending marker can record only candidates actually emitted.
+    pairs = list(zip(cands, eligible_entries))
+    if len(pairs) != len(cands) or len(cands) != len(eligible_entries):
+        result.parse_errors.append(
+            "internal mapping mismatch: candidate coverage marker may be incomplete"
+        )
+    schemas_ok = resolved_hub is not None and (Path(resolved_hub) / "schemas").is_dir()
+    covered_ids: set[str] = set()
+    if not schemas_ok:
+        result.parse_errors.append(
+            "hub schemas not found; candidates emitted WITHOUT schema validation "
+            "(pass a hub_root to validate)"
+        )
+        result.candidates.extend(cands)
+        covered_ids.update(entry.id for _cand, entry in pairs)
+    else:
+        for cand, entry in pairs:
+            errs = validate_candidate(cand, resolved_hub)
+            if errs:
+                result.invalid.append((cand, errs))
+            else:
+                result.candidates.append(cand)
+                covered_ids.add(entry.id)
+
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"{run_id}.jsonl"
+    with open(out_path, "w", encoding="utf-8") as f:
+        for cand in result.candidates:
+            f.write(json.dumps(cand, ensure_ascii=False) + "\n")
+    out_path.chmod(0o600)
+    result.out_path = str(out_path)
+
+    # Marker only feeds memory_status's `pending` count — sediment still re-emits
+    # the full journal and hub dedup absorbs repeats. Exact id coverage keeps
+    # outcome-gated/redacted/schema-invalid entries pending.
+    last_by_project: dict[str, str] = {}
+    covered_by_project: dict[str, list[str]] = {}
+    for e in entries:
+        if e.id > last_by_project.get(e.project, ""):
+            last_by_project[e.project] = e.id
+        if e.id in covered_ids:
+            covered_by_project.setdefault(e.project, []).append(e.id)
+    for proj, last_id in sorted(last_by_project.items()):
+        write_sediment_marker(
+            memory_root,
+            contributor,
+            proj,
+            last_id=last_id,
+            covered_ids=covered_by_project.get(proj, []),
+        )
+    return result
+
+
 def _namespace_id(cand: dict[str, Any], seen: dict[str, set[int]]) -> None:
     """Renumber a candidate's provisional id so it is unique within the bundle.
 
@@ -209,16 +345,39 @@ def _namespace_id(cand: dict[str, Any], seen: dict[str, set[int]]) -> None:
     rec["id"] = f"{prefix}{num:0{len(digits)}d}"
 
 
-def bundle_staging(staging_dir: str | Path, out_path: str | Path) -> tuple[Path, int]:
+def bundle_staging(
+    staging_dir: str | Path,
+    out_path: str | Path,
+    *,
+    source_paths: Iterable[str | Path] | None = None,
+    exclusive: bool = False,
+) -> tuple[Path, int]:
     """Collate all per-run staging jsonl into one bundle (for a hub PR), renumbering
-    colliding provisional ids so the bundle is hub-lint-clean (review F7)."""
+    colliding provisional ids so the bundle is hub-lint-clean (review F7).
+
+    ``source_paths`` scopes a Team Memory bundle to files emitted by the current
+    call. The legacy pipeline path omits it and still bundles the whole staging
+    directory. ``exclusive`` guarantees a timestamped Team Memory bundle can
+    never overwrite an earlier one.
+    """
     staging_dir = Path(staging_dir)
     out_path = Path(out_path)
     seen: dict[str, set[int]] = {}
     n = 0
-    with open(out_path, "w", encoding="utf-8") as out:
-        for jf in sorted(staging_dir.glob("*.jsonl")):
-            if jf.resolve() == out_path.resolve():
+    files = (
+        sorted(Path(path) for path in source_paths)
+        if source_paths is not None
+        else sorted(staging_dir.glob("*.jsonl"))
+    )
+    with open(out_path, "x" if exclusive else "w", encoding="utf-8") as out:
+        for jf in files:
+            # Skip prior bundles too: timestamped bundle names (_bundle_<ts>.jsonl,
+            # Team Memory design §4.6 item 3) would otherwise re-ingest each other.
+            if (
+                not jf.is_file()
+                or jf.resolve() == out_path.resolve()
+                or jf.name.startswith("_bundle")
+            ):
                 continue
             for line in jf.read_text(encoding="utf-8").splitlines():
                 if not line.strip():
@@ -230,4 +389,5 @@ def bundle_staging(staging_dir: str | Path, out_path: str | Path) -> tuple[Path,
                 _namespace_id(cand, seen)
                 out.write(json.dumps(cand, ensure_ascii=False) + "\n")
                 n += 1
+    out_path.chmod(0o600)
     return out_path, n

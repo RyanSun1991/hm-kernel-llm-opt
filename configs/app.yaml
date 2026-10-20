@@ -2,6 +2,10 @@ includes:
   model_server: ./model_server.yaml
   workloads: ./workloads.yaml
 
+# Evolution uses this same config. `hmopt evolve setup-workspace` appends only
+# selected projects/owners; paths and OpenCode model settings are inherited.
+# Runtime configuration: configs/evolution/README.md
+
 project:
   name: hm-verif-kernel
   # Absolute path to your local hm-verif-kernel checkout.

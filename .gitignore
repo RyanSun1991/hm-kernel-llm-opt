@@ -29,5 +29,5 @@ __pycache__/
 /.opencode/local/
 
 # Hub-bridge read-path audit log — per-run record of what `hmopt resolve`
-# mounted into agent context (.opencode/skills/hub-bridge). Runtime-only.
+# mounted into agent context (.opencode/skills/infra/hub-bridge). Runtime-only.
 /.opencode/state/retrieval.jsonl

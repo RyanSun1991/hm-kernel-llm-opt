@@ -1,0 +1,23 @@
+// Evolution is part of the existing HMOPT main MCP, not a second service.
+// If the main MCP already exists, merge environment values into that entry.
+// Add the whole entry only when no HMOPT main MCP connection exists yet.
+// Keep existing default_agent, roles, providers and other MCP services.
+// Paths below must be visible to BOTH OpenCode and the local MCP process.
+// Prefer the machine-specific fragment produced by `hmopt evolve setup`.
+{
+  "mcp": {
+    "hmopt_kernel_index": {
+      "type": "local",
+      "command": [
+        "/path/to/venv/bin/python",
+        "-m", "hmopt.api.mcp_stdio"
+      ],
+      "environment": {
+        "HMOPT_MCP_CONFIG": "/path/to/workbench/configs/app.yaml"
+      },
+      // This controls tool discovery, not a hard deadline for a mining batch.
+      "timeout": 180000,
+      "enabled": true
+    }
+  }
+}

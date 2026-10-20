@@ -372,6 +372,56 @@ def test_central_curate_real_hub_smoke():
     assert report.decisions and report.decisions[0].incoming_id == "F500"
 
 
+def test_materialization_rejects_candidate_path_traversal(tmp_path):
+    candidates = [
+        {
+            "schema": "memory_item",
+            "record": {
+                "id": "F900",
+                "type": "fact",
+                "title": "unsafe",
+                "body": "body",
+                "scope": {"level": "function", "target_slug": "../../escape"},
+                "source": [{"kind": "doc", "ref": "x"}],
+                "maturity": "L1",
+                "status": "active",
+                "created_at": "2026-07-30T00:00:00+00:00",
+            },
+        }
+    ]
+    report = central_curate.CurationReport(decisions=[central_curate.Decision("F900", "add")])
+    actions = central_curate.apply_additions(
+        report, candidates, [], tmp_path / "knowledge", write=True
+    )
+    assert "cannot derive path" in actions[0][3]
+    assert not (tmp_path / "escape").exists()
+
+
+def test_materialization_accepts_project_level_architectural_fact(tmp_path):
+    candidates = [
+        {
+            "schema": "memory_item",
+            "record": {
+                "id": "F900",
+                "type": "fact",
+                "title": "project fact",
+                "body": "body",
+                "scope": {"level": "architectural", "target_slug": "my-project"},
+                "source": [{"kind": "doc", "ref": "journal:alice/my-project/J-x"}],
+                "maturity": "L1",
+                "status": "active",
+                "created_at": "2026-07-30T00:00:00+00:00",
+            },
+        }
+    ]
+    report = central_curate.CurationReport(decisions=[central_curate.Decision("F900", "add")])
+    actions = central_curate.apply_additions(
+        report, candidates, [], tmp_path / "knowledge", write=True
+    )
+    assert actions[0][3] == "WROTE"
+    assert actions[0][2].startswith("targets/my-project/facts/")
+
+
 # ---- standalone runner -----------------------------------------------------
 
 def _run_standalone() -> int:

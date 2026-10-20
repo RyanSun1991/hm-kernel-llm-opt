@@ -12,6 +12,20 @@ needs the §9 three gates + double review.
 > record. Temporal / conditional / selector / evidence / subsumption all **keep
 > both**. Superseded records stay auditable (`status: superseded` + `valid_until`).
 
+## Evidence strength (strongest → weakest)
+
+1. objective test / benchmark;
+2. landed or reverted result;
+3. explicit human verdict;
+4. independent reuse;
+5. locatable static-code fact;
+6. tool output;
+7. model self-assessment.
+
+LLM confidence is metadata, not evidence. Never supersede an existing record
+unless the incoming evidence is strictly stronger under this ordering; ties or
+unclear provenance are escalated and both records remain.
+
 ## Per-candidate decision — classify the relation to the nearest hub records
 
 Run the deterministic tools first; only adjudicate the cases they flag as

@@ -4,7 +4,7 @@ Per-target registry of every optimization mechanism verdicted by a human reviewe
 
 ## When Populated
 
-Ideas are written here whenever a primary agent that loads `.opencode/skills/human-interaction-memory/SKILL.md` receives a per-idea verdict from the human expert.  Typical triggers:
+Ideas are written here whenever a primary agent that loads `.opencode/skills/infra/human-interaction-memory/SKILL.md` receives a per-idea verdict from the human expert.  Typical triggers:
 
 - `kernel-plan` presents 3–5 ranked candidate ideas → human approves / rejects / defers each → ledger gets N new rows
 - `kernel-research` discovers a design pitfall and the human explicitly says "this whole direction is wrong" → ledger gets a rejected row
@@ -20,7 +20,7 @@ Ideas are written here whenever a primary agent that loads `.opencode/skills/hum
 
 Anyone generating optimization ideas for a target MUST read the target's ledger (if it exists) before the funnel step.  Ideas that match a `rejected` mechanism MUST be dropped with a citation; ideas matching a `landed` mechanism MUST be dropped as already-landed; `deferred` entries MAY be re-proposed only if the `reopen_trigger` has plausibly fired, and that reasoning must be stated in the funnel handoff.
 
-See `.opencode/skills/human-interaction-memory/SKILL.md` — "Dedup Feedback Loop".
+See `.opencode/skills/infra/human-interaction-memory/SKILL.md` — "Dedup Feedback Loop".
 
 ## Write Rules
 

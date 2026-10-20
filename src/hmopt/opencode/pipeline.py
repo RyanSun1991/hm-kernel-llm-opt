@@ -24,11 +24,11 @@ class PipelineProfile:
     name: str
     title: str
     description: str
-    entry_agent: str = "hm-opt-manager"
-    manager_agent: str = "hm-opt-manager"
-    plan_reviewer_agent: str = "kernel-plan-reviewer"
-    code_reviewer_agent: str = "kernel-code-reviewer"
-    tester_agent: str = "kernel-tester-agent"
+    entry_agent: str = "coordinator"
+    manager_agent: str = "coordinator"
+    plan_reviewer_agent: str = "reviewer"
+    code_reviewer_agent: str = "reviewer"
+    tester_agent: str = "validator"
     specialist_hint: str = ""
     pipeline_card: str = ""
     objective_template: str = ""
@@ -39,7 +39,7 @@ class PipelineProfile:
     artifacts_expected: list[str] = field(default_factory=list)
     memory_mode: str = "auto"
     primary_goal: str = "instruction_count"
-    handoff_contract: str = ".opencode/skills/handoff-contract.md"
+    handoff_contract: str = ".opencode/skills/infra/pipeline/handoff-contract/SKILL.md"
     flash_relay_url: str = ""
     stock_image_dir: str = ""
 
@@ -78,7 +78,10 @@ def _infer_memory_paths(repo_root: Path, target: str) -> list[str]:
         repo_root / ".opencode" / "memory" / "targets" / f"{slug}.md",
         repo_root / ".opencode" / "memory" / "global_lessons.md",
     ]
-    return [str(path.relative_to(repo_root)) for path in candidates]
+    # as_posix keeps the emitted paths forward-slashed on Windows too — they are
+    # written into prompts and state files that the rest of the harness matches
+    # against `.opencode/...` literals.
+    return [path.relative_to(repo_root).as_posix() for path in candidates]
 
 
 def load_pipeline_profiles(path: str | Path = DEFAULT_PROFILES_PATH) -> dict[str, PipelineProfile]:
@@ -92,11 +95,11 @@ def load_pipeline_profiles(path: str | Path = DEFAULT_PROFILES_PATH) -> dict[str
             name=name,
             title=str(data.get("title") or name),
             description=str(data.get("description") or ""),
-            entry_agent=str(data.get("entry_agent") or "hm-opt-manager"),
-            manager_agent=str(data.get("manager_agent") or "hm-opt-manager"),
-            plan_reviewer_agent=str(data.get("plan_reviewer_agent") or "kernel-plan-reviewer"),
-            code_reviewer_agent=str(data.get("code_reviewer_agent") or "kernel-code-reviewer"),
-            tester_agent=str(data.get("tester_agent") or "kernel-tester-agent"),
+            entry_agent=str(data.get("entry_agent") or "coordinator"),
+            manager_agent=str(data.get("manager_agent") or "coordinator"),
+            plan_reviewer_agent=str(data.get("plan_reviewer_agent") or "reviewer"),
+            code_reviewer_agent=str(data.get("code_reviewer_agent") or "reviewer"),
+            tester_agent=str(data.get("tester_agent") or "validator"),
             specialist_hint=str(data.get("specialist_hint") or ""),
             pipeline_card=str(data.get("pipeline_card") or ""),
             objective_template=str(data.get("objective_template") or ""),
@@ -108,7 +111,8 @@ def load_pipeline_profiles(path: str | Path = DEFAULT_PROFILES_PATH) -> dict[str
             memory_mode=str(data.get("memory_mode") or "auto"),
             primary_goal=str(data.get("primary_goal") or "instruction_count"),
             handoff_contract=str(
-                data.get("handoff_contract") or ".opencode/skills/handoff-contract.md"
+                data.get("handoff_contract")
+                or ".opencode/skills/infra/pipeline/handoff-contract/SKILL.md"
             ),
             flash_relay_url=str(data.get("flash_relay_url") or ""),
             stock_image_dir=str(data.get("stock_image_dir") or ""),
@@ -127,9 +131,16 @@ def validate_profile_assets(profile: PipelineProfile, repo_root: str | Path) -> 
     root = Path(repo_root)
     missing: list[str] = []
 
-    agent_file = root / ".opencode" / "agents" / f"{profile.entry_agent}.md"
-    if not agent_file.exists():
-        missing.append(str(agent_file.relative_to(root)))
+    # Agents may live at agents/ top level (workbench roles), agents/legacy/
+    # (pre-workbench pipeline cast), or agents/profiles/ (compositions).
+    agents_root = root / ".opencode" / "agents"
+    agent_candidates = [
+        agents_root / f"{profile.entry_agent}.md",
+        agents_root / "legacy" / f"{profile.entry_agent}.md",
+        agents_root / "profiles" / f"{profile.entry_agent}.md",
+    ]
+    if not any(candidate.exists() for candidate in agent_candidates):
+        missing.append(agent_candidates[0].relative_to(root).as_posix())
 
     candidates: list[str] = list(profile.skills)
     candidates += list(profile.bootstrap_docs)

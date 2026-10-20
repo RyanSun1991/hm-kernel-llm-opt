@@ -76,5 +76,5 @@
         "./.opencode/**": "allow"
     }
   },
-  "default_agent": "hm-opt-manager"
+  "default_agent": "assistant"
 }

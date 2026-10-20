@@ -10,8 +10,12 @@ Two-stage extraction (§8):
      fields (delta_pct / compare_level / source[]).
   2. optional LLM salience pass (`salience.py`) — capture reusable free-form
      insight the rules miss; products default to confidence=tentative.
+
+Team Memory (design §4) adds a third source: the per-contributor journal
+(`journal.py`), a server-side store of experiences distilled at capture time
+from free-form conversations, sedimented via `pipeline.sediment_journal`.
 """
 
 from __future__ import annotations
 
-__all__ = ["extractors", "readers", "pipeline", "salience"]
+__all__ = ["extractors", "journal", "pipeline", "readers", "salience"]

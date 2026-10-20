@@ -52,7 +52,7 @@
 | BEAT | t | 画面 | 终端/UI 文本 | 字幕卡 | 屏幕注释 | 音效 |
 |---|---|---|---|---|---|---|
 | 1 | 0:30–0:35 | 字幕卡全屏 | — | 主：`Stage 1 — Intake & Routing`<br>副：`入站与路由`<br>角：`01 / 07` | — | stinger |
-| 2 | 0:35–0:43 | OPENCODE 区出现首个 banner | `=== kernel-pipeline-starter v1 — acknowledging target: {TARGET} ===`<br>`loading: .opencode/config.yaml`<br>`loading: .opencode/skills/language-config.md`<br>`loading: .opencode/docs/harness_engineer_system.md`<br>... | — | 浅蓝标签：`agent: kernel-pipeline-starter v1` | — |
+| 2 | 0:35–0:43 | OPENCODE 区出现首个 banner | `=== kernel-pipeline-starter v1 — acknowledging target: {TARGET} ===`<br>`loading: .opencode/config.yaml`<br>`loading: .opencode/skills/infra/language-config.md`<br>`loading: .opencode/docs/harness_engineer_system.md`<br>... | — | 浅蓝标签：`agent: kernel-pipeline-starter v1` | — |
 | 3 | 0:43–0:52 | 自动切到 manager；HUD 中心 hub 亮起 | `=== os-opt-manager v1 — taking control of target: {TARGET} ===`<br>`stage: intake`<br>`primary metric: instruction_count`<br>`routing decision: specialist = auto (generic_full)` | — | 浅蓝标签：`agent: os-opt-manager v1`<br>HUD 中心节点：`MANAGER` 亮 | — |
 | 4 | 0:52–1:05 | manager 输出首个 handoff packet（右侧弹浮窗） | `## Handoff → research`<br>`- target: {TARGET}`<br>`- primary_metric: instruction_count`<br>`- evidence_baseline: outputs/runs/{run_id}/baseline.json`<br>`- hot_path: (to be discovered)`<br>`- files_in_scope: [{TARGET}]`<br>`- risks: routing-only stage, no code change`<br>`- next_action: research specialist enter` | — | 右侧浮窗 5 字段逐项绿色脉冲 | tick × 5 |
 

@@ -1,21 +1,42 @@
-"""Shared MCP tool service for kernel index retrieval."""
+"""Unified MCP registry for kernel retrieval and the Evolution workflow."""
 
 from __future__ import annotations
 
 import json
 import logging
 import os
+from collections.abc import Mapping
 from functools import lru_cache
-from typing import Any, Mapping
+from typing import Any
 
 from hmopt.core.config import AppConfig
-from hmopt.indexing.llamaindex_pipeline import (
-    fetch_code_snippets,
-    retrieve_call_chain,
-    retrieve_code_context,
-)
 
 logger = logging.getLogger(__name__)
+
+
+def _indexing_backend():
+    """Load the optional index stack only when an index tool actually runs."""
+    try:
+        from hmopt.indexing import llamaindex_pipeline
+    except ModuleNotFoundError as exc:
+        if exc.name and (exc.name.startswith("llama_index") or exc.name == "neo4j"):
+            raise RuntimeError(
+                "Kernel index tools require optional dependencies: pip install -e '.[indexing]'"
+            ) from exc
+        raise
+    return llamaindex_pipeline
+
+
+def fetch_code_snippets(*args, **kwargs):
+    return _indexing_backend().fetch_code_snippets(*args, **kwargs)
+
+
+def retrieve_call_chain(*args, **kwargs):
+    return _indexing_backend().retrieve_call_chain(*args, **kwargs)
+
+
+def retrieve_code_context(*args, **kwargs):
+    return _indexing_backend().retrieve_code_context(*args, **kwargs)
 
 DEFAULT_CONFIG_PATH = "configs/app.yaml"
 DEFAULT_TOOL_NAME = "kernel_index_code"
@@ -190,7 +211,8 @@ def _coerce_symbols(value: Any, field_name: str = "symbols") -> list[str]:
     elif isinstance(value, list):
         values = [str(item).strip() for item in value]
     else:
-        raise ValueError(f"{field_name} must be a list of strings or a comma-separated string")
+        # ValueError preserves the legacy HTTP 400 validation contract.
+        raise ValueError(f"{field_name} must be a list of strings or a comma-separated string")  # noqa: TRY004
 
     deduped: list[str] = []
     seen: set[str] = set()
@@ -526,7 +548,8 @@ def _coerce_edge_kinds(value: Any) -> list[str] | None:
     elif isinstance(value, list):
         items = [str(item).strip() for item in value]
     else:
-        raise ValueError("edge_kinds must be a list of strings or comma-separated string")
+        # ValueError preserves the legacy HTTP 400 validation contract.
+        raise ValueError("edge_kinds must be a list of strings or comma-separated string")  # noqa: TRY004
     cleaned: list[str] = []
     for item in items:
         if not item:
@@ -627,7 +650,7 @@ def snippets_to_markdown(payload: dict[str, Any]) -> str:
         backend_tag = entry.get("backend_origin") or entry.get("parser")
         if backend_tag:
             stats_parts.append(f"backend={backend_tag}")
-        lines.append(f"- " + " ".join(stats_parts))
+        lines.append("- " + " ".join(stats_parts))
         # Signature is short and high-signal: render it directly under
         # the header so an LLM consumer sees the function shape before
         # reading the body.
@@ -807,7 +830,7 @@ def call_kernel_tool(arguments: Mapping[str, Any], *, config_path: str | None = 
 @lru_cache(maxsize=1)
 def build_fastmcp_server() -> Any | None:
     try:
-        from mcp.server.fastmcp import FastMCP  # type: ignore
+        from hmopt.api.mcp_registry import StrictFastMCP
     except ImportError:
         logger.warning(
             "mcp package is not installed; standard MCP protocol endpoint is unavailable. "
@@ -839,13 +862,16 @@ def build_fastmcp_server() -> Any | None:
                 allowed_hosts=allowed_hosts,
             )
 
-    mcp = FastMCP(
+    mcp = StrictFastMCP(
         server_name,
         stateless_http=True,
         json_response=True,
         transport_security=transport_security,
     )
     tool_names = get_tool_names()
+    if any(name.startswith("evolution_") for name in tool_names.values()):
+        raise ValueError("Index tool names cannot use the reserved evolution_ prefix")
+    config_path = resolve_mcp_config_path()
 
     @mcp.tool(
         name=tool_names["general"],
@@ -886,7 +912,7 @@ def build_fastmcp_server() -> Any | None:
             "response_format": response_format,
             "backend": backend,
         }
-        return _call_general_tool(arguments)
+        return _call_general_tool(arguments, config_path=config_path)
 
     @mcp.tool(
         name=tool_names["graph"],
@@ -916,7 +942,7 @@ def build_fastmcp_server() -> Any | None:
             "response_format": response_format,
             "backend": backend,
         }
-        return _call_graph_tool(arguments)
+        return _call_graph_tool(arguments, config_path=config_path)
 
     @mcp.tool(
         name=tool_names["hotspot"],
@@ -944,7 +970,7 @@ def build_fastmcp_server() -> Any | None:
             "response_format": response_format,
             "backend": backend,
         }
-        return _call_hotspot_tool(arguments)
+        return _call_hotspot_tool(arguments, config_path=config_path)
 
     @mcp.tool(
         name=tool_names["call_chain"],
@@ -976,7 +1002,7 @@ def build_fastmcp_server() -> Any | None:
             "response_format": response_format,
             "backend": backend,
         }
-        return _call_call_chain_tool(arguments)
+        return _call_call_chain_tool(arguments, config_path=config_path)
 
     @mcp.tool(
         name=tool_names["snippets"],
@@ -1001,6 +1027,9 @@ def build_fastmcp_server() -> Any | None:
             "total_max_chars": total_max_chars,
             "response_format": response_format,
         }
-        return _call_snippets_tool(arguments)
+        return _call_snippets_tool(arguments, config_path=config_path)
 
+    from hmopt.api.evolution_mcp_service import read_environment_options, register_evolution_tools
+
+    register_evolution_tools(mcp, **read_environment_options())
     return mcp

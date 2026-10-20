@@ -237,6 +237,7 @@ class AppConfig(BaseModel):
     iterations: int = 2
     profiling_enabled: bool = True
     pipeline: str = "optimize_kernel"
+    evolution: dict[str, Any] | None = None
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "AppConfig":
@@ -463,4 +464,5 @@ def normalize_raw_config(raw: dict[str, Any]) -> dict[str, Any]:
         "iterations": raw.get("iterations", raw.get("max_iterations", 2)),
         "profiling_enabled": raw.get("profiling", {}).get("enabled", True),
         "pipeline": raw.get("pipelines", {}).get("default", raw.get("pipeline", "optimize_kernel")),
+        "evolution": raw.get("evolution"),
     }

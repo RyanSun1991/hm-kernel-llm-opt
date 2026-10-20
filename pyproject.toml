@@ -24,10 +24,13 @@ dependencies = [
   "jsonschema>=4",
   "mcp[cli]>=1.16.0,<2",
   "GitPython>=3.1",
-  "protobuf>=4.25",
+  "protobuf>=6.31.1",
 ]
 
 [project.optional-dependencies]
+validation = [
+  "openpyxl>=3.1,<4",
+]
 indexing = [
   "llama-index-core>=0.14.5,<0.15",
   "llama-index-llms-openai>=0.6.13,<0.7",
@@ -43,6 +46,7 @@ dev = [
 
 [project.scripts]
 hmopt = "hmopt.cli:app"
+hmopt-evolve = "hmopt.evolution.cli:main"
 
 [tool.ruff]
 line-length = 100

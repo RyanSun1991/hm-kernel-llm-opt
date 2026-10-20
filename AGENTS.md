@@ -101,7 +101,7 @@ ruff format src/ tests/
 | `analysis/` | Hotspot detection, bottleneck classification, artifact parsers |
 | `indexing/` | LlamaIndex + clangd index builders, query routing |
 | `storage/` | SQLAlchemy ORM (SQLite default), artifact file store, vector embeddings |
-| `api/` | FastAPI REST + MCP server endpoints (main, git, build, auto-test, sequential-thinking) |
+| `api/` | FastAPI REST + MCP endpoints; main `mcp_service` registry combines kernel retrieval and Evolution for HTTP/stdio; device, Git and Skill Hub services retain their own endpoints |
 | `mcp_server_git/` | Git MCP tool implementations |
 | `opencode/` | Pipeline session init, profile loading, OpenCode integration |
 | `sequential_thinking/` | Step-by-step reasoning MCP service |
@@ -121,15 +121,68 @@ Run, Artifact, Metric, Hotspot, Graph, Patch, Evaluation, AgentMessage, VectorEm
 
 Config supports `includes:` for composing YAML files. LLM keys come from env vars (`HMOPT_LLM_API_KEY`, `HMOPT_LLM_BASE_URL`).
 
-### OpenCode Multi-Agent Harness (`.opencode/`)
+### OpenCode Agent Workbench (`.opencode/`) — the thin constitution
 
-A strict staged pipeline for AI-assisted kernel optimization with mandatory gates:
+`.opencode/` hosts two lanes (design: `docs/Agent_Workbench_Design_EN.md`):
+
+**Workbench lane (default).** Everyday unit of work = one role + a small selected
+skill set + a lightweight task workspace.
+
+- Default entry is `assistant`; an ordinary prompt NEVER implicitly starts a pipeline.
+- The user owns routing — roles suggest handoff/consult/fork with forwardable briefs;
+  only the user triggers them.
+- 7 domain-free roles in `.opencode/agents/` (assistant · researcher · architect ·
+  implementer · reviewer · validator · coordinator); domain knowledge lives in
+  `.opencode/skills/scenario/` packs; profiles in `agents/profiles/` are preloaded
+  compositions. Every role loads `skills/infra/agent-core/SKILL.md` (the base
+  contract).
+- Skills are discovered via `skills/_registry.yaml` (suggest ≤3 with reasons; full
+  text loads only after the user confirms; ≤4 active non-core skills).
+- Task truth lives in `.opencode/local/workspaces/<slug>/` (git-ignored; template in
+  `.opencode/templates/workspace/`); the capsule is the only handoff/resume carrier.
+- Permission ceilings are runtime-enforced by role frontmatter as pattern-scoped
+  `edit` maps: each role writes only its own artifact directories, source is denied
+  for every role except implementer (whose every edit asks; destructive ops denied);
+  read-only bash runs freely, mutating bash asks; device/R3 MCP operations are
+  contract-gated per-action. Only coordinator delegates. Skills never widen
+  permissions. Execution rights ≠ claim rights: artifact status promotions
+  (approved / ready-to-land / validated) have role-owned conditions.
+
+**Pipeline lane (explicit recipes only).** `/evolve-candidate <absolute task.json>`
+uses the existing generic roles with `infra/pipeline/evolution-execution`, service
+evidence gates and a task-local workspace/capsule. It preserves default routing
+and role permissions, and does not use the optimization singleton state.
+`/evolve-research` selects versioned pattern-synthesis/candidate-assessment methods
+for existing researcher/reviewer roles. `/evolve-queue` reads approvals and dossiers;
+`/evolve-batch` explicitly selects approved IDs for serial execution with durable
+claims and isolated worktrees, reusing evolution-execution and all service gates.
+`/evolve-production` lets coordinator explicitly queue bounded OpenCode research
+campaigns, inspect/cancel them, suggest synthesis groups, or queue expert review.
+Production settings remain in the same Evolution config. The operator starts
+workers and notifications; authenticated gateway callbacks under `src/hmopt/api/`
+archive expert decisions. No tool grants owner authority or automatic implementation.
+`/evolve-workspace` manages explicitly selected Git projects under source_workspace;
+the business root is not assumed to be a Git repository. Runs freeze selected and
+build-only dependency revisions. `serve` advances research/scans; experiment IDs
+bind operator-configured build/test adapters to the same reviewed evidence gates.
+
+`/optimize_*` commands run the strict
+staged pipeline with mandatory gates:
 
 ```
 intake → routing → research → plan review (GATE) → implementation → code review (GATE) → test → decision
 ```
 
-Key rule: no implementation without plan review approval, no acceptance without code review. See `.opencode/AGENTS.md` for enforcement details. Pipeline skills, agent definitions, and handoff contracts live in `.opencode/skills/` and `.opencode/agents/`.
+Key rule: no implementation without plan review approval, no acceptance without code
+review, no test verdict without stock-vs-feature A/B. Stage gates live in
+`skills/infra/pipeline/` and apply only inside recipe runs. See `.opencode/CLAUDE.md`
+(the `.opencode`-local mirror of this constitution) and
+`.opencode/docs/harness_engineer_system.md` for enforcement details.
+
+Golden rule: create a role only when responsibility/authority changes; a skill when
+domain/method changes; a profile when a composition repeats; a workflow only for
+repeatable coordination. Task truth lives in the workspace; reusable truth in Team
+Memory / the Skill Hub.
 
 ## Docker
 

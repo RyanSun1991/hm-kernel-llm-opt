@@ -1,6 +1,6 @@
 # Human Decision Log
 
-Per-target chronological log of every significant human-agent exchange under primary-agent workflows that load `.opencode/skills/human-interaction-memory/SKILL.md` (e.g. `kernel-research`, `kernel-plan`, `kernel-function-research`).
+Per-target chronological log of every significant human-agent exchange under primary-agent workflows that load `.opencode/skills/infra/human-interaction-memory/SKILL.md` (e.g. `kernel-research`, `kernel-plan`, `kernel-function-research`).
 
 ## File Layout
 
