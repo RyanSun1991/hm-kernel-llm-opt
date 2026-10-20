@@ -1,8 +1,10 @@
 # HM-VERIF Kernel Code & Performance Optimization Platform (LLM-Driven)
 
-The team's active development branch is **`opencode`**. Start with the
-[platform overview](docs/Platform_Overview_Quickstart_CN.md) and
-[Agent Workbench guide](docs/Agent_Workbench_Usage_CN.md).
+The team's active development branch is **`opencode`**. Start with the user and
+deployment guide — [中文](docs/HMOPT_User_and_Deployment_Guide_CN.md) /
+[English](docs/HMOPT_User_and_Deployment_Guide_EN.md) — which covers Docker
+deployment, MCP/OpenCode setup, the workbench, Team Memory, Skill Hub and Evolution.
+[docs/README.md](docs/README.md) indexes the remaining design and reference documents.
 
 Evolution adds evidence-driven discovery and reviewed execution to the existing
 workbench, Team Memory and Skill Hub:
